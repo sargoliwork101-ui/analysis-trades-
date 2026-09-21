@@ -37,20 +37,12 @@ jobs:
           set +e
           ./gradlew assembleDebug --no-daemon --stacktrace > build.log 2>&1
           code=$?
-          tail -n 60 build.log
+          tail -n 40 build.log
           if [ "$code" -ne 0 ]; then
-            echo "## ❌ Build failed — error lines" >> "$GITHUB_STEP_SUMMARY"
-            {
-              echo '```'
-              grep -E "^(e: |w: .*deprecat|FAILURE:|\\* What went wrong|\\* Try:|> |Caused by)" build.log | head -n 40
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-            grep -E "^(e: |FAILURE:|> |Caused by:)" build.log | head -n 25 | while IFS= read -r line; do
-              enc="${line//'%'/'%25'}"
-              enc="${enc//$'\r'/'%0D'}"
-              enc="${enc//$'\n'/'%0A'}"
-              echo "::error::${enc}"
-            done
+            emit() { enc="${1//'%'/'%25'}"; enc="${enc//$'\r'/'%0D'}"; enc="${enc//$'\n'/'%0A'}"; echo "::error::${enc}"; }
+            grep -E "^(e: |error: |Error: )" build.log | head -n 15 | while IFS= read -r line; do emit "$line"; done
+            grep -E "FAILED|FAILURE:" build.log | head -n 6 | while IFS= read -r line; do emit "$line"; done
+            awk '/\* What went wrong:/{f=1} f{print; c++} c>12{exit}' build.log | while IFS= read -r line; do emit "$line"; done
           fi
           exit "$code"
 
