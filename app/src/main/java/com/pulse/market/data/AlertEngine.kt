@@ -74,13 +74,12 @@ object AlertEngine {
         }
     }
 
-    private fun isTriggered(rule: AlertRule, price: Double, changePct: Double?): Boolean =
-        when (rule.condition) {
-            AlertCondition.ABOVE -> price >= rule.threshold
-            AlertCondition.BELOW -> price <= rule.threshold
-            AlertCondition.PCT_UP -> (changePct ?: return false) >= abs(rule.threshold)
-            AlertCondition.PCT_DOWN -> (changePct ?: return false) <= -abs(rule.threshold)
-        }
+    private fun isTriggered(rule: AlertRule, price: Double, changePct: Double?): Boolean = when (rule.condition) {
+        AlertCondition.ABOVE -> price >= rule.threshold
+        AlertCondition.BELOW -> price <= rule.threshold
+        AlertCondition.PCT_UP -> changePct != null && changePct >= abs(rule.threshold)
+        AlertCondition.PCT_DOWN -> changePct != null && changePct <= -abs(rule.threshold)
+    }
 
     /** بازه‌ی زمانی معمولی و بازه‌های شب‌گذر (مثلاً ۲۲:۰۰ تا ۰۶:۰۰) */
     private fun insideWindow(minute: Int, from: Int, to: Int): Boolean =
