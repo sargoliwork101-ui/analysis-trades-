@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- یک ردیف نماد: (راست) نام | نمودار مینیاتوری | (چپ) قیمت + درصد تغییر -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="0dp"
+    android:layout_weight="1"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:layoutDirection="rtl"
+    android:paddingTop="4dp"
+    android:paddingBottom="4dp">
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/row_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:fontFamily="@font/vazirmatn_bold"
+            android:maxLines="1"
+            android:text="-"
+            android:textColor="#F1F5F9"
+            android:textSize="12.5sp" />
+
+        <TextView
+            android:id="@+id/row_sub"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:fontFamily="@font/vazirmatn_regular"
+            android:maxLines="1"
+            android:text=""
+            android:textColor="#8B9AB1"
+            android:textSize="9.5sp" />
+    </LinearLayout>
+
+    <ImageView
+        android:id="@+id/row_spark"
+        android:layout_width="52dp"
+        android:layout_height="24dp"
+        android:layout_marginStart="8dp"
+        android:layout_marginEnd="10dp"
+        android:scaleType="fitXY"
+        android:src="@android:color/transparent" />
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:gravity="end"
+        android:minWidth="86dp"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/row_price"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="end"
+            android:fontFamily="@font/vazirmatn_bold"
+            android:letterSpacing="-0.02"
+            android:maxLines="1"
+            android:text="—"
+            android:textColor="#F1F5F9"
+            android:textSize="14.5sp" />
+
+        <TextView
+            android:id="@+id/row_change"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="end"
+            android:layout_marginTop="2dp"
+            android:background="@drawable/badge_flat"
+            android:fontFamily="@font/vazirmatn_bold"
+            android:paddingStart="6dp"
+            android:paddingEnd="6dp"
+            android:paddingTop="1dp"
+            android:paddingBottom="1dp"
+            android:text="—"
+            android:textColor="#94A3B8"
+            android:textSize="9.5sp" />
+    </LinearLayout>
+</LinearLayout>

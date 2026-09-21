@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">نبض بازار</string>
+    <string name="widget_name">نبض بازار</string>
+    <string name="widget_description">قیمت لحظه‌ای سهام، کریپتو، طلا و ارز روی صفحه‌ی اصلی</string>
+</resources>
