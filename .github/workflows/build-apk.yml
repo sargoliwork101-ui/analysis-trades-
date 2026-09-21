@@ -32,7 +32,26 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build Debug APK
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        run: |
+          set +e
+          ./gradlew assembleDebug --no-daemon --stacktrace > build.log 2>&1
+          code=$?
+          tail -n 60 build.log
+          if [ "$code" -ne 0 ]; then
+            echo "## ❌ Build failed — error lines" >> "$GITHUB_STEP_SUMMARY"
+            {
+              echo '```'
+              grep -E "^(e: |w: .*deprecat|FAILURE:|\\* What went wrong|\\* Try:|> |Caused by)" build.log | head -n 40
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            grep -E "^(e: |FAILURE:|> |Caused by:)" build.log | head -n 25 | while IFS= read -r line; do
+              enc="${line//'%'/'%25'}"
+              enc="${enc//$'\r'/'%0D'}"
+              enc="${enc//$'\n'/'%0A'}"
+              echo "::error::${enc}"
+            done
+          fi
+          exit "$code"
 
       - name: Rename APK for Easy Download
         run: |

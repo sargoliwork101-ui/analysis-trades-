@@ -17,8 +17,8 @@ object Sparkline {
         val bmp = Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
 
-        val min = values.min()
-        val max = values.max()
+        val min = values.minOrNull() ?: return null
+        val max = values.maxOrNull() ?: return null
         val span = (max - min).takeIf { it > 0.0 } ?: 1.0
 
         val pad = heightPx * 0.14f
