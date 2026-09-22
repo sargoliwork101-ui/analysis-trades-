@@ -10,6 +10,7 @@ import com.pulse.market.data.ConfigStore
 import com.pulse.market.data.Quote
 import com.pulse.market.data.QuoteRepo
 import com.pulse.market.data.SourceCatalog
+import com.pulse.market.data.SymbolSort
 import com.pulse.market.data.WidgetConfig
 import com.pulse.market.service.LiveUpdateService
 import com.pulse.market.service.LiveUpdateWorker
@@ -164,11 +165,20 @@ open class StockWidgetProvider : AppWidgetProvider() {
                 context = context,
                 widgetId = widgetId,
                 cfg = cfg,
-                quotes = quotes,
+                quotes = QuoteRepo.withLocalSpark(context, sortQuotes(quotes, cfg.sortMode)),
                 live = cfg.liveService,
                 updatedAt = updatedAt,
                 sourceTitle = sourceTitle
             )
+        }
+
+        /** مرتب‌سازی نمایش نمادها — بدون تغییر ترتیب ذخیره‌شده‌ی کاربر */
+        private fun sortQuotes(quotes: List<Quote>, mode: SymbolSort): List<Quote> = when (mode) {
+            SymbolSort.MANUAL -> quotes
+            SymbolSort.BIGGEST_CHANGE ->
+                quotes.sortedByDescending { kotlin.math.abs(it.changePct ?: 0.0) }
+
+            SymbolSort.ALPHABET -> quotes.sortedBy { it.label }
         }
 
         /** سرویس زنده فقط وقتی لازم است که هیچ ویجتی liveService داشته باشد */

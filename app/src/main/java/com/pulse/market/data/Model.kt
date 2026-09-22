@@ -1,6 +1,15 @@
 package com.pulse.market.data
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+
+/** بیشترین تعداد نماد هر ویجت */
+const val MAX_SYMBOLS = 6
 
 /** نوع خواندن داده از منبع */
 @Serializable
@@ -53,10 +62,12 @@ data class SourceDef(
     val pricePath: String? = null,
     val changePath: String? = null,
     val changeMode: ChangeMode = ChangeMode.PERCENT,
-    val cssSelector: String? = null,
-    val cssAttr: String? = null,
     /** مسیر آرایه‌ی اعداد برای نمودار مینیاتوری (اختیاری) */
     val sparkPath: String? = null,
+    /** مسیر عدد «حجم معاملات / حجم ۲۴ ساعت» (اختیاری) — اگر آرایه باشد جمع زده می‌شود */
+    val volumePath: String? = null,
+    val cssSelector: String? = null,
+    val cssAttr: String? = null,
     val scale: Double = 1.0,
     val unit: String = "",
     val symbols: List<SymbolDef> = emptyList(),
@@ -71,20 +82,59 @@ data class Quote(
     val label: String,
     val price: Double? = null,
     val changePct: Double? = null,
+    /** حجم معامله (بورس) یا حجم ۲۴ ساعت (کریپتو) */
+    val volume: Double? = null,
     val unit: String = "",
     val error: String? = null,
     val ts: Long = 0L,
+    /** آخرین مقدار سالم است ولی به‌روزرسانی بعدی ناموفق بود (چراغ قرمز) */
+    val stale: Boolean = false,
     /** سری قیمت برای نمودار مینیاتوری */
     val spark: List<Double> = emptyList(),
     /** منبعی که قیمت از آن خوانده شده */
     val sourceId: String = ""
 )
 
-/** تم ویجت */
-@Serializable
-enum class WidgetTheme { DARK, LIGHT, AMOLED }
+/** تم ویجت — تیره/روشن + سه تم ترند: شیشه‌ای، شفق قطبی، نئون */
+@Serializable(with = WidgetThemeSerializer::class)
+enum class WidgetTheme {
+    /** تیره‌ی کلاسیک */
+    DARK,
 
-/** تنظیمات کاربر برای ویجت */
+    /** روشن */
+    LIGHT,
+
+    /** شیشه‌ای (Glassmorphism) — نیمه‌شفاف با حاشیه‌ی روشن */
+    GLASS,
+
+    /** شفق قطبی (Aurora) — گرادیان بنفش/نیلی/فیروزه‌ای */
+    AURORA,
+
+    /** نئون (Cyber) — مشکی بنفش با تأکید نئونی */
+    NEON
+}
+
+/** سازگاری با نسخه‌های قدیمی: AMOLED حذف شد و به «شیشه‌ای» مهاجرت می‌کند */
+object WidgetThemeSerializer : KSerializer<WidgetTheme> {
+
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("WidgetTheme", PrimitiveKind.STRING)
+
+    override fun serialize(encoder: Encoder, value: WidgetTheme) {
+        encoder.encodeString(value.name)
+    }
+
+    override fun deserialize(decoder: Decoder): WidgetTheme {
+        val name = decoder.decodeString()
+        return WidgetTheme.entries.firstOrNull { it.name == name }
+            ?: when (name) {
+                "AMOLED" -> WidgetTheme.GLASS
+                else -> WidgetTheme.DARK
+            }
+    }
+}
+
+/** تنظیمات کاربر برای ویجت — هر ویجت مقادیر و ظاهر مستقل خودش را دارد */
 @Serializable
 data class WidgetConfig(
     /** @deprecated فقط برای سازگاری با تنظیمات قدیمی — از sourceIds استفاده کن */
@@ -102,7 +152,32 @@ data class WidgetConfig(
     val persianDigits: Boolean = false,
     val showNotification: Boolean = true,
     /** قانون‌های هشدار قیمت */
-    val alerts: List<AlertRule> = emptyList()
+    val alerts: List<AlertRule> = emptyList(),
+
+    // ── نمایش: هر ویجت مقادیر دلخواه خودش را نشان می‌دهد ──
+
+    /** عنوان دلخواه ویجت — خالی = عنوان منبع */
+    val title: String = "",
+    /** ضریب اندازه‌ی فونت (۰٫۷۵ تا ۱٫۵) */
+    val fontScale: Float = 1.0f,
+    /** نمایش حجم معاملات / حجم ۲۴ ساعت */
+    val showVolume: Boolean = true,
+    /** نمایش درصد تغییر */
+    val showChange: Boolean = true,
+    /** نمایش کد/واحد زیر نام نماد */
+    val showCode: Boolean = true,
+    /** نمایش نوار وضعیت پایین */
+    val showStatus: Boolean = true,
+    /** نمایش ساعت هدر */
+    val showTime: Boolean = true,
+    /** جداکننده‌ی رنگی ردیف‌ها (پس‌زمینه‌ی متناوب برای هر نماد) */
+    val rowSeparation: Boolean = true,
+    /** اعداد فشرده (۶۴٫۲ هزار / 12.4K) */
+    val compactNumbers: Boolean = false,
+    /** مرتب‌سازی نمادها — دستی یا خودکار */
+    val sortMode: SymbolSort = SymbolSort.MANUAL,
+    /** وضعیت باز/بسته بودن بورس تهران کنار ساعت ویجت */
+    val showMarketStatus: Boolean = true
 ) {
     /** منابع فعال (با پشتیبانی از فرمت قدیمی تک‌منبعی) */
     val activeSourceIds: List<String>
@@ -110,4 +185,17 @@ data class WidgetConfig(
 
     /** نمادهای متعلق به یک منبع مشخص */
     fun symbolsOf(sourceId: String): List<SymbolDef> = symbols.filter { it.sourceId == sourceId }
+}
+
+/** روش مرتب‌سازی نمادها در ویجت */
+@Serializable
+enum class SymbolSort {
+    /** ترتیب دستی کاربر (با فلش‌های بالا/پایین) */
+    MANUAL,
+
+    /** خودکار: بیشترین تغییر امروز بالاتر می‌نشیند */
+    BIGGEST_CHANGE,
+
+    /** بر اساس حروف نام نماد */
+    ALPHABET
 }

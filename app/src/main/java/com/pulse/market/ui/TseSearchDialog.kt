@@ -4,20 +4,19 @@ import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -26,19 +25,16 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -49,24 +45,35 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import com.pulse.market.data.SymbolDef
 import com.pulse.market.data.TseInstrument
 import com.pulse.market.data.TseService
+import com.pulse.market.ui.settings.DialogShell
+import com.pulse.market.ui.settings.Hint
+import com.pulse.market.ui.settings.RowDivider
+import com.pulse.market.ui.settings.RowsCard
 import kotlinx.coroutines.launch
 
+/**
+ * پنجره‌ی جستجوی نماد بورس تهران — با همان زبان طراحی تنظیمات:
+ * یک کارت یکپارچه برای نتایج و ردیف‌های جداشده با خط ظریف.
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TseSearchDialog(
     selectedSymbols: List<SymbolDef>,
+    customSymbols: List<SymbolDef> = emptyList(),
     onDismiss: () -> Unit,
-    onAddSymbol: (SymbolDef) -> Unit
+    onAddSymbol: (SymbolDef) -> Unit,
+    onRemoveSymbol: (SymbolDef) -> Unit = {},
+    onDeleteCustomSymbol: (SymbolDef) -> Unit = {}
 ) {
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
@@ -112,268 +119,225 @@ fun TseSearchDialog(
         }
     }
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 6.dp,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 12.dp)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp)
-            ) {
+    DialogShell(
+        icon = Icons.Default.Search,
+        tint = Color(0xFF22C55E),
+        title = "جستجوی نماد بورس تهران",
+        subtitle = "نام سهم (مثلاً اهرم، خودرو) یا لینک صفحه‌ی TSETMC",
+        onClose = onDismiss
+    ) {
 
-                // ─── عنوان ───
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            "جستجوی نماد بورس تهران",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 17.sp,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Text(
-                            "نام سهم (مثلاً اهرم، خودرو) یا لینک صفحه TSETMC",
-                            fontSize = 11.5.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Clear, contentDescription = "بستن")
-                    }
+        // ─── فیلد جستجو + چسباندن ───
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = {
+                searchQuery = it
+                if (it.isBlank()) {
+                    searchResults = TseService.POPULAR_INSTRUMENTS.take(8)
+                    statusMessage = ""
                 }
-
-                Spacer(Modifier.height(12.dp))
-
-                // ─── فیلد جستجو + دکمه چسباندن ───
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = {
-                        searchQuery = it
-                        if (it.isBlank()) {
+            },
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text("نام نماد یا لینک tsetmc.com...") },
+            leadingIcon = {
+                Icon(Icons.Default.Search, contentDescription = null)
+            },
+            trailingIcon = {
+                Row {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = {
+                            searchQuery = ""
                             searchResults = TseService.POPULAR_INSTRUMENTS.take(8)
                             statusMessage = ""
+                        }) {
+                            Icon(Icons.Default.Clear, contentDescription = "پاک کردن")
                         }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("نام نماد یا لینک tsetmc.com...") },
-                    leadingIcon = {
-                        Icon(Icons.Default.Search, contentDescription = null)
-                    },
-                    trailingIcon = {
-                        Row {
-                            if (searchQuery.isNotEmpty()) {
-                                IconButton(onClick = {
-                                    searchQuery = ""
-                                    searchResults = TseService.POPULAR_INSTRUMENTS.take(8)
-                                    statusMessage = ""
-                                }) {
-                                    Icon(Icons.Default.Clear, contentDescription = "پاک کردن")
-                                }
-                            }
-                            IconButton(onClick = { pasteFromClipboard() }) {
-                                Icon(Icons.Default.ContentPaste, contentDescription = "چسباندن لینک")
-                            }
-                        }
-                    },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = { doSearch(searchQuery) })
+                    }
+                    IconButton(onClick = { pasteFromClipboard() }) {
+                        Icon(Icons.Default.ContentPaste, contentDescription = "چسباندن لینک")
+                    }
+                }
+            },
+            singleLine = true,
+            shape = RoundedCornerShape(14.dp),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { doSearch(searchQuery) })
+        )
+
+        Button(
+            onClick = { doSearch(searchQuery) },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !isLoading
+        ) {
+            if (isLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.onPrimary
                 )
+                Spacer(Modifier.width(8.dp))
+            }
+            Text("جستجو / بررسی لینک")
+        }
 
-                Spacer(Modifier.height(8.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        onClick = { doSearch(searchQuery) },
-                        modifier = Modifier.weight(1f),
-                        enabled = !isLoading
-                    ) {
-                        if (isLoading) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp),
-                                strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.onPrimary
-                            )
-                            Spacer(Modifier.width(8.dp))
-                        }
-                        Text("جستجو / بررسی لینک")
-                    }
-                }
-
-                Spacer(Modifier.height(8.dp))
-
-                // ─── چیپ‌های پرطرفدار (دسترسی سریع) ───
-                if (searchQuery.isBlank()) {
-                    Text(
-                        "پرمعامله‌ها و صندوق‌های طلا (کلیک برای جستجو):",
-                        fontSize = 11.5.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf("اهرم", "طلا", "عیار", "کهربا", "فولاد", "خودرو", "خساپا", "شپنا", "شتران", "دی").forEach { s ->
-                            FilterChip(
-                                selected = false,
-                                onClick = {
-                                    searchQuery = s
-                                    doSearch(s)
-                                },
-                                label = { Text(s, fontSize = 11.sp) }
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(6.dp))
-                }
-
-                if (statusMessage.isNotEmpty()) {
-                    Text(
-                        statusMessage,
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.secondary,
-                        modifier = Modifier.padding(vertical = 4.dp)
-                    )
-                }
-
-                HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
-
-                // ─── لیست نتایج ───
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 280.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(searchResults) { inst ->
-                        val isAlreadyAdded = selectedSymbols.any {
-                            it.code.equals(inst.symbol, ignoreCase = true) || it.code == inst.insCode
-                        }
-
-                        TseItemCard(
-                            inst = inst,
-                            isAdded = isAlreadyAdded,
-                            onAdd = {
-                                onAddSymbol(
-                                    SymbolDef(
-                                        code = inst.symbol,
-                                        label = inst.name.ifBlank { inst.symbol },
-                                        sourceId = "tse_tsetmc"
-                                    )
-                                )
-                            }
+        // ─── چیپ‌های پرطرفدار (دسترسی سریع) ───
+        if (searchQuery.isBlank()) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Hint("پرمعامله‌ها و صندوق‌های طلا — کلیک برای جستجو")
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf("اهرم", "طلا", "عیار", "کهربا", "فولاد", "خودرو", "خساپا", "شپنا", "شتران", "دی").forEach { s ->
+                        FilterChip(
+                            selected = false,
+                            onClick = {
+                                searchQuery = s
+                                doSearch(s)
+                            },
+                            label = { Text(s, fontSize = 11.sp) }
                         )
                     }
                 }
+            }
+        }
 
-                Spacer(Modifier.height(10.dp))
+        if (statusMessage.isNotEmpty()) {
+            Text(
+                statusMessage,
+                fontSize = 11.5.sp,
+                color = MaterialTheme.colorScheme.secondary
+            )
+        }
 
-                OutlinedButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("بستن")
+        // ─── نتایج — یک کارت یکپارچه با ردیف‌های جداشده ───
+        RowsCard {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 265.dp)
+            ) {
+                itemsIndexed(searchResults) { index, inst ->
+                    if (index > 0) RowDivider()
+
+                    val isAlreadyAdded = selectedSymbols.any {
+                        it.code.equals(inst.symbol, ignoreCase = true) || it.code == inst.insCode
+                    }
+                    val isCustom = customSymbols.any {
+                        it.code.equals(inst.symbol, ignoreCase = true) || it.code == inst.insCode
+                    }
+                    val symDef = SymbolDef(
+                        code = inst.symbol,
+                        label = inst.name.ifBlank { inst.symbol },
+                        sourceId = "tse_tsetmc"
+                    )
+
+                    TseResultRow(
+                        inst = inst,
+                        isAdded = isAlreadyAdded,
+                        isCustom = isCustom,
+                        onAdd = { onAddSymbol(symDef) },
+                        onRemove = { onRemoveSymbol(symDef) },
+                        onDeleteCustom = { onDeleteCustomSymbol(symDef) }
+                    )
                 }
             }
+        }
+
+        OutlinedButton(
+            onClick = onDismiss,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("بستن", fontSize = 13.sp)
         }
     }
 }
 
+/** یک ردیف نتیجه‌ی جستجو — نام نماد + قیمت + دکمه‌ی افزودن/حذف */
 @Composable
-private fun TseItemCard(
+private fun TseResultRow(
     inst: TseInstrument,
     isAdded: Boolean,
-    onAdd: () -> Unit
+    isCustom: Boolean = false,
+    onAdd: () -> Unit,
+    onRemove: () -> Unit = {},
+    onDeleteCustom: () -> Unit = {}
 ) {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = if (isAdded) MaterialTheme.colorScheme.surfaceVariant
-            else MaterialTheme.colorScheme.surface
-        ),
-        shape = RoundedCornerShape(10.dp),
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(enabled = !isAdded) { onAdd() }
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        inst.symbol,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    if (inst.changePct != null) {
-                        val isUp = inst.changePct >= 0
-                        val text = (if (isUp) "+" else "") + String.format("%.2f%%", inst.changePct)
-                        Text(
-                            text,
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = if (isUp) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error
-                        )
-                    }
-                }
+        Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    inst.name,
-                    fontSize = 11.5.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1
+                    inst.symbol,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.5.sp,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
-                if (inst.closePrice != null && inst.closePrice > 0) {
+                if (inst.changePct != null) {
+                    Spacer(Modifier.width(8.dp))
+                    val isUp = inst.changePct >= 0
+                    val text = (if (isUp) "+" else "") + String.format("%.2f%%", inst.changePct)
                     Text(
-                        "قیمت: ${Format.price(inst.closePrice)} ریال",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.outline
+                        text,
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = if (isUp) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error
                     )
                 }
             }
+            Text(
+                inst.name,
+                fontSize = 11.5.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1
+            )
+            if (inst.closePrice != null && inst.closePrice > 0) {
+                Text(
+                    "قیمت: ${Format.price(inst.closePrice)} ریال" +
+                            (inst.volume?.let { " • حجم ${Format.volume(it)}" } ?: ""),
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.outline
+                )
+            }
+        }
 
-            if (isAdded) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(horizontal = 4.dp)
-                ) {
-                    Icon(
-                        Icons.Default.Check,
-                        contentDescription = "اضافه شده",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        "انتخاب شده",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-            } else {
-                Button(
-                    onClick = onAdd,
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("افزودن", fontSize = 12.sp)
-                }
+        // نمادهای دلخواه کاربر — قابل حذف از فهرست
+        if (isCustom) {
+            IconButton(onClick = onDeleteCustom) {
+                Icon(
+                    Icons.Default.Delete,
+                    contentDescription = "حذف از فهرست من",
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+
+        if (isAdded) {
+            // با زدن دوباره، نماد از ویجت حذف می‌شود
+            OutlinedButton(
+                onClick = onRemove,
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+            ) {
+                Icon(
+                    Icons.Default.Check,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(15.dp)
+                )
+                Spacer(Modifier.width(4.dp))
+                Text("انتخاب شده — حذف", fontSize = 11.sp)
+            }
+        } else {
+            Button(
+                onClick = onAdd,
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(15.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("افزودن", fontSize = 11.5.sp)
             }
         }
     }

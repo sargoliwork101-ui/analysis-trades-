@@ -13,10 +13,20 @@
     <color name="light_sub">#64748B</color>
     <color name="light_divider">#E2E8F0</color>
 
-    <!-- AMOLED -->
-    <color name="amoled_text">#FFFFFF</color>
-    <color name="amoled_sub">#7A8899</color>
-    <color name="amoled_divider">#161616</color>
+    <!-- تم شیشه‌ای (Glassmorphism) -->
+    <color name="glass_text">#EAF2FF</color>
+    <color name="glass_sub">#9DB4D4</color>
+    <color name="glass_divider">#3A4E73</color>
+
+    <!-- تم شفق قطبی (Aurora) -->
+    <color name="aurora_text">#FFFFFF</color>
+    <color name="aurora_sub">#DDD6FE</color>
+    <color name="aurora_divider">#6D5BD0</color>
+
+    <!-- تم نئون (Cyber) -->
+    <color name="neon_text">#F5F3FF</color>
+    <color name="neon_sub">#67E8F9</color>
+    <color name="neon_divider">#3B0764</color>
 
     <color name="up">#22C55E</color>
     <color name="down">#F43F5E</color>

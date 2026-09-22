@@ -20,6 +20,8 @@ data class TseInstrument(
     val lastPrice: Double? = null,
     val closePrice: Double? = null,
     val changePct: Double? = null,
+    /** حجم معاملات امروز (تعداد سهم) */
+    val volume: Double? = null,
     val cIsin: String = ""
 )
 
@@ -231,6 +233,7 @@ object TseService {
         var closePrice: Double? = null
         var lastPrice: Double? = null
         var changePct: Double? = null
+        var volume: Double? = null
 
         runCatching {
             client.newCall(priceReq).execute().use { resp ->
@@ -240,6 +243,7 @@ object TseService {
                     if (info != null) {
                         closePrice = info.optDouble("pClosing", 0.0).takeIf { it > 0 }
                         lastPrice = info.optDouble("pDrCotVal", 0.0).takeIf { it > 0 }
+                        volume = info.optDouble("qTotTran5J", 0.0).takeIf { it > 0 }
                         val yesterday = info.optDouble("priceYesterday", 0.0)
                         if (yesterday > 0 && closePrice != null) {
                             changePct = ((closePrice!! - yesterday) / yesterday) * 100.0
@@ -255,7 +259,8 @@ object TseService {
             return local.copy(
                 closePrice = closePrice ?: local.closePrice,
                 lastPrice = lastPrice ?: local.lastPrice,
-                changePct = changePct ?: local.changePct
+                changePct = changePct ?: local.changePct,
+                volume = volume ?: local.volume
             )
         }
 
@@ -284,7 +289,8 @@ object TseService {
             name = name,
             lastPrice = lastPrice,
             closePrice = closePrice,
-            changePct = changePct
+            changePct = changePct,
+            volume = volume
         )
     }
 
@@ -309,7 +315,8 @@ object TseService {
                 return local.copy(
                     lastPrice = closing.last ?: local.lastPrice,
                     closePrice = closing.close ?: local.closePrice,
-                    changePct = closing.changePct ?: local.changePct
+                    changePct = closing.changePct ?: local.changePct,
+                    volume = closing.volume ?: local.volume
                 )
             }
         }
@@ -323,7 +330,8 @@ object TseService {
             return best.copy(
                 lastPrice = closing.last ?: best.lastPrice,
                 closePrice = closing.close ?: best.closePrice,
-                changePct = closing.changePct ?: best.changePct
+                changePct = closing.changePct ?: best.changePct,
+                volume = closing.volume ?: best.volume
             )
         }
 
@@ -332,7 +340,12 @@ object TseService {
             ?: TseInstrument(code, code, code)
     }
 
-    private data class Closing(val close: Double?, val last: Double?, val changePct: Double?)
+    private data class Closing(
+        val close: Double?,
+        val last: Double?,
+        val changePct: Double?,
+        val volume: Double?
+    )
 
     private fun fetchClosing(insCode: String): Closing {
         return try {
@@ -342,12 +355,13 @@ object TseService {
                 .header("Accept", "application/json, text/plain, */*")
                 .build()
             client.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return@use Closing(null, null, null)
+                if (!resp.isSuccessful) return@use Closing(null, null, null, null)
                 val root = runCatching { JSONObject(resp.body?.string().orEmpty()) }.getOrNull()
-                    ?: return@use Closing(null, null, null)
+                    ?: return@use Closing(null, null, null, null)
                 val info = root.optJSONObject("closingPriceInfo") ?: root
                 val close = info.optDouble("pClosing", 0.0).takeIf { it > 0 }
                 val last = info.optDouble("pDrCotVal", 0.0).takeIf { it > 0 }
+                val volume = info.optDouble("qTotTran5J", 0.0).takeIf { it > 0 }
                 val yesterday = info.optDouble("priceYesterday", 0.0)
                 val change = info.optDouble("priceChange", 0.0)
                 val price = close ?: last
@@ -356,10 +370,10 @@ object TseService {
                     change != 0.0 && yesterday > 0 -> (change / yesterday) * 100.0
                     else -> null
                 }
-                Closing(close, last, pct)
+                Closing(close, last, pct, volume)
             }
         } catch (_: Throwable) {
-            Closing(null, null, null)
+            Closing(null, null, null, null)
         }
     }
 
@@ -374,6 +388,7 @@ object TseService {
             val name = item.optString("lVal30").trim().ifBlank { symbol }
             val pClosing = item.optDouble("pClosing", 0.0).takeIf { it > 0 }
             val pLast = item.optDouble("pDrCotVal", 0.0).takeIf { it > 0 }
+            val volume = item.optDouble("qTotTran5J", 0.0).takeIf { it > 0 }
             val yesterday = item.optDouble("priceYesterday", 0.0)
             val changePct = if (yesterday > 0 && pClosing != null) {
                 ((pClosing - yesterday) / yesterday) * 100.0
@@ -388,6 +403,7 @@ object TseService {
                         lastPrice = pLast,
                         closePrice = pClosing,
                         changePct = changePct,
+                        volume = volume,
                         cIsin = item.optString("cIsin")
                     )
                 )

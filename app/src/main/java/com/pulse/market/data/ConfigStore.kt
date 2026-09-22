@@ -5,7 +5,13 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
@@ -31,6 +37,13 @@ object ConfigStore {
 
     private val KEY_CONFIG = stringPreferencesKey("widget_config")      // قدیمی (تک‌تنظیماتی)
     private val KEY_WIDGETS = stringPreferencesKey("widgets_config")    // جدید (هر ویجت جدا)
+
+    /**
+     * اسکوپ دائمی ذخیره‌ی تنظیمات — با بسته شدن صفحه کنسل نمی‌شود تا
+     * تنظیمات هر ویجت همیشه واقعاً ذخیره بماند.
+     */
+    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var pendingSave: Job? = null
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
@@ -88,6 +101,24 @@ object ConfigStore {
         }
     }
 
+    /**
+     * ذخیره‌ی خودکار و فوری تنظیمات (با debounce کوتاه برای اسلایدرها).
+     * حتی اگر صفحه بلافاصله بسته شود، ذخیره انجام می‌شود.
+     */
+    fun saveDebounced(context: Context, cfg: WidgetConfig, widgetId: Int = 0, delayMs: Long = 200) {
+        pendingSave?.cancel()
+        pendingSave = ioScope.launch {
+            if (delayMs > 0) delay(delayMs)
+            save(context, cfg, widgetId)
+        }
+    }
+
+    /** ذخیره‌ی فوری بدون debounce — برای دکمه‌ی ذخیره */
+    fun saveNow(context: Context, cfg: WidgetConfig, widgetId: Int = 0) {
+        pendingSave?.cancel()
+        pendingSave = ioScope.launch { save(context, cfg, widgetId) }
+    }
+
     /** پاک کردن تنظیمات ویجتِ حذف‌شده از صفحه */
     suspend fun deleteWidget(context: Context, widgetId: Int) {
         context.dataStore.edit { prefs ->
@@ -137,6 +168,11 @@ object ConfigStore {
         }
     }
 
+    /** ذخیره‌ی منابع دلخواه بدون نیاز به زنده ماندن صفحه */
+    fun saveCustomSourcesAsync(context: Context, list: List<SourceDef>) {
+        ioScope.launch { saveCustomSources(context, list) }
+    }
+
     fun tseSymbolsFlow(context: Context): Flow<List<SymbolDef>> =
         context.dataStore.data.map { prefs ->
             prefs[KEY_TSE_SYMBOLS]?.let {
@@ -154,7 +190,60 @@ object ConfigStore {
         }
     }
 
+    /** ذخیره‌ی نمادهای دلخواه بورس بدون نیاز به زنده ماندن صفحه */
+    fun saveTseSymbolsAsync(context: Context, list: List<SymbolDef>) {
+        ioScope.launch { saveTseSymbols(context, list) }
+    }
+
+    // ───────────── بکاپ و بازگردانی ─────────────
+
+    /** ساخت فایل بکاپ JSON از همه‌ی تنظیمات (ویجت‌ها + الگو + منابع دلخواه + نمادهای بورس) */
+    suspend fun exportAll(context: Context): String {
+        val prefs = context.dataStore.data.first()
+        val dump = BackupDump(
+            exportedAt = System.currentTimeMillis(),
+            widgets = loadFile(prefs),
+            customSources = prefs[KEY_CUSTOM_SOURCES]?.let { raw ->
+                runCatching {
+                    json.decodeFromString(ListSerializer(SourceDef.serializer()), raw)
+                }.getOrNull()
+            } ?: emptyList(),
+            tseSymbols = prefs[KEY_TSE_SYMBOLS]?.let { raw ->
+                runCatching {
+                    json.decodeFromString(ListSerializer(SymbolDef.serializer()), raw)
+                }.getOrNull()
+            } ?: emptyList()
+        )
+        return json.encodeToString(BackupDump.serializer(), dump)
+    }
+
+    /**
+     * بازیابی از فایل بکاپ — تنظیمات فعلی کاملاً جایگزین می‌شود.
+     * برمی‌گرداند: تعداد ویجت‌های بازیابی‌شده.
+     */
+    suspend fun importAll(context: Context, text: String): Int {
+        val dump = json.decodeFromString(BackupDump.serializer(), text.trim())
+        context.dataStore.edit { prefs ->
+            prefs[KEY_WIDGETS] = json.encodeToString(WidgetsFile.serializer(), dump.widgets)
+            prefs[KEY_CUSTOM_SOURCES] =
+                json.encodeToString(ListSerializer(SourceDef.serializer()), dump.customSources)
+            prefs[KEY_TSE_SYMBOLS] =
+                json.encodeToString(ListSerializer(SymbolDef.serializer()), dump.tseSymbols)
+        }
+        return dump.widgets.widgets.size
+    }
+
     /** همه‌ی منابع = آماده‌های داخل اپ + منابع دلخواه کاربر */
     suspend fun resolveSource(context: Context, id: String): SourceDef? =
         SourceCatalog.byId(id) ?: currentCustomSources(context).firstOrNull { it.id == id }
 }
+
+/** قالب فایل بکاپ نبض بازار */
+@Serializable
+private data class BackupDump(
+    val version: Int = 1,
+    val exportedAt: Long = 0L,
+    val widgets: WidgetsFile,
+    val customSources: List<SourceDef> = emptyList(),
+    val tseSymbols: List<SymbolDef> = emptyList()
+)

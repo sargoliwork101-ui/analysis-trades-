@@ -15,14 +15,61 @@ import com.pulse.market.data.WidgetTheme
 import com.pulse.market.ui.MainActivity
 import com.pulse.market.ui.Sparkline
 import com.pulse.market.ui.Format
-import kotlin.math.abs
+import java.util.Calendar
+import java.util.TimeZone
 
-/** ساخت ظاهر ویجت */
+/** ساخت ظاهر ویجت — کاملاً داینامیک با اندازه‌ی ویجت، اندازه‌ی فونت و مقادیر انتخابی هر ویجت */
 object WidgetRenderer {
 
     private const val COLOR_UP = 0xFF22C55E.toInt()
     private const val COLOR_DOWN = 0xFFF43F5E.toInt()
     private const val COLOR_FLAT = 0xFF94A3B8.toInt()
+
+    /** اندازه‌ی پایه‌ی فونت‌ها (sp) قبل از اعمال ضریب کاربر و اندازه‌ی ویجت */
+    private const val SZ_TITLE = 12f
+    private const val SZ_TIME = 10f
+    private const val SZ_STATUS = 9f
+    private const val SZ_LABEL = 12.5f
+    private const val SZ_SUB = 9.5f
+    private const val SZ_PRICE = 14.5f
+    private const val SZ_CHANGE = 9.5f
+
+    /** رنگ‌ها و پس‌زمینه‌ی هر تم — شامل دو رنگ متناوب برای جداکننده‌ی ردیف‌ها */
+    private data class Palette(
+        val bgRes: Int,
+        val rowA: Int,
+        val rowB: Int,
+        val text: Int,
+        val sub: Int,
+        val divider: Int
+    )
+
+    private fun palette(theme: WidgetTheme): Palette = when (theme) {
+        WidgetTheme.DARK -> Palette(
+            R.drawable.widget_bg_dark, R.drawable.row_bg_dark_a, R.drawable.row_bg_dark_b,
+            0xFFF1F5F9.toInt(), 0xFF8B9AB1.toInt(), 0xFF1B2740.toInt()
+        )
+
+        WidgetTheme.LIGHT -> Palette(
+            R.drawable.widget_bg_light, R.drawable.row_bg_light_a, R.drawable.row_bg_light_b,
+            0xFF0F172A.toInt(), 0xFF64748B.toInt(), 0xFFE2E8F0.toInt()
+        )
+
+        WidgetTheme.GLASS -> Palette(
+            R.drawable.widget_bg_glass, R.drawable.row_bg_glass_a, R.drawable.row_bg_glass_b,
+            0xFFEAF2FF.toInt(), 0xFF9DB4D4.toInt(), 0xFF3A4E73.toInt()
+        )
+
+        WidgetTheme.AURORA -> Palette(
+            R.drawable.widget_bg_aurora, R.drawable.row_bg_aurora_a, R.drawable.row_bg_aurora_b,
+            0xFFFFFFFF.toInt(), 0xFFDDD6FE.toInt(), 0xFF6D5BD0.toInt()
+        )
+
+        WidgetTheme.NEON -> Palette(
+            R.drawable.widget_bg_neon, R.drawable.row_bg_neon_a, R.drawable.row_bg_neon_b,
+            0xFFF5F3FF.toInt(), 0xFF67E8F9.toInt(), 0xFF3B0764.toInt()
+        )
+    }
 
     fun render(
         context: Context,
@@ -34,75 +81,86 @@ object WidgetRenderer {
         sourceTitle: String = ""
     ) {
         val views = RemoteViews(context.packageName, R.layout.widget_stock)
+        val pal = palette(cfg.theme)
 
-        // ── اندازه‌ی واقعی ویجت ← تعداد ردیف و نمایش نمودار ──
+        // ── اندازه‌ی واقعی ویجت ← تعداد ردیف، نمایش نمودار و ضریب فونت ──
         val opts = AppWidgetManager.getInstance(context).getAppWidgetOptions(widgetId)
         val sizeH = opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT).takeIf { it > 0 }
             ?: opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 120)
         val sizeW = opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH).takeIf { it > 0 }
             ?: opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 250)
-        val rowCapacity = (((sizeH - 70f) / 42f) + 1f).toInt().coerceIn(1, 4)
-        val maxRows = minOf(cfg.rows.coerceIn(1, 4), rowCapacity)
+
+        // فونت‌ها و محتوا کاملاً با اندازه‌ی ویجت بزرگ/کوچک می‌شوند + ضریب دلخواه کاربر
+        val scale = cfg.fontScale.coerceIn(0.75f, 1.5f) * sizeFactor(sizeW, sizeH)
+
+        val rowCapacity = (((sizeH - 84f) / 50f) + 1f).toInt().coerceIn(1, 6)
+        val maxRows = minOf(cfg.rows.coerceIn(1, 6), rowCapacity)
         val sparkVisible = cfg.showSparkline && sizeW >= 170
+        val subVisible = sizeW >= 120
+
+        // چشمک LED: با هر به‌روزرسانی، فاز روشن/کم‌نور عوض می‌شود (مثل چشمک زدن)
+        val blinkOn = (updatedAt / 1000L) % 2 == 0L
+        // اگر مدت زیادی از آخرین به‌روزرسانی سالم گذشته، همه‌ی LEDها قرمز می‌شوند
+        val dataStale = updatedAt > 0 &&
+                System.currentTimeMillis() - updatedAt > (cfg.intervalSec * 2 + 45) * 1000L
 
         // ── پوسته بر اساس تم ──
-        val bgRes = when (cfg.theme) {
-            WidgetTheme.DARK -> R.drawable.widget_bg_dark
-            WidgetTheme.LIGHT -> R.drawable.widget_bg_light
-            WidgetTheme.AMOLED -> R.drawable.widget_bg_amoled
-        }
-        val textColor = when (cfg.theme) {
-            WidgetTheme.DARK -> 0xFFF1F5F9.toInt()
-            WidgetTheme.LIGHT -> 0xFF0F172A.toInt()
-            WidgetTheme.AMOLED -> 0xFFFFFFFF.toInt()
-        }
-        val subColor = when (cfg.theme) {
-            WidgetTheme.DARK -> 0xFF8B9AB1.toInt()
-            WidgetTheme.LIGHT -> 0xFF64748B.toInt()
-            WidgetTheme.AMOLED -> 0xFF7A8899.toInt()
-        }
-        val dividerColor = when (cfg.theme) {
-            WidgetTheme.DARK -> 0xFF1B2740.toInt()
-            WidgetTheme.LIGHT -> 0xFFE2E8F0.toInt()
-            WidgetTheme.AMOLED -> 0xFF161616.toInt()
-        }
-
-        views.setInt(R.id.widget_root, "setBackgroundResource", bgRes)
-        views.setTextColor(R.id.txt_title, textColor)
-        views.setTextColor(R.id.txt_time, subColor)
-        views.setTextColor(R.id.txt_status, subColor)
-        views.setInt(R.id.divider, "setBackgroundColor", dividerColor)
+        views.setInt(R.id.widget_root, "setBackgroundResource", pal.bgRes)
+        views.setTextColor(R.id.txt_title, pal.text)
+        views.setTextColor(R.id.txt_time, pal.sub)
+        views.setTextColor(R.id.txt_status, pal.sub)
+        views.setInt(R.id.divider, "setBackgroundColor", pal.divider)
         views.setImageViewResource(R.id.dot_live, if (live) R.drawable.dot_live else R.drawable.dot_idle)
 
-        val title = sourceTitle.ifBlank { defaultTitle(cfg.sourceId) }
-        views.setTextViewText(R.id.txt_title, text(title, cfg))
-        views.setTextViewText(R.id.txt_time, text(Format.time(updatedAt), cfg))
+        // ── فونت داینامیک همه‌ی متن‌ها ──
+        sp(views, R.id.txt_title, SZ_TITLE, scale)
+        sp(views, R.id.txt_time, SZ_TIME, scale)
+        sp(views, R.id.txt_status, SZ_STATUS, scale)
 
-        // ── ردیف‌ها ──
+        // ── سرصفحه: عنوان دلخواه/منبع + زمان آخرین به‌روزرسانی ──
+        val title = cfg.title.ifBlank { sourceTitle.ifBlank { defaultTitle(cfg.sourceId) } }
+        views.setTextViewText(R.id.txt_title, text(title, cfg))
+        val updText = when {
+            updatedAt <= 0 -> "به‌روزرسانی نشده"
+            sizeW < 200 -> "به‌روز ${Format.time(updatedAt)}"
+            else -> "آخرین به‌روزرسانی ${Format.time(updatedAt)}"
+        }
+        // وضعیت جلسه‌ی بورس تهران کنار ساعت — اگر کاربر خواسته و ویجت به‌اندازه‌ی کافی پهن است
+        val headerText =
+            if (cfg.showMarketStatus && sizeW >= 200) updText + " • " + tseMarketText() else updText
+        views.setTextViewText(R.id.txt_time, text(headerText, cfg))
+        views.setViewVisibility(R.id.txt_time, if (cfg.showTime) View.VISIBLE else View.GONE)
+
+        // ── ردیف‌ها به شکل کارت‌های جدا با پس‌زمینه‌ی متناوب ──
         views.removeAllViews(R.id.rows)
         val shown = quotes.take(maxRows)
         if (shown.isEmpty()) {
             val row = RemoteViews(context.packageName, R.layout.widget_row)
-            row.setTextViewText(R.id.row_label, "منتظر داده…")
-            row.setTextViewText(R.id.row_sub, "دکمه‌ی رفرش را بزن")
+            applyRowChrome(row, pal, cfg, 0, scale)
+            row.setImageViewResource(R.id.row_led, R.drawable.led_gray)
+            row.setTextViewText(R.id.row_label, text("منتظر داده…", cfg))
+            row.setTextViewText(R.id.row_sub, text("دکمه‌ی رفرش را بزن", cfg))
             row.setTextViewText(R.id.row_price, "—")
             row.setViewVisibility(R.id.row_change, View.GONE)
             row.setViewVisibility(R.id.row_spark, View.GONE)
-            row.setTextColor(R.id.row_label, textColor)
-            row.setTextColor(R.id.row_sub, subColor)
-            row.setTextColor(R.id.row_price, textColor)
             views.addView(R.id.rows, row)
         } else {
-            shown.forEach { q -> views.addView(R.id.rows, buildRow(context, q, cfg, textColor, subColor, sparkVisible)) }
+            shown.forEachIndexed { i, q ->
+                views.addView(
+                    R.id.rows,
+                    buildRow(context, q, cfg, pal, i, sparkVisible, subVisible, scale, blinkOn, dataStale)
+                )
+            }
         }
 
-        // ── نوار وضعیت ──
-        val errors = quotes.count { it.error != null }
+        // ── نوار وضعیت (قابل خاموش شدن) ──
+        val errors = quotes.count { it.error != null && it.price == null }
         val activeAlerts = cfg.alerts.count { it.enabled }
         val alertInfo = if (activeAlerts > 0) " • 🔔 $activeAlerts هشدار" else ""
         val status = when {
             errors == 0 && quotes.isNotEmpty() -> (if (live) "زنده" else "دستی") +
                     " • هر ${cfg.intervalSec} ثانیه$alertInfo"
+
             quotes.isEmpty() -> "داده‌ای نیست — روی رفرش بزن"
             else -> "$errors مورد خطا$alertInfo"
         }
@@ -110,6 +168,7 @@ object WidgetRenderer {
             R.id.txt_status,
             if (cfg.persianDigits) Format.toPersianDigits(status) else status
         )
+        views.setViewVisibility(R.id.txt_status, if (cfg.showStatus) View.VISIBLE else View.GONE)
 
         // ── کلیک‌ها ──
         views.setOnClickPendingIntent(R.id.btn_refresh, refreshIntent(context, widgetId))
@@ -119,33 +178,65 @@ object WidgetRenderer {
         AppWidgetManager.getInstance(context).updateAppWidget(widgetId, views)
     }
 
+    /** ظاهر مشترک هر ردیف: رنگ‌ها، فونت داینامیک و پس‌زمینه‌ی متناوب */
+    private fun applyRowChrome(
+        row: RemoteViews,
+        pal: Palette,
+        cfg: WidgetConfig,
+        index: Int,
+        scale: Float
+    ) {
+        row.setTextColor(R.id.row_label, pal.text)
+        row.setTextColor(R.id.row_sub, pal.sub)
+        row.setTextColor(R.id.row_price, pal.text)
+        sp(row, R.id.row_label, SZ_LABEL, scale)
+        sp(row, R.id.row_sub, SZ_SUB, scale)
+        sp(row, R.id.row_price, SZ_PRICE, scale)
+        sp(row, R.id.row_change, SZ_CHANGE, scale)
+        // رنگ زمینه‌ی متناوب ردیف‌ها — نمادها با رنگ زمینه از هم جدا می‌شوند
+        if (cfg.rowSeparation) {
+            row.setInt(
+                R.id.row_root, "setBackgroundResource",
+                if (index % 2 == 0) pal.rowA else pal.rowB
+            )
+        }
+    }
+
     private fun buildRow(
         context: Context,
         q: Quote,
         cfg: WidgetConfig,
-        textColor: Int,
-        subColor: Int,
-        sparkVisible: Boolean
+        pal: Palette,
+        index: Int,
+        sparkVisible: Boolean,
+        subVisible: Boolean,
+        scale: Float,
+        blinkOn: Boolean,
+        dataStale: Boolean
     ): RemoteViews {
         val row = RemoteViews(context.packageName, R.layout.widget_row)
+        applyRowChrome(row, pal, cfg, index, scale)
+
+        // ── LED وضعیت هر نماد: سبز=به‌روز شد (چشمک) | قرمز=نشد ولی آخرین مقدار مانده | خاکستری=بدون داده ──
+        row.setImageViewResource(R.id.row_led, ledRes(q, blinkOn, dataStale))
 
         row.setTextViewText(
             R.id.row_label,
             if (cfg.persianDigits) Format.toPersianDigits(q.label) else q.label
         )
-        row.setTextViewText(R.id.row_sub, subColorLabel(q))
-
-        val priceText = withUnit(q)
-        row.setTextViewText(
-            R.id.row_price,
-            if (cfg.persianDigits) Format.toPersianDigits(priceText) else priceText
+        val sub = subLabel(q, cfg)
+        row.setTextViewText(R.id.row_sub, text(sub, cfg))
+        row.setViewVisibility(
+            R.id.row_sub,
+            if (subVisible && sub.isNotEmpty()) View.VISIBLE else View.GONE
         )
-        row.setTextColor(R.id.row_label, textColor)
-        row.setTextColor(R.id.row_sub, subColor)
-        row.setTextColor(R.id.row_price, if (q.price != null) textColor else subColor)
+
+        val priceText = Format.price(q.price, cfg.persianDigits, cfg.compactNumbers)
+        row.setTextViewText(R.id.row_price, priceText)
+        row.setTextColor(R.id.row_price, if (q.price != null) pal.text else pal.sub)
 
         val ch = q.changePct
-        if (ch == null || q.price == null) {
+        if (!cfg.showChange || ch == null || q.price == null) {
             row.setViewVisibility(R.id.row_change, View.GONE)
         } else {
             row.setViewVisibility(R.id.row_change, View.VISIBLE)
@@ -167,10 +258,10 @@ object WidgetRenderer {
 
         if (sparkVisible && q.spark.size >= 3) {
             val px = TypedValue.applyDimension(
-                TypedValue.COMPLEX_UNIT_DIP, 52f, context.resources.displayMetrics
+                TypedValue.COMPLEX_UNIT_DIP, 52f * scale, context.resources.displayMetrics
             ).toInt()
             val py = TypedValue.applyDimension(
-                TypedValue.COMPLEX_UNIT_DIP, 24f, context.resources.displayMetrics
+                TypedValue.COMPLEX_UNIT_DIP, 24f * scale, context.resources.displayMetrics
             ).toInt()
             val color = when {
                 (ch ?: 0.0) > 0.0001 -> COLOR_UP
@@ -191,21 +282,64 @@ object WidgetRenderer {
         return row
     }
 
-    private fun subColorLabel(q: Quote): String = when {
-        q.error != null -> "⚠ ${q.error}"
-        q.unit.isNotEmpty() -> q.unit
-        else -> q.code
+    /** رنگ LED بر اساس وضعیت به‌روزرسانی هر نماد — چشمک با فاز روشن/کم‌نور */
+    private fun ledRes(q: Quote, blinkOn: Boolean, dataStale: Boolean): Int {
+        // بدون داده اصلاً — خاکستری
+        if (q.price == null && q.error == null) return R.drawable.led_gray
+        // به‌روز شده و سالم — سبز چشمک‌زن
+        val fresh = q.price != null && q.error == null && !q.stale && !dataStale
+        return when {
+            fresh -> if (blinkOn) R.drawable.led_green else R.drawable.led_green_dim
+            else -> if (blinkOn) R.drawable.led_red else R.drawable.led_red_dim
+        }
     }
 
-    private fun withUnit(q: Quote): String {
-        val p = Format.price(q.price, false)
-        return if (q.price == null) "—" else p
+    /** خط دوم هر نماد: کد/واحد + حجم معاملات — هر کدام با تنظیم همان ویجت روشن/خاموش */
+    private fun subLabel(q: Quote, cfg: WidgetConfig): String {
+        // خطا فقط وقتی نشان داده می‌شود که مقداری برای نمایش نداشته باشیم؛
+        // در حالت stale (آخرین مقدار سالم) عدد می‌ماند و فقط LED قرمز می‌شود
+        if (q.error != null && q.price == null) return "⚠ ${q.error}"
+        val parts = mutableListOf<String>()
+        if (cfg.showCode) {
+            val codeOrUnit = q.code.ifBlank { q.unit }
+            if (codeOrUnit.isNotBlank()) parts += codeOrUnit
+            else if (q.unit.isNotBlank()) parts += q.unit
+        }
+        if (cfg.showVolume && q.volume != null) {
+            parts += "حجم ${Format.volume(q.volume, cfg.persianDigits)}"
+        }
+        if (parts.isEmpty() && q.unit.isNotBlank()) parts += q.unit
+        return parts.joinToString(" • ")
+    }
+
+    /** ضریب اندازه بر اساس فضای واقعی ویجت — هرچه بزرگ‌تر، فونت درشت‌تر */
+    private fun sizeFactor(sizeW: Int, sizeH: Int): Float = when {
+        sizeH >= 230 || sizeW >= 340 -> 1.18f
+        sizeH >= 170 -> 1.08f
+        sizeH <= 62 -> 0.82f
+        sizeH <= 95 -> 0.92f
+        else -> 1.0f
+    }
+
+    private fun sp(views: RemoteViews, id: Int, base: Float, scale: Float) {
+        views.setTextViewTextSize(id, TypedValue.COMPLEX_UNIT_SP, base * scale)
     }
 
     private fun text(s: String, cfg: WidgetConfig) = if (cfg.persianDigits) Format.toPersianDigits(s) else s
 
     private fun defaultTitle(sourceId: String): String =
         com.pulse.market.data.SourceCatalog.byId(sourceId)?.title?.substringBefore(" —") ?: "نبض بازار"
+
+    /** وضعیت جلسه‌ی معاملاتی بورس تهران: شنبه تا چهارشنبه، ساعت ۹:۰۰ تا ۱۲:۳۰ به وقت ایران */
+    private fun tseMarketText(): String {
+        val cal = Calendar.getInstance(TimeZone.getTimeZone("Asia/Tehran"))
+        val day = cal.get(Calendar.DAY_OF_WEEK)
+        val workDay = day == Calendar.SATURDAY || day == Calendar.SUNDAY ||
+                day in Calendar.MONDAY..Calendar.WEDNESDAY
+        val minute = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
+        val open = workDay && minute in 9 * 60..12 * 60 + 30
+        return if (open) "بورس: باز 🟢" else "بورس: بسته 🔴"
+    }
 
     // ── PendingIntent ها ──
 

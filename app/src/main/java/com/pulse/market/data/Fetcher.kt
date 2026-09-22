@@ -92,6 +92,7 @@ object Fetcher {
                 label = sym.label.ifBlank { inst.name },
                 price = price,
                 changePct = inst.changePct,
+                volume = inst.volume,
                 unit = source.unit,
                 error = if (price == null) "قیمت پیدا نشد" else null,
                 ts = started
@@ -140,11 +141,20 @@ object Fetcher {
             label = sym.label,
             price = scaled,
             changePct = change,
+            volume = readVolume(json, source, sym),
             unit = source.unit,
             error = if (scaled == null) "قیمت در پاسخ پیدا نشد" else null,
             ts = started,
             spark = spark
         )
+    }
+
+    /** حجم معاملات/حجم ۲۴ ساعت — عدد یا آرایه‌ی میله‌ها (که جمع زده می‌شود) */
+    private fun readVolume(json: Any, source: SourceDef, sym: SymbolDef): Double? {
+        val path = source.volumePath?.replace("{symbol}", sym.code) ?: return null
+        JsonPath.readDouble(json, path)?.let { return it * source.scale }
+        val list = JsonPath.readDoubleList(json, path)
+        return if (list.isEmpty()) null else list.sum() * source.scale
     }
 
     /** تبدیل عدد «تغییر» سایت به درصد، بر اساس حالت انتخاب‌شده */

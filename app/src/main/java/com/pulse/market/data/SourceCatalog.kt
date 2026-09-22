@@ -21,13 +21,14 @@ object SourceCatalog {
             subtitle = "قیمت دلاری + تغییر ۲۴ ساعت • به‌روزرسانی لحظه‌ای",
             kind = JSON_REST,
             urlTemplate = "https://api.coingecko.com/api/v3/simple/price" +
-                    "?ids={symbol}&vs_currencies=usd&include_24hr_change=true",
+                    "?ids={symbol}&vs_currencies=usd&include_24hr_change=true&include_24hr_vol=true",
             // همه‌ی نمادها با یک درخواست (جلوگیری از محدودیت تعداد درخواست CoinGecko)
             batchTemplate = "https://api.coingecko.com/api/v3/simple/price" +
-                    "?ids={symbols}&vs_currencies=usd&include_24hr_change=true",
+                    "?ids={symbols}&vs_currencies=usd&include_24hr_change=true&include_24hr_vol=true",
             pricePath = "{symbol}.usd",
             changePath = "{symbol}.usd_24h_change",
             changeMode = ChangeMode.PERCENT,
+            volumePath = "{symbol}.usd_24h_vol",
             unit = "$",
             symbols = listOf(
                 SymbolDef("bitcoin", "بیت‌کوین"),
@@ -131,6 +132,7 @@ object SourceCatalog {
             changePath = "chart.result[0].meta.chartPreviousClose",
             changeMode = ChangeMode.PREV_CLOSE,
             sparkPath = "chart.result[0].indicators.quote[0].close",
+            volumePath = "chart.result[0].indicators.quote[0].volume",
             unit = "$",
             symbols = listOf(
                 SymbolDef("AAPL", "اپل"),

@@ -18,7 +18,9 @@
   /* ویجت */
   .widget { border-radius:24px; padding:13px 16px 11px; box-shadow:0 18px 40px rgba(0,0,0,.5); }
   .w-dark { background:linear-gradient(135deg,#16233C,#101A2E 55%,#0B1220); border:1px solid #25334F; }
-  .w-amoled { background:#000; border:1px solid #1C1C1C; }
+  .w-glass { background:linear-gradient(135deg,rgba(46,59,84,.88),rgba(28,39,64,.93) 55%,rgba(20,28,46,.96)); border:1px solid rgba(143,179,255,.4); }
+  .w-aurora { background:linear-gradient(135deg,#7C3AED,#4F46E5 55%,#0E7490); border:1px solid rgba(196,181,253,.5); }
+  .w-neon { background:linear-gradient(135deg,#1A0B2E,#240F3D 55%,#0D0518); border:1px solid rgba(34,211,238,.55); }
   .w-head { display:flex; align-items:center; gap:7px; }
   .dot { width:7px; height:7px; border-radius:50%; background:#22C55E; box-shadow:0 0 8px #22C55E; }
   .dot.idle { background:#4A5568; box-shadow:none; }
@@ -27,11 +29,24 @@
   .spacer { flex:1; }
   .bell { font-size:11px; }
   .divider { height:1px; background:#1B2740; margin:9px 0 3px; }
-  .divider-a { height:1px; background:#161616; margin:9px 0 3px; }
-  .row { display:flex; align-items:center; padding:7px 0; }
+  .row { display:flex; align-items:center; padding:8px 10px; margin-top:6px; border-radius:12px;
+         background:linear-gradient(180deg,rgba(255,255,255,.13),rgba(255,255,255,.05)); border:1px solid rgba(255,255,255,.16); }
+  .row.alt { background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.03)); border-color:rgba(255,255,255,.10); }
+  .led { width:8px; height:8px; border-radius:50%; margin-inline-end:5px; flex:none; align-self:flex-start; margin-top:4px; }
+  .led.g { background:#22C55E; box-shadow:0 0 6px #22C55E; }
+  .led.gd { background:#15803D; }
+  .led.r { background:#F43F5E; box-shadow:0 0 6px #F43F5E; }
+  .w-glass .row, .w-aurora .row { background:linear-gradient(180deg,rgba(255,255,255,.22),rgba(255,255,255,.10)); border:1px solid rgba(255,255,255,.28); }
+  .w-glass .row.alt, .w-aurora .row.alt { background:linear-gradient(180deg,rgba(255,255,255,.13),rgba(255,255,255,.05)); border-color:rgba(255,255,255,.18); }
+  .w-neon .row { background:linear-gradient(180deg,#2E1B4E,#201238); border:1px solid #6B5BC6; }
+  .w-neon .row.alt { background:linear-gradient(180deg,#1C1032,#120A22); border-color:#4D3A8F; }
   .row-name { flex:1; }
   .row-name b { font-size:12.5px; font-weight:700; display:block; }
   .row-name span { font-size:9.5px; color:#8B9AB1; }
+  .w-glass .row-name span { color:#9DB4D4; }
+  .w-aurora .row-name span { color:#DDD6FE; }
+  .w-aurora .w-time { color:#DDD6FE; }
+  .w-neon .row-name span { color:#67E8F9; }
   .price { text-align:left; min-width:96px; }
   .price b { font-size:14.5px; font-weight:700; display:block; }
   .badge { display:inline-block; font-size:9.5px; border-radius:7px; padding:1px 6px; margin-top:2px; font-weight:700; }
@@ -62,7 +77,8 @@
   <h1>نبض بازار — پیش‌نمایش (با فونت وزیرمتن)</h1>
   <p class="lead">
     این ماکت طراحی است؛ ظاهر واقعی ویجت از همین فایل‌های <b>layout/widget_stock.xml</b> و فونت <b>res/font/vazirmatn_*.ttf</b> ساخته می‌شود.
-    تم انتخابی تو «تیره» است، پس ویجت اصلی همین تم را دارد؛ AMOLED هم برای مقایسه آورده شده.
+    پنج تم داریم: تیره و روشن + سه تم ترند: <b>شیشه‌ای (Glassmorphism)</b>، <b>شفق قطبی (Aurora)</b> و <b>نئون (Cyber)</b>.
+    هر ویجت تم، اندازه‌ی فونت و مقادیر نمایشی (حجم، تغییر، کد، نمودار) مستقل خودش را دارد؛ ردیف‌ها با رنگ زمینه‌ی متناوب از هم جدا شده‌اند.
   </p>
 
   <!-- ═══════════ ویجت — تم تیره ═══════════ -->
@@ -73,15 +89,15 @@
       <span class="w-title">کریپتو — CoinGecko</span>
       <span class="spacer"></span>
       <span class="bell">🔔</span>
-      <span class="w-time">۱۴:۳۲</span>
+      <span class="w-time">آخرین به‌روزرسانی ۱۴:۳۲</span>
       <svg width="16" height="16" viewBox="0 0 24 24" style="margin-inline-start:8px;opacity:.75;">
         <path fill="#94A3B8" d="M17.65,6.35C16.2,4.9 14.21,4 12,4c-4.42,0 -7.99,3.58 -8,8s3.57,8 7.99,8c3.73,0 6.84,-2.55 7.73,-6h-2.08c-0.82,2.33 -3.04,4 -5.65,4c-3.31,0 -6,-2.69 -6,-6s2.69,-6 6,-6c1.66,0 3.14,0.69 4.22,1.78L13,11h7V4l-2.35,2.35z"/>
       </svg>
     </div>
     <div class="divider"></div>
 
-    <div class="row">
-      <div class="row-name"><b>بیت‌کوین</b><span>BTC / CoinGecko</span></div>
+    <div class="row alt">
+      <span class="led g"></span><div class="row-name"><b>بیت‌کوین</b><span>BTC • حجم ۲۸٫۴ میلیارد</span></div>
       <svg width="52" height="24" viewBox="0 0 52 24" style="margin:0 10px;">
         <defs><linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stop-color="#22C55E" stop-opacity=".35"/><stop offset="100%" stop-color="#22C55E" stop-opacity="0"/>
@@ -94,7 +110,7 @@
     </div>
 
     <div class="row">
-      <div class="row-name"><b>اتریوم</b><span>ETH / CoinGecko</span></div>
+      <span class="led g"></span><div class="row-name"><b>اتریوم</b><span>ETH • حجم ۱۲٫۱ میلیارد</span></div>
       <svg width="52" height="24" viewBox="0 0 52 24" style="margin:0 10px;">
         <path d="M0,6 L6,9 L12,7 L18,12 L24,10 L30,15 L36,13 L42,18 L48,16 L51,19.5 L51,24 L0,24 Z" fill="rgba(244,63,94,.13)"/>
         <path d="M0,6 L6,9 L12,7 L18,12 L24,10 L30,15 L36,13 L42,18 L48,16 L51,19.5" fill="none" stroke="#F43F5E" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -103,8 +119,8 @@
       <div class="price"><b>۳,۱۸۰.۲۰</b><span class="badge down">▼ ۱.۰۵٪</span></div>
     </div>
 
-    <div class="row">
-      <div class="row-name"><b>تتر</b><span>USDT / CoinGecko</span></div>
+    <div class="row alt">
+      <span class="led g"></span><div class="row-name"><b>تتر</b><span>USDT • حجم ۴۸٫۹ میلیارد</span></div>
       <svg width="52" height="24" viewBox="0 0 52 24" style="margin:0 10px;">
         <path d="M0,12 L8,12.4 L16,11.7 L24,12.2 L32,11.8 L40,12.3 L51,12" fill="none" stroke="#94A3B8" stroke-width="2.2" stroke-linecap="round"/>
         <circle cx="51" cy="12" r="3" fill="#94A3B8"/>
@@ -180,31 +196,77 @@
     </div>
   </div>
 
-  <!-- ═══════════ AMOLED ═══════════ -->
-  <div class="label">● تم AMOLED (برای مقایسه — کم‌مصرف‌ترین روی صفحه‌های OLED)</div>
-  <div class="widget w-amoled">
+  <!-- ═══════════ تم‌های ترند ═══════════ -->
+  <div class="label">● تم شیشه‌ای (Glassmorphism) — نیمه‌شفاف با حاشیه‌ی روشن</div>
+  <div class="widget w-glass">
     <div class="w-head">
-      <span class="dot idle"></span>
+      <span class="dot"></span>
+      <span class="w-title">طلا و سکه</span>
+      <span class="spacer"></span>
+      <span class="w-time">آخرین به‌روزرسانی ۱۴:۳۵</span>
+    </div>
+    <div class="divider" style="background:#3A4E73"></div>
+    <div class="row alt">
+      <span class="led g"></span><div class="row-name"><b>طلای ۱۸ عیار</b><span>گرم • حجم ۳۲۰</span></div>
+      <div class="price"><b>۳٬۸۴۲٬۰۰۰</b><span class="badge up">▲ ۰٫۶۵٪</span></div>
+    </div>
+    <div class="row">
+      <span class="led r"></span><div class="row-name"><b>سکه</b><span>عدد • حجم ۱٬۲۵۰</span></div>
+      <div class="price"><b>۲۹٬۸۵۰٬۰۰۰</b><span class="badge down">▼ ۰٫۲۰٪</span></div>
+    </div>
+    <div class="status">زنده • هر ۱۵ ثانیه</div>
+  </div>
+
+  <div class="label">● تم شفق قطبی (Aurora) — گرادیان بنفش تا فیروزه‌ای</div>
+  <div class="widget w-aurora">
+    <div class="w-head">
+      <span class="dot"></span>
       <span class="w-title">سهام آمریکا — Yahoo</span>
       <span class="spacer"></span>
-      <span class="w-time">۰۹:۳۰</span>
+      <span class="w-time">آخرین به‌روزرسانی ۰۹:۳۰</span>
     </div>
-    <div class="divider-a"></div>
-    <div class="row">
-      <div class="row-name"><b>انویدیا</b><span>$</span></div>
+    <div class="divider" style="background:rgba(255,255,255,.25)"></div>
+    <div class="row alt">
+      <span class="led g"></span><div class="row-name"><b>انویدیا</b><span>NVDA • حجم ۲۱۰م</span></div>
       <svg width="52" height="24" viewBox="0 0 52 24" style="margin:0 10px;">
         <path d="M0,18 L7,15 L14,16 L21,11 L28,13 L35,7 L42,9 L51,3" fill="none" stroke="#22C55E" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
         <circle cx="51" cy="3" r="3" fill="#22C55E"/>
       </svg>
-      <div class="price"><b>۱۸۲.۴۵</b><span class="badge up">▲ ۰.۸۴٪</span></div>
+      <div class="price"><b>۱۸۲٫۴۵</b><span class="badge up">▲ ۰٫۸۴٪</span></div>
+    </div>
+    <div class="row">
+      <span class="led g"></span><div class="row-name"><b>تسلا</b><span>TSLA • حجم ۸۹م</span></div>
+      <div class="price"><b>۲۴۸٫۱۰</b><span class="badge down">▼ ۱٫۱۲٪</span></div>
     </div>
     <div class="status">دستی • هر ۶۰ ثانیه</div>
   </div>
 
+  <div class="label">● تم نئون (Cyber) — مشکی بنفش با حاشیه‌ی درخشان</div>
+  <div class="widget w-neon">
+    <div class="w-head">
+      <span class="dot idle"></span>
+      <span class="w-title">کریپتو — CoinGecko</span>
+      <span class="spacer"></span>
+      <span class="w-time">آخرین به‌روزرسانی ۱۴:۴۰</span>
+    </div>
+    <div class="divider" style="background:#3B0764"></div>
+    <div class="row alt">
+      <span class="led g"></span><div class="row-name"><b>بیت‌کوین</b><span>BTC • حجم ۲۸٫۴ میلیارد</span></div>
+      <div class="price"><b>۶۴٬۲۱۰</b><span class="badge up">▲ ۲٫۳۱٪</span></div>
+    </div>
+    <div class="row">
+      <span class="led r"></span><div class="row-name"><b>سولانا</b><span>SOL • حجم ۲٫۱ میلیارد</span></div>
+      <div class="price"><b>۱۴۸٫۹۰</b><span class="badge up">▲ ۳٫۷۵٪</span></div>
+    </div>
+    <div class="status">زنده • هر ۱۵ ثانیه</div>
+  </div>
+
   <p class="note">
+    چراغ LED کنار هر نماد: سبز = به‌روز شد (چشمک‌زن) • قرمز = به‌روز نشد ولی آخرین مقدار مانده.
     دکمه‌ی ⟳ گوشه‌ی ویجت = رفرش فوری &nbsp;•&nbsp; زدن روی نام منبع = روشن/خاموش کردن حالت زنده &nbsp;•&nbsp;
     زدن روی بدنه‌ی ویجت = باز شدن تنظیمات &nbsp;•&nbsp; آیکون 🔔 در نوار بالای ویجت یعنی هشدار فعال داری.
     <br>هشدارها با همان بازه‌ی زمانی حالت زنده بررسی می‌شوند؛ برای دقت بیشتر، فاصله‌ی به‌روزرسانی را روی ۱۵–۳۰ ثانیه بگذار.
+    <br>در تنظیمات هر ویجت می‌توانی اندازه‌ی فونت، مقادیر نمایشی (حجم، تغییر، کد، نمودار) و رنگ جداکننده‌ی ردیف‌ها را جداگانه تغییر دهی؛ حذف نمادها با دکمه‌ی 🗑 و جابه‌جایی با فلش‌ها انجام می‌شود.
   </p>
 </div>
 </body>
