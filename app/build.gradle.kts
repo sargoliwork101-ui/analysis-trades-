@@ -37,6 +37,10 @@ android {
                 keyAlias = "androiddebugkey"
                 keyPassword = "android"
                 storeType = "PKCS12"
+                // امضای v1 هم روشن باشد: هم سازگاری با اندرویدهای قدیمی‌تر،
+                // هم می‌شود امضای APK را بدون apksigner (با openssl) بررسی کرد.
+                enableV1Signing = true
+                enableV2Signing = true
             }
         }
     }
