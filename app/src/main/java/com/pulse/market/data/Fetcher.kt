@@ -107,13 +107,13 @@ object Fetcher {
             val body = get(url(source, sym.code), source)
             val doc = Jsoup.parse(body, url(source, sym.code))
             val selector = source.cssSelector
-            val el = if (selector.isNullOrBlank()) null
-            else runCatching { doc.selectFirst(selector) ?: doc.select(selector).firstOrNull() }.getOrNull()
-                ?: error("سلکتور در صفحه پیدا نشد")
-            val raw = when {
-                source.cssAttr.isNullOrBlank() -> el.text()
-                else -> el.attr(source.cssAttr)
+            val el = if (selector.isNullOrBlank()) {
+                error("سلکتور CSS برای منبع HTML تعریف نشده")
+            } else {
+                runCatching { doc.selectFirst(selector) ?: doc.select(selector).firstOrNull() }.getOrNull()
+                    ?: error("سلکتور در صفحه پیدا نشد")
             }
+            val raw = if (source.cssAttr.isNullOrBlank()) el.text() else el.attr(source.cssAttr)
             val scaled = Num.parse(raw)?.let { it * source.scale }
             Quote(
                 code = sym.code, label = sym.label, price = scaled, unit = source.unit,
