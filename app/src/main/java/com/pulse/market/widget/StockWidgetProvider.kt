@@ -12,6 +12,7 @@ import com.pulse.market.data.QuoteRepo
 import com.pulse.market.data.SourceCatalog
 import com.pulse.market.data.WidgetConfig
 import com.pulse.market.service.LiveUpdateService
+import com.pulse.market.service.LiveUpdateWorker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -45,7 +46,7 @@ open class StockWidgetProvider : AppWidgetProvider() {
         val pending = goAsync()
         scope.launch {
             try {
-                renderAll(context, ConfigStore.current(context), QuoteRepo.loadCached(context))
+                renderFromCache(context, appWidgetId)
             } finally {
                 pending.finish()
             }
@@ -70,11 +71,13 @@ open class StockWidgetProvider : AppWidgetProvider() {
                 val pending = goAsync()
                 scope.launch {
                     try {
-                        val cfg = ConfigStore.current(context)
+                        // هر ویجت حالت زنده‌ی خودش را کنترل می‌کند
+                        val wId = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, 0)
+                        val cfg = ConfigStore.current(context, wId)
                         val newState = !cfg.liveService
-                        ConfigStore.save(context, cfg.copy(liveService = newState))
-                        if (newState) LiveUpdateService.start(context) else LiveUpdateService.stop(context)
-                        renderAll(context, cfg.copy(liveService = newState), QuoteRepo.loadCached(context))
+                        ConfigStore.save(context, cfg.copy(liveService = newState), wId)
+                        syncLiveService(context)
+                        refreshAll(context, force = true)
                     } finally {
                         pending.finish()
                     }
@@ -83,10 +86,19 @@ open class StockWidgetProvider : AppWidgetProvider() {
         }
     }
 
+    /** پاک کردن تنظیمات ویجت‌هایی که از صفحه حذف شده‌اند */
     override fun onDeleted(context: Context, appWidgetIds: IntArray) {
         super.onDeleted(context, appWidgetIds)
-        if (WidgetRenderer.allWidgetIds(context).isEmpty()) {
-            LiveUpdateService.stop(context)
+        val pending = goAsync()
+        scope.launch {
+            try {
+                appWidgetIds.forEach { ConfigStore.deleteWidget(context, it) }
+                if (WidgetRenderer.allWidgetIds(context).isEmpty()) {
+                    LiveUpdateService.stop(context)
+                }
+            } finally {
+                pending.finish()
+            }
         }
     }
 
@@ -97,44 +109,76 @@ open class StockWidgetProvider : AppWidgetProvider() {
 
         private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-        /** گرفتن داده و رندر همه‌ی ویجت‌های روی صفحه */
+        /**
+         * به‌روزرسانی همه‌ی ویجت‌ها — هر کدام با پیکربندی و نمادهای خودش؛
+         * نمادهای مشترک فقط یک بار از شبکه گرفته می‌شوند.
+         */
         suspend fun refreshAll(context: Context, force: Boolean = false) {
             val ids = WidgetRenderer.allWidgetIds(context)
             if (ids.isEmpty()) return
 
-            val cfg = ConfigStore.current(context)
-            val cached = QuoteRepo.loadCached(context)
-            val ageMs = System.currentTimeMillis() - QuoteRepo.lastUpdated(context)
-            val needNetwork = force || cached.isEmpty() || ageMs > cfg.intervalSec * 1000L
+            val cfgs = ids.map { it to ConfigStore.current(context, it) }
+            val wantedList = cfgs.map { (_, cfg) -> QuoteRepo.wantedFor(context, cfg) }
 
-            val quotes = if (needNetwork) QuoteRepo.refresh(context, cfg) else cached
-            val finalQuotes = if (quotes.any { it.price != null }) quotes else cached
-            renderAll(context, cfg, finalQuotes)
+            val cached = QuoteRepo.loadCachedMap(context)
+            val minInterval = cfgs.minOf { it.second.intervalSec }.coerceIn(5, 3600)
+            val stale =
+                System.currentTimeMillis() - QuoteRepo.lastUpdated(context) > minInterval * 1000L
+            val missing = wantedList.flatten().any { QuoteRepo.key(it.first, it.second.code) !in cached }
+            val needNetwork = force || cached.isEmpty() || stale || missing
 
-            // بررسی هشدارهای قیمت روی همان دیتای تازه
-            runCatching { AlertEngine.evaluate(context, cfg, finalQuotes) }
+            val quoteMap = if (needNetwork) QuoteRepo.refreshMany(context, wantedList) else cached
+
+            cfgs.forEachIndexed { i, (id, cfg) ->
+                val quotes = wantedList[i].mapNotNull { quoteMap[QuoteRepo.key(it.first, it.second.code)] }
+                renderOne(context, id, cfg, quotes)
+                // هشدارهای هر ویجت روی داده‌ی خودش
+                runCatching { AlertEngine.evaluate(context, cfg, quotes) }
+            }
         }
 
-        fun renderAll(context: Context, cfg: WidgetConfig, quotes: List<Quote>) {
-            val ids = WidgetRenderer.allWidgetIds(context)
-            if (ids.isEmpty()) return
+        /** رندر یک ویجت از روی کش — برای تغییر اندازه بدون شبکه */
+        private suspend fun renderFromCache(context: Context, widgetId: Int) {
+            val cfg = ConfigStore.current(context, widgetId)
+            val wanted = QuoteRepo.wantedFor(context, cfg)
+            val map = QuoteRepo.loadCachedMap(context)
+            val quotes = wanted.mapNotNull { map[QuoteRepo.key(it.first, it.second.code)] }
+            renderOne(context, widgetId, cfg, quotes)
+        }
+
+        private fun renderOne(
+            context: Context,
+            widgetId: Int,
+            cfg: WidgetConfig,
+            quotes: List<Quote>
+        ) {
             val sourceIds = cfg.activeSourceIds
             val sourceTitle = when {
                 sourceIds.size == 1 ->
                     SourceCatalog.byId(sourceIds.first())?.title?.substringBefore(" —") ?: "منبع دلخواه"
                 else -> "نبض بازار"
             }
-            val updatedAt = QuoteRepo.lastUpdated(context).takeIf { it > 0 } ?: System.currentTimeMillis()
-            ids.forEach { id ->
-                WidgetRenderer.render(
-                    context = context,
-                    widgetId = id,
-                    cfg = cfg,
-                    quotes = quotes,
-                    live = cfg.liveService,
-                    updatedAt = updatedAt,
-                    sourceTitle = sourceTitle
-                )
+            val updatedAt =
+                QuoteRepo.lastUpdated(context).takeIf { it > 0 } ?: System.currentTimeMillis()
+            WidgetRenderer.render(
+                context = context,
+                widgetId = widgetId,
+                cfg = cfg,
+                quotes = quotes,
+                live = cfg.liveService,
+                updatedAt = updatedAt,
+                sourceTitle = sourceTitle
+            )
+        }
+
+        /** سرویس زنده فقط وقتی لازم است که هیچ ویجتی liveService داشته باشد */
+        suspend fun syncLiveService(context: Context) {
+            if (ConfigStore.anyLive(context)) {
+                LiveUpdateService.start(context)
+                LiveUpdateWorker.schedule(context)
+            } else {
+                LiveUpdateService.stop(context)
+                LiveUpdateWorker.cancel(context)
             }
         }
 

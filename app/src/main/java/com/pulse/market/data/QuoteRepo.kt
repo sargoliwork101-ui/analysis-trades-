@@ -9,8 +9,8 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 
 /**
- * گرفتن قیمت‌ها به‌صورت موازی + کش کردن آخرین نتیجه،
- * تا ویجت حتی وقتی شبکه قطع است عدد قبلی را نشان بدهد.
+ * گرفتن قیمت‌ها به‌صورت موازی + کش مشترک بین ویجت‌ها:
+ * هر نماد فقط یک بار از شبکه گرفته می‌شود، حتی اگر چند ویجت آن را نشان دهند.
  */
 object QuoteRepo {
 
@@ -22,41 +22,75 @@ object QuoteRepo {
     private fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
 
-    fun loadCached(context: Context): List<Quote> {
-        val raw = prefs(context).getString(KEY_QUOTES, null) ?: return emptyList()
-        return runCatching {
+    /** کلید یکتای هر نماد: منبع + کد */
+    fun key(sourceId: String, code: String) = "$sourceId|$code"
+
+    // ───────────── کش ─────────────
+
+    fun loadCachedMap(context: Context): Map<String, Quote> {
+        val raw = prefs(context).getString(KEY_QUOTES, null) ?: return emptyMap()
+        val list = runCatching {
             json.decodeFromString(ListSerializer(Quote.serializer()), raw)
         }.getOrDefault(emptyList())
+        return list.associateBy { key(it.sourceId, it.code) }
     }
 
-    fun saveCached(context: Context, quotes: List<Quote>) {
+    private fun mergeCached(context: Context, fresh: List<Quote>) {
+        val merged = loadCachedMap(context).toMutableMap()
+        fresh.forEach { merged[key(it.sourceId, it.code)] = it }
         prefs(context).edit()
-            .putString(KEY_QUOTES, json.encodeToString(ListSerializer(Quote.serializer()), quotes))
+            .putString(
+                KEY_QUOTES,
+                json.encodeToString(ListSerializer(Quote.serializer()), merged.values.toList())
+            )
             .putLong("ts", System.currentTimeMillis())
             .apply()
     }
 
     fun lastUpdated(context: Context): Long = prefs(context).getLong("ts", 0L)
 
-    /** گرفتن همه‌ی نمادهای انتخاب‌شده از همه‌ی منابع فعال — هر منبع با کم‌ترین تعداد درخواست */
-    suspend fun refresh(context: Context, cfg: WidgetConfig): List<Quote> {
-        val sources = cfg.activeSourceIds.mapNotNull { ConfigStore.resolveSource(context, it) }
-        if (sources.isEmpty()) return emptyList()
+    // ───────────── شبکه ─────────────
 
-        val quotes = coroutineScope {
-            sources.map { src ->
+    /**
+     * نمادهایی که این پیکربندی باید نشان دهد:
+     * (منبع، نماد) — انتخاب صریح یا چند نماد پیش‌فرض از هر منبع
+     */
+    suspend fun wantedFor(context: Context, cfg: WidgetConfig): List<Pair<String, SymbolDef>> {
+        val sourceIds = cfg.activeSourceIds
+        return sourceIds.flatMap { sid ->
+            val syms = cfg.symbolsOf(sid).ifEmpty {
+                ConfigStore.resolveSource(context, sid)
+                    ?.symbols?.take(maxOf(1, 4 / sourceIds.size))
+                    ?: emptyList()
+            }
+            syms.map { sid to it }
+        }
+    }
+
+    /**
+     * گرفتن همه‌ی نمادهای همه‌ی ویجت‌ها با کم‌ترین درخواست ممکن:
+     * هر منبع فقط یک بار (و دسته‌ای) پرسیده می‌شود؛ نتیجه در کش مشترک ادغام می‌شود.
+     */
+    suspend fun refreshMany(
+        context: Context,
+        wantedPerWidget: List<List<Pair<String, SymbolDef>>>
+    ): Map<String, Quote> {
+        val bySource: Map<String, List<SymbolDef>> = wantedPerWidget.flatten()
+            .distinctBy { it.first to it.second.code }
+            .groupBy({ it.first }, { it.second })
+        if (bySource.isEmpty()) return loadCachedMap(context)
+
+        val fetched = coroutineScope {
+            bySource.map { (sid, syms) ->
                 async {
-                    val syms = cfg.symbolsOf(src.id).ifEmpty {
-                        // بدون انتخاب صریح: چند نماد پیش‌فرض از هر منبع
-                        src.symbols.take(maxOf(1, 4 / sources.size))
-                    }
+                    val src = ConfigStore.resolveSource(context, sid) ?: return@async emptyList()
                     Fetcher.fetchAll(src, syms)
                 }
             }.awaitAll().flatten()
         }
 
-        // اگر همه خطا دادند، کش قدیمی را نگه دار
-        if (quotes.any { it.price != null }) saveCached(context, quotes)
-        return quotes
+        // اگر همه خطا دادند، کش قدیمی نگه داشته می‌شود
+        if (fetched.any { it.price != null }) mergeCached(context, fetched)
+        return loadCachedMap(context) + fetched.associateBy { key(it.sourceId, it.code) }
     }
 }

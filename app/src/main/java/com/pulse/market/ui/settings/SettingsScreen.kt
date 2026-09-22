@@ -18,9 +18,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -56,8 +55,6 @@ import com.pulse.market.data.SourceCatalog
 import com.pulse.market.data.SourceDef
 import com.pulse.market.data.SymbolDef
 import com.pulse.market.data.WidgetConfig
-import com.pulse.market.service.LiveUpdateService
-import com.pulse.market.service.LiveUpdateWorker
 import com.pulse.market.ui.AddAlertDialog
 import com.pulse.market.ui.AddSourceDialog
 import com.pulse.market.ui.Format
@@ -74,13 +71,17 @@ enum class SettingsCategory(val title: String) {
 }
 
 /**
- * صفحه‌ی تنظیمات با چهار دسته‌بندی:
- * منابع داده (چند انتخابی) • نمادها • ظاهر و سرعت • هشدارها
- * نوار پایین همیشه دکمه‌های «تست داده» و «ذخیره و به‌روزرسانی» را دارد.
+ * صفحه‌ی تنظیمات — هر ویجت پیکربندی مستقل خودش را دارد:
+ * - widgetId=0 → «الگوی پیش‌فرض» برای ویجت‌های تازه
+ * - widgetId≠0 → تنظیمات همان ویجت روی صفحه (با زدن روی ویجت باز می‌شود)
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(fromWidget: Boolean, onApply: (WidgetConfig) -> Unit) {
+fun SettingsScreen(
+    widgetId: Int = 0,
+    isAddFlow: Boolean = false,
+    onApply: (WidgetConfig) -> Unit
+) {
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -97,15 +98,17 @@ fun SettingsScreen(fromWidget: Boolean, onApply: (WidgetConfig) -> Unit) {
     var alertDialogOpen by remember { mutableStateOf(false) }
     var editingAlert by remember { mutableStateOf<AlertRule?>(null) }
 
-    // ─── بارگذاری و ذخیره ───
+    val editingWidget = widgetId != 0
+
+    // ─── بارگذاری و ذخیره (فقط همین ویجت یا الگو) ───
 
     fun persistAlerts(list: List<AlertRule>) {
         cfg = cfg.copy(alerts = list)
-        scope.launch { ConfigStore.save(context, cfg.copy(alerts = list)) }
+        scope.launch { ConfigStore.save(context, cfg.copy(alerts = list), widgetId) }
     }
 
-    LaunchedEffect(Unit) {
-        cfg = ConfigStore.current(context)
+    LaunchedEffect(widgetId) {
+        cfg = ConfigStore.current(context, widgetId)
         customSources = ConfigStore.currentCustomSources(context)
         tseCustomSymbols = ConfigStore.currentTseSymbols(context)
     }
@@ -137,9 +140,20 @@ fun SettingsScreen(fromWidget: Boolean, onApply: (WidgetConfig) -> Unit) {
             TopAppBar(
                 title = {
                     Column {
-                        Text("نبض بازار", fontWeight = FontWeight.Bold)
                         Text(
-                            "ویجت لحظه‌ای سهام، کریپتو، طلا و ارز",
+                            when {
+                                isAddFlow -> "افزودن ویجت"
+                                editingWidget -> "تنظیمات ویجت"
+                                else -> "نبض بازار"
+                            },
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            when {
+                                isAddFlow -> "منابع و نمادهای این ویجت را انتخاب کن"
+                                editingWidget -> "هر ویجت نمادها و ظاهر مستقل خودش را دارد"
+                                else -> "الگوی پیش‌فرض ویجت‌های تازه"
+                            },
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -184,8 +198,16 @@ fun SettingsScreen(fromWidget: Boolean, onApply: (WidgetConfig) -> Unit) {
                     .padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                if (fromWidget) {
-                    InfoCard("منابع و نمادها را انتخاب کن و «ذخیره و افزودن ویجت» را بزن — با برگشتن هم ویجت با تنظیمات فعلی اضافه می‌شود.")
+                when {
+                    isAddFlow -> InfoCard(
+                        "منابع و نمادها را انتخاب کن و «ذخیره و افزودن ویجت» را بزن — با برگشتن هم ویجت با تنظیمات فعلی اضافه می‌شود."
+                    )
+                    editingWidget -> InfoCard(
+                        "در حال تنظیم «همین ویجت» — نمادها و ظاهرش روی هیچ ویجت دیگری اثر ندارد."
+                    )
+                    else -> InfoCard(
+                        "این «الگوی پیش‌فرض» برای ویجت‌های تازه است. برای تنظیم هر ویجتِ روی صفحه، روی آن بزن تا تنظیماتش باز شود."
+                    )
                 }
 
                 when (category) {
@@ -228,7 +250,7 @@ fun SettingsScreen(fromWidget: Boolean, onApply: (WidgetConfig) -> Unit) {
                                         sourceId = ids.first(),
                                         symbols = cfg.symbols.filterNot { it.sourceId == src.id }
                                     )
-                                    ConfigStore.save(context, cfg)
+                                    ConfigStore.save(context, cfg, widgetId)
                                 }
                             }
                         },
@@ -257,12 +279,9 @@ fun SettingsScreen(fromWidget: Boolean, onApply: (WidgetConfig) -> Unit) {
                         onChange = { new -> cfg = new },
                         onLiveToggle = { on ->
                             cfg = cfg.copy(liveService = on)
-                            if (on) {
-                                LiveUpdateService.start(context)
-                                LiveUpdateWorker.schedule(context)
-                            } else {
-                                LiveUpdateService.stop(context)
-                                LiveUpdateWorker.cancel(context)
+                            scope.launch {
+                                ConfigStore.save(context, cfg, widgetId)
+                                StockWidgetProvider.syncLiveService(context)
                             }
                         }
                     )
@@ -344,28 +363,30 @@ fun SettingsScreen(fromWidget: Boolean, onApply: (WidgetConfig) -> Unit) {
                             onClick = {
                                 busy = true
                                 scope.launch {
-                                    ConfigStore.save(context, cfg)
+                                    ConfigStore.save(context, cfg, widgetId)
+                                    StockWidgetProvider.syncLiveService(context)
                                     StockWidgetProvider.refreshAll(context, force = true)
-                                    if (cfg.liveService) {
-                                        LiveUpdateService.start(context)
-                                        LiveUpdateWorker.schedule(context)
-                                    } else {
-                                        LiveUpdateService.stop(context)
-                                        LiveUpdateWorker.cancel(context)
+                                    testResult = when {
+                                        isAddFlow -> "ذخیره شد ✓ ویجت اضافه شد."
+                                        editingWidget -> "ذخیره شد ✓ این ویجت به‌روزرسانی شد."
+                                        else -> "الگو ذخیره شد ✓ ویجت‌های تازه از آن استفاده می‌کنند."
                                     }
-                                    testResult = if (fromWidget) "ذخیره شد ✓ ویجت اضافه شد." else "ذخیره شد ✓ ویجت به‌روزرسانی شد."
                                     busy = false
                                 }
                                 onApply(cfg)
                             },
                             modifier = Modifier.weight(1f)
                         ) {
-                            Icon(
-                                if (cfg.liveService) Icons.Default.PlayArrow else Icons.Default.Stop,
-                                contentDescription = null
-                            )
+                            Icon(Icons.Default.Check, contentDescription = null)
                             Spacer(Modifier.padding(3.dp))
-                            Text(if (fromWidget) "ذخیره و افزودن ویجت" else "ذخیره و به‌روزرسانی", fontSize = 12.sp)
+                            Text(
+                                when {
+                                    isAddFlow -> "ذخیره و افزودن ویجت"
+                                    editingWidget -> "ذخیره‌ی این ویجت"
+                                    else -> "ذخیره‌ی الگو"
+                                },
+                                fontSize = 12.sp
+                            )
                         }
                     }
                 }
@@ -415,7 +436,7 @@ fun SettingsScreen(fromWidget: Boolean, onApply: (WidgetConfig) -> Unit) {
                         }
                         currentList.add(newSym)
                         cfg = cfg.copy(symbols = currentList)
-                        ConfigStore.save(context, cfg)
+                        ConfigStore.save(context, cfg, widgetId)
                     }
                 }
             }
@@ -430,7 +451,7 @@ fun SettingsScreen(fromWidget: Boolean, onApply: (WidgetConfig) -> Unit) {
             onSave = { rule ->
                 val list = cfg.alerts.filterNot { it.id == rule.id } + rule
                 persistAlerts(list)
-                // اگر نماد هشدار در ویجت نیست، اضافه‌اش کن تا هشدار قابل بررسی باشد
+                // اگر نماد هشدار در این ویجت نیست، اضافه‌اش کن تا هشدار قابل بررسی باشد
                 val already = cfg.symbols.any {
                     it.code == rule.symbolCode &&
                             (it.sourceId.isEmpty() || it.sourceId == rule.sourceId)
@@ -439,7 +460,7 @@ fun SettingsScreen(fromWidget: Boolean, onApply: (WidgetConfig) -> Unit) {
                     cfg = cfg.copy(
                         symbols = cfg.symbols + SymbolDef(rule.symbolCode, rule.symbolLabel, rule.sourceId)
                     )
-                    scope.launch { ConfigStore.save(context, cfg) }
+                    scope.launch { ConfigStore.save(context, cfg, widgetId) }
                 }
                 alertDialogOpen = false
                 editingAlert = null
