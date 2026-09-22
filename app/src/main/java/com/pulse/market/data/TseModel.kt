@@ -20,6 +20,8 @@ data class TseInstrument(
     val lastPrice: Double? = null,
     val closePrice: Double? = null,
     val changePct: Double? = null,
+    /** حجم معاملات امروز (تعداد سهم) */
+    val volume: Double? = null,
     val cIsin: String = ""
 )
 
@@ -116,6 +118,16 @@ object TseService {
         TseInstrument("52458444983281249", "توان", "صندوق س. اهرمی توان مفید"),
         TseInstrument("41699948011270271", "پالایش", "صندوق پالایشی یکم"),
         TseInstrument("65089307994467000", "دارا یکم", "صندوق واسطه‌گری مالی یکم"),
+
+        // ─── صندوق‌های درآمد ثابت ───
+        TseInstrument("", "کیان", "صندوق درآمد ثابت کیان"),
+        TseInstrument("", "آرمان", "صندوق درآمد ثابت آرمان"),
+        TseInstrument("", "همای", "صندوق درآمد ثابت همای"),
+        TseInstrument("", "ثبات", "صندوق درآمد ثابت ثبات"),
+        TseInstrument("", "پارند", "صندوق درآمد ثابت پارند"),
+        TseInstrument("", "سپاس", "صندوق درآمد ثابت سپاس"),
+        TseInstrument("", "کمند", "صندوق درآمد ثابت کمند"),
+        TseInstrument("", "اعتماد", "صندوق درآمد ثابت اعتماد"),
 
         // ─── سهام شاخص‌ساز و پرمعامله ───
         TseInstrument("46348633615832441", "فولاد", "فولاد مبارکه اصفهان"),
@@ -221,6 +233,7 @@ object TseService {
         var closePrice: Double? = null
         var lastPrice: Double? = null
         var changePct: Double? = null
+        var volume: Double? = null
 
         runCatching {
             client.newCall(priceReq).execute().use { resp ->
@@ -230,6 +243,7 @@ object TseService {
                     if (info != null) {
                         closePrice = info.optDouble("pClosing", 0.0).takeIf { it > 0 }
                         lastPrice = info.optDouble("pDrCotVal", 0.0).takeIf { it > 0 }
+                        volume = info.optDouble("qTotTran5J", 0.0).takeIf { it > 0 }
                         val yesterday = info.optDouble("priceYesterday", 0.0)
                         if (yesterday > 0 && closePrice != null) {
                             changePct = ((closePrice!! - yesterday) / yesterday) * 100.0
@@ -245,7 +259,8 @@ object TseService {
             return local.copy(
                 closePrice = closePrice ?: local.closePrice,
                 lastPrice = lastPrice ?: local.lastPrice,
-                changePct = changePct ?: local.changePct
+                changePct = changePct ?: local.changePct,
+                volume = volume ?: local.volume
             )
         }
 
@@ -274,14 +289,97 @@ object TseService {
             name = name,
             lastPrice = lastPrice,
             closePrice = closePrice,
-            changePct = changePct
+            changePct = changePct,
+            volume = volume
         )
+    }
+
+    /**
+     * گرفتن قیمت یک نماد بورس تهران — با چند لایه‌ی پشتیبان:
+     * ۱) insCode عددی  ۲) کاتالوگ داخلی  ۳) جستجوی آنلاین (نمادهای جدید و صندوق‌ها)
+     * اگر با کدی قیمت نیامد، از جستجوی آنلاین کمک گرفته می‌شود تا نماد «نیاید» نشود.
+     */
+    suspend fun fetchQuote(code: String): TseInstrument {
+        // ۱) insCode عددی مستقیم
+        if (code.matches(Regex("\\d{8,20}"))) {
+            val byIns = fetchByInsCode(code)
+            if (byIns != null && (byIns.closePrice != null || byIns.lastPrice != null)) return byIns
+        }
+
+        // ۲) کاتالوگ داخلی (سریع/آفلاین) — فقط اگر insCode داشته باشد و قیمت بدهد
+        POPULAR_INSTRUMENTS.firstOrNull {
+            (it.symbol == code || it.name == code) && it.insCode.isNotBlank()
+        }?.let { local ->
+            val closing = fetchClosing(local.insCode)
+            if (closing.close != null || closing.last != null) {
+                return local.copy(
+                    lastPrice = closing.last ?: local.lastPrice,
+                    closePrice = closing.close ?: local.closePrice,
+                    changePct = closing.changePct ?: local.changePct,
+                    volume = closing.volume ?: local.volume
+                )
+            }
+        }
+
+        // ۳) جستجوی آنلاین — منبع حقیقت برای نمادهای جدید (صندوق‌های درآمد ثابت و ...)
+        val online = runCatching { searchTseOnline(code) }.getOrDefault(emptyList())
+        val best = online.firstOrNull { it.symbol.equals(code, ignoreCase = true) }
+            ?: online.firstOrNull()
+        if (best != null && best.insCode.isNotBlank()) {
+            val closing = fetchClosing(best.insCode)
+            return best.copy(
+                lastPrice = closing.last ?: best.lastPrice,
+                closePrice = closing.close ?: best.closePrice,
+                changePct = closing.changePct ?: best.changePct,
+                volume = closing.volume ?: best.volume
+            )
+        }
+
+        // ۴) چیزی پیدا نشد — حداقل اسم نماد برگردد
+        return POPULAR_INSTRUMENTS.firstOrNull { it.symbol == code || it.name == code }
+            ?: TseInstrument(code, code, code)
+    }
+
+    private data class Closing(
+        val close: Double?,
+        val last: Double?,
+        val changePct: Double?,
+        val volume: Double?
+    )
+
+    private fun fetchClosing(insCode: String): Closing {
+        return try {
+            val req = Request.Builder()
+                .url("https://cdn.tsetmc.com/api/ClosingPrice/GetClosingPriceInfo/$insCode")
+                .header("User-Agent", UA)
+                .header("Accept", "application/json, text/plain, */*")
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@use Closing(null, null, null, null)
+                val root = runCatching { JSONObject(resp.body?.string().orEmpty()) }.getOrNull()
+                    ?: return@use Closing(null, null, null, null)
+                val info = root.optJSONObject("closingPriceInfo") ?: root
+                val close = info.optDouble("pClosing", 0.0).takeIf { it > 0 }
+                val last = info.optDouble("pDrCotVal", 0.0).takeIf { it > 0 }
+                val volume = info.optDouble("qTotTran5J", 0.0).takeIf { it > 0 }
+                val yesterday = info.optDouble("priceYesterday", 0.0)
+                val change = info.optDouble("priceChange", 0.0)
+                val price = close ?: last
+                val pct = when {
+                    price != null && yesterday > 0 -> ((price - yesterday) / yesterday) * 100.0
+                    change != 0.0 && yesterday > 0 -> (change / yesterday) * 100.0
+                    else -> null
+                }
+                Closing(close, last, pct, volume)
+            }
+        } catch (_: Throwable) {
+            Closing(null, null, null, null)
+        }
     }
 
     private fun parseSearchResponse(body: String): List<TseInstrument> {
         val list = mutableListOf<TseInstrument>()
-        val root = runCatching { JSONObject(body) }.getOrNull() ?: return list
-        val arr = root.optJSONArray("instrumentSearch") ?: return list
+        val arr = parseArray(body, "instrumentSearch") ?: return list
 
         for (i in 0 until arr.length()) {
             val item = arr.optJSONObject(i) ?: continue
@@ -290,6 +388,7 @@ object TseService {
             val name = item.optString("lVal30").trim().ifBlank { symbol }
             val pClosing = item.optDouble("pClosing", 0.0).takeIf { it > 0 }
             val pLast = item.optDouble("pDrCotVal", 0.0).takeIf { it > 0 }
+            val volume = item.optDouble("qTotTran5J", 0.0).takeIf { it > 0 }
             val yesterday = item.optDouble("priceYesterday", 0.0)
             val changePct = if (yesterday > 0 && pClosing != null) {
                 ((pClosing - yesterday) / yesterday) * 100.0
@@ -304,11 +403,24 @@ object TseService {
                         lastPrice = pLast,
                         closePrice = pClosing,
                         changePct = changePct,
+                        volume = volume,
                         cIsin = item.optString("cIsin")
                     )
                 )
             }
         }
         return list
+    }
+
+    /** آرایه را از پاسخ خام `[...]` یا پیچیده `{"instrumentSearch":[...]}` بیرون می‌کشد */
+    private fun parseArray(body: String, vararg keys: String): JSONArray? {
+        runCatching { JSONArray(body) }.getOrNull()?.let { return it }
+        val root = runCatching { JSONObject(body) }.getOrNull() ?: return null
+        for (k in keys) root.optJSONArray(k)?.let { return it }
+        val names = root.keys()
+        while (names.hasNext()) {
+            root.optJSONArray(names.next())?.let { return it }
+        }
+        return null
     }
 }

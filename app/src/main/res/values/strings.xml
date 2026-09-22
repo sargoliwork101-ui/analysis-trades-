@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">نبض بازار</string>
-    <string name="widget_name">نبض بازار</string>
+    <string name="widget_name">نبض بازار (متوسط)</string>
+    <string name="widget_name_small">نبض بازار (کوچک)</string>
+    <string name="widget_name_large">نبض بازار (بزرگ)</string>
     <string name="widget_description">قیمت لحظه‌ای سهام، کریپتو، طلا و ارز روی صفحه‌ی اصلی</string>
+    <string name="widget_description_small">ویجت جمع‌وجور برای فضای کم</string>
+    <string name="widget_description_large">ویجت بزرگ با چند ردیف و نمودار</string>
 </resources>

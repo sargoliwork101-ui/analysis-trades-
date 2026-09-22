@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- فقط کلاس‌های مجاز RemoteViews: LinearLayout / TextView / ImageView -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
@@ -18,11 +19,12 @@
         android:gravity="center_vertical"
         android:orientation="horizontal">
 
-        <View
+        <ImageView
             android:id="@+id/dot_live"
             android:layout_width="7dp"
             android:layout_height="7dp"
-            android:background="@drawable/dot_idle" />
+            android:contentDescription="@null"
+            android:src="@drawable/dot_idle" />
 
         <TextView
             android:id="@+id/txt_title"
@@ -30,14 +32,14 @@
             android:layout_height="wrap_content"
             android:layout_marginStart="7dp"
             android:ellipsize="end"
-            android:fontFamily="@font/vazirmatn_bold"
             android:maxWidth="150dp"
             android:maxLines="1"
             android:text="نبض بازار"
             android:textColor="#F1F5F9"
-            android:textSize="12sp" />
+            android:textSize="12sp"
+            android:textStyle="bold" />
 
-        <Space
+        <TextView
             android:layout_width="0dp"
             android:layout_height="1dp"
             android:layout_weight="1" />
@@ -46,7 +48,6 @@
             android:id="@+id/txt_time"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:fontFamily="@font/vazirmatn_regular"
             android:text="--:--"
             android:textColor="#8B9AB1"
             android:textSize="10sp" />
@@ -61,13 +62,14 @@
             android:src="@drawable/ic_refresh" />
     </LinearLayout>
 
-    <View
+    <ImageView
         android:id="@+id/divider"
         android:layout_width="match_parent"
         android:layout_height="1dp"
         android:layout_marginTop="9dp"
         android:layout_marginBottom="3dp"
-        android:background="#1B2740" />
+        android:background="#1B2740"
+        android:contentDescription="@null" />
 
     <!-- ردیف نمادها اینجا اضافه می‌شود -->
     <LinearLayout
@@ -81,7 +83,6 @@
         android:id="@+id/txt_status"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:fontFamily="@font/vazirmatn_regular"
         android:maxLines="1"
         android:ellipsize="end"
         android:text="در حال آماده‌سازی…"

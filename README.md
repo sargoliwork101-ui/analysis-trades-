@@ -1,161 +1,56 @@
-# 📱 نبض بازار (Pulse Market Widget)
+# Pulse Market — نبض بازار 📈
 
-> **ویجت هوشمند، سبک و لحظه‌ای برای نمایش قیمت سهام بورس تهران، ارزهای دیجیتال، طلا، سکه، دلار و بازارهای جهانی بر روی صفحه‌ی اصلی گوشی اندروید**  
-> مجهز به سیستم پیشرفته‌ی **هشدار قیمت زمان‌بندی‌شده**، **فونت اصیل وزیرمتن**، و **بیلد خودکار ابری (GitHub Actions)** بدون نیاز به نصب نرم‌افزارهای سنگین برنامه‌نویسی.
+An Android home-screen widget that shows **live market prices** — Tehran Stock Exchange (TSE), crypto, gold, and forex — in your own style. Written in Kotlin with Jetpack Compose (settings) + RemoteViews (widgets).
 
----
-
-## 🌟 این نرم‌افزار چیست و چه کارهایی می‌کند؟
-
-«نبض بازار» یک اپلیکیشن کاملاً بومی (Native) برای اندروید است که به شما امکان می‌دهد وضعیت دارایی‌ها و نمادهای مالی مورد نظر خود را همواره جلوی چشمانتان داشته باشید، بدون اینکه نیاز باشد هر بار اپلیکیشن‌های مختلف را باز کنید یا در مرورگر صفحه رفرش کنید.
-
-### 💎 قابلیت‌های کلیدی
-
-1. **ویجت زنده روی صفحه اصلی (Home Screen):**
-   - نمایش کارت زیبا و مدرن با ۳ تم مختلف: **تیره (Dark)**، **روشن (Light)** و **مشکی عمیق (AMOLED)** برای صرفه‌جویی باتری در نمایشگرهای OLED.
-   - نمایش قیمت لحظه‌ای، درصد تغییر سود/زیان روزانه (با رنگ‌بندی استاندارد سبز و قرمز) و نمودار خطی مینیاتوری (Sparkline).
-   - قابلیت تنظیم تعداد سهم‌ها/ارزها (۱ تا ۴ ردیف همزمان روی یک ویجت).
-   - کلید اختصاصی رفرش دستی + نمایش وضعیت زنده بودن و تعداد هشدارهای فعال روی خودِ ویجت.
-   - پشتیبانی کامل از تبدیل اعداد به **ارقام فارسی** یا انگلیسی.
-
-2. **به‌روزرسانی لحظه‌ای واقعی (Live Service):**
-   - بهره‌گیری از سرویس پیش‌زمینه (Foreground Service) سبک اندروید با قابلیت تنظیم بازه زمانی تازه شدن داده‌ها از **۵ ثانیه تا ۱۲۰ ثانیه** به دلخواه شما.
-   - دارای سرویس پشتیبان دوره‌ای (WorkManager) برای مواقعی که گوشی در حالت ذخیره انرژی عمیق می‌رود تا هیچ‌وقت داده‌ی منقضی روی صفحه نماند.
-
-3. **سیستم هشدار قیمت هوشمند و زمان‌بندی‌شده (Price Alerts):**
-   - امکان ثبت شرط برای هر نماد به صورت دلخواه:
-     - وقتی قیمت **بالاتر از X** رفت (عبور از مقاومت یا هدف فروش)
-     - وقتی قیمت **پایین‌تر از X** آمد (کف خرید یا حد ضرر)
-     - وقتی نماد در یک روز بیش از **N درصد رشد** یا **N درصد افت** کرد
-   - **زمان‌بندی حرفه‌ای:**
-     - تعیین روزهای فعال هفته (مثلاً فقط شنبه تا چهارشنبه برای بورس ایران یا تمام روزها برای کریپتو و طلا)
-     - تعیین ساعات فعال بودن هشدار (مثلاً فقط در ساعات بازار بورس از ۰۹:۰۰ تا ۱۲:۳۰)
-     - دارای سیستم ضد اسپم (Cooldown) هوشمند با قابلیت تنظیم فاصله هشدارها (هر بار، ۵، ۱۵، ۳۰، ۶۰ یا ۱۸۰ دقیقه)
-
-4. **بخش اختصاصی و هوشمند بورس تهران (TSETMC):**
-   - **جستجوی آنلاین نمادها:** تایپ نام هر سهم یا صندوق بازار بورس و فرابورس (مانند `اهرم`، `عیار`، `طلا`، `کهربا`، `خودرو`، `خساپا`، `فولاد`، `شتران`، `دی` و...) و دریافت آنی نتایج.
-   - **افزودن مستقیم با لینک TSETMC:** باز کردن صفحه‌ی هر سهم در سایت [tsetmc.com](https://tsetmc.com) و چسباندن (Paste) آدرس آن در اپلیکیشن برای شناسایی خودکار.
-   - **محاسبه هوشمند درصد سود/زیان:** محاسبه دقیق درصد تغییر آخرین معامله و قیمت پایانی نسبت به دیروز با رنگ سبز و قرمز.
-   - **دسته‌بندی‌های سریع:** دسترسی با یک کلیک به محبوب‌ترین صندوق‌های طلا، صندوق‌های اهرمی و سهام شاخص‌ساز.
-
-5. **پشتیبانی از انواع بازارهای مالی:**
-   - **کریپتو (ارزهای دیجیتال):** دریافت مستقیم و پایدار از CoinGecko (بیت‌کوین، اتریوم، تتر، بایننس، سولانا، ریپل، دوج‌کوین، تون‌کوین و...).
-   - **طلا و ارز:** قیمت دلار آزاد، یورو، پوند، درهم، طلای ۱۸ عیار، سکه امامی و مثقال طلا (تومان).
-   - **سهام جهانی (آمریکا):** قیمت سهام اپل، تسلا، مایکروسافت، انویدیا، گوگل، آمازون و متا همراه نمودار مینیاتوری از یاهو فایننس.
-   - **شاخص کل بورس تهران.**
-
-6. **افزودن منبع دلخواه بدون کدنویسی (Custom Sources):**
-   - اگر سایت خاصی دارید، می‌توانید آدرس API یا صفحه‌ی وب آن را وارد کنید و با تعیین مسیر JSON (مانند `data.price`) یا سلکتور CSS (مانند `.price-box`)، دیتای آن را مستقیماً روی ویجت گوشی بیاورید!
-
-7. **تایپوگرافی چشم‌نواز با فونت اصیل «وزیرمتن» (Vazirmatn):**
-   - تمام متون ویجت، کارت‌ها، هشدارها و منوهای تنظیمات از نسخه رسمی فونت وزیرمتن (Regular، Medium و Bold) بهره می‌برند.
+**[📥 Download latest release](https://github.com/sargoliwork101-ui/analysis-trades-/releases/latest)** · Persian UI: see [README_fa.md](README_fa.md)
 
 ---
 
-## ⚡ نحوه بیلد و دریافت آسان فایل نصبی (APK) با گیت‌هاب
+## ✨ Features
 
-برای نصب این نرم‌افزار نیازی نیست روی کامپیوترتان اندروید استودیو یا نرم‌افزارهای چند گیگابایتی نصب کنید! سرورهای ابری گیت‌هاب (GitHub Actions) این کار را برای شما در ۲ دقیقه انجام می‌دهند.
+### Widgets (small / medium / large)
+- **Per-widget independent settings** — every widget has its own sources, symbols, values and theme; each can be edited by tapping it.
+- **5 themes** — Dark, Light, Glass, Aurora, Neon — with zebra row separation.
+- **Dynamic sizing** — fonts and content adapt to the real widget size plus a user font-scale (×0.75–×1.5).
+- **Live values per symbol** — price **with its unit right next to it** (unit moves under the price on narrow widgets), change badge, volume, sparkline.
+- **Sparkline for every symbol** — local price history is recorded on each successful update, so even TSE symbols gradually get a trend chart.
+- **Stale-data resilience** — on update failure the last good value stays; a small **blinking LED** per row tells the status (green = fresh, red blink = stale, gray = no data). The header shows the last-update time.
+- **Tehran market status** — "بورس: باز/بسته" next to the clock, computed in Asia/Tehran time (Sat–Wed, 9:00–12:30). Toggleable.
+- **Smart sorting** — display symbols manually, by biggest daily change, or alphabetically.
+- **Row count control** — choose how many symbols (1–6) each widget shows.
 
-### مراحل دریافت فایل نصبی:
+### Alerts 🔔
+- Conditions: above / below / %gain / %loss; per-alert schedule (time window + days of week, overnight windows supported) and anti-spam cooldown.
+- **Snooze** — silence all alert notifications for 15/30/60 minutes (meetings, sleep) with one tap.
+- Notifications use a **single subtle vibration** (70 ms), not the long default buzz.
 
-1. وارد حساب کاربری خود در [github.com](https://github.com) شوید و با دکمه **+** بالای صفحه یک **New repository** بسازید (نام آن را مثلاً `pulse-widget` بگذارید).
-2. کدهای این پوشه را با دستورات زیر به ریپازیتوری خود بفرستید (Push کنید):
-   ```bash
-   git remote add origin https://github.com/USERNAME/REPO_NAME.git
-   git branch -M main
-   git push -u origin main
-   ```
-   *(اگر با کامندلاین راحت نیستید، نرم‌افزار رایگان **GitHub Desktop** را باز کنید، این پوشه را اضافه کرده و Publish کنید).*
-3. وارد صفحه‌ی ریپازیتوری‌تان در سایت گیت‌هاب شوید و روی تب **Actions** (نوار بالا) کلیک کنید.
-4. می‌بینید که پردازش بیلد خودکار با نام **Build Android APK** فعال شده و با تیک سبز تمام می‌شود.
-5. روی بیلد کلیک کنید و در بخش پایین صفحه (**Artifacts**)، فایل **`PulseMarket-Android-APK`** را دانلود کنید.
-6. فایل فشرده را باز کنید؛ فایل **`PulseMarket-v1.0.apk`** آماده است! آن را روی گوشی اندرویدی خود نصب کنید.
+### Refresh & data usage ⏱
+- Live foreground service with per-widget interval (5–120 s) + WorkManager fallback every 15 min.
+- **Scheduled refresh window** — set "from/to" hours so updates (and mobile data) only happen during those hours; manual refresh always works. Overnight windows supported.
 
-*(راهنمای گام‌به‌گام و مصور این بخش در فایل `GITHUB_APK_GUIDE_fa.md` نیز موجود است).*
+### Settings UI
+- Clean sectioned design (landing menu → each section its own page), live widget preview, color-swatch theme picker, unified dialogs (TSE symbol search, add alert, add source).
+- **Backup & restore** — export/import the full configuration (widgets, template, custom sources, symbols, alerts) as one JSON file.
+- **In-app updater** — checks the latest GitHub release; a newer APK installs *over* the current one (nothing is wiped). Test dial auto-hides after 3 s.
 
----
-
-## 📖 راهنمای کار با اپلیکیشن روی گوشی
-
-۱. **افزودن ویجت به صفحه اصلی:**  
-   روی فضای خالی صفحه اصلی گوشی (Home Screen) چند ثانیه انگشتتان را نگه دارید ➔ گزینه **Widgets (ابزارک‌ها)** را انتخاب کنید ➔ ویجت **«نبض بازار»** را بکشید و روی صفحه قرار دهید.
-
-۲. **پیکربندی سهم‌ها:**  
-   صفحه تنظیمات به طور خودکار باز می‌شود:
-   - **انتخاب منبع:** منبع مورد نظر (مثلاً «بورس تهران — TSETMC»، «کریپتو» یا «طلا و ارز») را انتخاب کنید.
-   - **انتخاب نماد:** اگر بورس تهران را انتخاب کردید، دکمه‌ی بنفش **«🔍 جستجو در بورس تهران یا افزودن با لینک TSETMC»** را بزنید و نام سهم خود (مثلاً `اهرم` یا `عیار`) را سرچ کنید یا لینک سهم در tsetmc.com را چسبانده و دکمه «+ افزودن» را بزنید.
-   - نمادهای مورد نظر خود را (تا سقف ۴ نماد برای هر ویجت) تیک بزنید.
-
-۳. **تنظیم ظاهر و سرعت:**  
-   - سرعت رفرش را از ۵ تا ۱۲۰ ثانیه تنظیم کنید (برای بورس ۳۰ تا ۶۰ ثانیه و برای کریپتو ۱۰ تا ۲۰ ثانیه ایده‌آل است).
-   - تم مورد نظر (تیره، روشن یا AMOLED) و وضعیت اعداد فارسی را مشخص کنید.
-
-۴. **تنظیم هشدار قیمت:**  
-   - دکمه‌ی «افزودن هشدار» را بزنید.
-   - سهم، شرط (مثلاً عبور از قیمت خاص)، بازه زمانی (مثلاً ۰۹:۰۰ تا ۱۲:۳۰) و روزهای فعال را مشخص کنید.
-   - با دکمه‌ی «تست نوتیف» صدای اعلان گوشی خود را بررسی کنید.
-
-۵. **ذخیره:**  
-   دکمه آبی‌رنگ **«ذخیره و به‌روزرسانی»** را لمس کنید. ویجت شما با اطلاعات لحظه‌ای آماده است!
+### Data sources
+- Built-ins: **TSE (TSETMC)**, CoinGecko, Yahoo Finance, TGJU (gold/forex), Navasan mirror.
+- **Custom sources** — any JSON API (dot-path, batch templates, scale/unit) or HTML page (CSS selector) — and TSE symbol search by name or TSETMC page link.
 
 ---
 
-## 🏗 ساختار فنی پروژه (Architecture)
+## 🔁 Releases & versioning
+- Every meaningful change ships with a **version bump** (`versionName`) and a GitHub Release (`v*` tag) so the in-app updater can pick it up.
+- CI (GitHub Actions) builds the APK on every push: see the [Actions tab](https://github.com/sargoliwork101-ui/analysis-trades-/actions).
 
-پروژه با معماری تمیز و نوین اندروید توسعه یافته است:
-
+## 🛠 Build
+```bash
+./gradlew assembleDebug    # APK → app/build/outputs/apk/debug/
 ```
-pulse-widget/
-├── .github/workflows/build-apk.yml    # پایپ‌لاین بیلد ابری در گیت‌هاب (GitHub Actions CI/CD)
-├── gradlew / gradlew.bat              # اسکریپت‌های رسمی اجرای Gradle Wrapper
-├── gradle/wrapper/gradle-wrapper.jar  # فایل اجرایی گرادل نسخه ۸.۷
-├── app/src/main/
-│   ├── AndroidManifest.xml           # مجوزهای شبکه، سرویس پیش‌زمینه و نوتیفیکیشن
-│   ├── java/com/pulse/market/
-│   │   ├── App.kt                    # مقداردهی اولیه کانال‌های نوتیفیکیشن اندروید
-│   │   ├── data/
-│   │   │   ├── Model.kt              # مدل‌های پایه (Quote, SourceDef, SymbolDef, WidgetConfig)
-│   │   │   ├── Alert.kt              # مدل قوانین هشدار و زمان‌بندی روز و ساعت
-│   │   │   ├── AlertEngine.kt        # موتور ارزیابی قیمت، ضداسپم و ارسال اعلان
-│   │   │   ├── TseModel.kt           # سرویس هوشمند بورس تهران، پارسر لینک و سرچ آنلاین
-│   │   │   ├── SourceCatalog.kt      # کاتالوگ منابع پیش‌فرض
-│   │   │   ├── Fetcher.kt            # واکشی موازی داده با OkHttp و Jsoup و انکودینگ UTF-8
-│   │   │   ├── JsonPath.kt           # مسیرخوان بهینه JSON
-│   │   │   ├── Num.kt                # تبدیل اعداد فارسی/عربی و فرمت‌های واحد پولی
-│   │   │   ├── ConfigStore.kt        # ذخیره‌سازی داده‌ها با Jetpack DataStore
-│   │   │   └── QuoteRepo.kt          # کش حافظه و استراتژی واکشی موازی
-│   │   ├── widget/
-│   │   │   ├── StockWidgetProvider.kt # مدیریت رویدادهای ویجت و کلیک‌ها
-│   │   │   └── WidgetRenderer.kt     # رندر گرافیکی RemoteViews با فونت وزیرمتن
-│   │   ├── service/
-│   │   │   ├── LiveUpdateService.kt  # سرویس پیش‌زمینه برای رفرش لحظه‌ای
-│   │   │   ├── LiveUpdateWorker.kt   # کارگر پس‌زمینه برای مواقع خواب گوشی
-│   │   │   └── BootReceiver.kt       # فعال‌سازی مجدد بعد از ری‌استارت گوشی
-│   │   └── ui/
-│   │       ├── MainActivity.kt       # صفحه تنظیمات مدرن با Jetpack Compose و Material 3
-│   │       ├── TseSearchDialog.kt    # پنجره تعاملی جستجوی سهم و چسباندن لینک TSETMC
-│   │       ├── AddSourceDialog.kt    # پنجره تعریف منبع دلخواه
-│   │       ├── AddAlertDialog.kt     # پنجره تنظیم ساعت و شروط هشدار
-│   │       ├── Theme.kt              # تم‌های تیره و تایپوگرافی با فونت وزیرمتن
-│   │       ├── Format.kt             # قالب‌بندی قیمت‌ها و ارقام فارسی
-│   │       └── Sparkline.kt          # موتور رسم بیت‌مپ نمودار مینیاتوری
-│   └── res/
-│       ├── font/                     # فایل‌های فونت Vazirmatn (Regular, Medium, Bold)
-│       ├── layout/                   # طرح XML ویجت استاندارد اندروید
-│       └── drawable/                 # پس‌زمینه‌ها، بج‌های صعود/نزول و نشانگر زنده
-```
+Kotlin 2.0 · AGP 8.5 · minSdk 26 · Gradle wrapper included.
 
----
+## 🔐 Notes
+Settings are stored in DataStore/SharedPreferences only (no account, no keys in code). Custom sources may fetch plain HTTP by explicit user configuration.
 
-## ⚙️ پیش‌نیازها و مشخصات نرم‌افزاری
-
-- **حداقل اندروید:** نسخه ۸.۰ (API 26) به بالا — سازگار با اندروید ۹، ۱۰، ۱۱، ۱۲، ۱۳، ۱۴ و ۱۵
-- **زبان و ابزارها:** Kotlin 2.0.20 + Jetpack Compose + Material 3 + Gradle 8.7 + AGP 8.5.2 + JDK 17
-- **پایداری شبکه:** بهره‌گیری از OkHttp با Retry خودکار و تنظیمات `network_security_config` برای پایداری در انواع اینترنت همراه و وای‌فای.
-
----
-
-## 📄 راهنماهای تکمیلی موجود در پروژه
-
-- **`GITHUB_APK_GUIDE_fa.md`:** راهنمای دقیق و قدم‌به‌قدم برای دریافت APK از گیت‌هاب بدون نیاز به هیچ ابزار کمکی.
-- **`preview/widget-preview.html`:** پیش‌نمایش گرافیکی و دقیق ظاهر ویجت با فونت توکار وزیرمتن در مرورگر.
+## 👤 Developer
+**Hamed Sargoli** — [hamedsargoli.ir](https://hamedsargoli.ir) — +98 912 636 8924

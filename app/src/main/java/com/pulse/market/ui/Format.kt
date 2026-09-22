@@ -9,10 +9,12 @@ object Format {
     private val grouped = DecimalFormat("#,##0")
     private val two = DecimalFormat("#,##0.00")
     private val small = DecimalFormat("0.######")
+    private val oneD = DecimalFormat("0.#")
 
-    /** قیمت را خوانا می‌کند: ۱٬۲۵۰٬۰۰۰ / ۹۸٬۴۵۰ / ۰٫۰۰۰۱۲۳ */
-    fun price(value: Double?, persian: Boolean = false): String {
+    /** قیمت را خوانا می‌کند: ۱٬۲۵۰٬۰۰۰ / ۹۸٬۴۵۰ / ۰٫۰۰۰۱۲۳ — با compact: 64.2K / ۹۸٫۴ هزار */
+    fun price(value: Double?, persian: Boolean = false, compact: Boolean = false): String {
         if (value == null) return "—"
+        if (compact && abs(value) >= 1000) return volume(value, persian)
         val a = abs(value)
         val text = when {
             a >= 1000 -> grouped.format(value)
@@ -31,6 +33,24 @@ object Format {
         }
         val text = String.format(Locale.US, "%.2f%%", abs(value))
         return "$arrow ${if (persian) toPersianDigits(text) else text}"
+    }
+
+    /** حجم معاملات/حجم ۲۴ ساعت — فرمت فشرده: ۱۲٫۴ میلیون / 3.2B */
+    fun volume(value: Double?, persian: Boolean = false): String {
+        if (value == null) return "—"
+        val a = abs(value)
+        return when {
+            a >= 1_000_000_000 -> compactNum(value / 1_000_000_000, if (persian) " میلیارد" else "B", persian)
+            a >= 1_000_000 -> compactNum(value / 1_000_000, if (persian) " میلیون" else "M", persian)
+            a >= 1_000 -> compactNum(value / 1_000, if (persian) " هزار" else "K", persian)
+            else -> grouped.format(value).let { if (persian) toPersianDigits(it) else it }
+        }
+    }
+
+    private fun compactNum(v: Double, suffix: String, persian: Boolean): String {
+        val n = if (abs(v) >= 100) grouped.format(v) else oneD.format(v)
+        val out = n + suffix
+        return if (persian) toPersianDigits(out).replace(".", "٫") else out
     }
 
     fun time(ts: Long): String {

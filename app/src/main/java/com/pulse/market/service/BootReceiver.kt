@@ -17,8 +17,7 @@ class BootReceiver : BroadcastReceiver() {
         val pending = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                val cfg = ConfigStore.current(context)
-                if (cfg.liveService) {
+                if (ConfigStore.anyLive(context)) {
                     LiveUpdateService.start(context)   // اگر اندروید اجازه نداد، بی‌صدا رد می‌شویم
                 }
                 LiveUpdateWorker.schedule(context)

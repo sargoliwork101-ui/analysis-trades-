@@ -1,15 +1,27 @@
 package com.pulse.market.data
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
 import org.jsoup.Jsoup
+import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
-/** موتور گرفتن داده از سایت‌ها (API های JSON و صفحه‌های HTML) */
+/**
+ * موتور گرفتن داده از سایت‌ها.
+ *
+ * هر منبع با کم‌ترین تعداد درخواست ممکن خوانده می‌شود:
+ *  - JSON گروهی: همه‌ی نمادها با یک HTTP (مثل CoinGecko و آینه‌ی طلا/ارز)
+ *  - JSON تکی: هر نماد یک درخواست (مثل Yahoo)
+ *  - HTML: خواندن مقدار از صفحه با سلکتور CSS
+ *  - TSE: بورس تهران — جستجوی نماد + قیمت پایانی (دو مرحله‌ای)
+ */
 object Fetcher {
 
     private const val UA =
@@ -24,128 +36,131 @@ object Fetcher {
             .build()
     }
 
-    suspend fun fetch(source: SourceDef, symbol: SymbolDef): Quote = withContext(Dispatchers.IO) {
-        val started = System.currentTimeMillis()
-        try {
-            val encodedSymbol = java.net.URLEncoder.encode(symbol.code, "UTF-8").replace("+", "%20")
-            val url = source.urlTemplate.replace("{symbol}", encodedSymbol)
-            val request = Request.Builder()
-                .url(url)
-                .header("User-Agent", UA)
-                .header("Accept-Language", "fa,en;q=0.8")
-                .header(
-                    "Accept",
-                    if (source.kind == FetchKind.JSON_REST) "application/json, text/plain, */*"
-                    else "text/html,application/xhtml+xml,*/*"
-                )
-                .apply { source.headers.forEach { (k, v) -> header(k, v) } }
-                .build()
+    /** گرفتن قیمت همه‌ی نمادهای انتخاب‌شده‌ی یک منبع */
+    suspend fun fetchAll(source: SourceDef, symbols: List<SymbolDef>): List<Quote> {
+        if (symbols.isEmpty()) return emptyList()
+        return withContext(Dispatchers.IO) {
+            when {
+                source.kind == FetchKind.TSE_TSETMC ->
+                    coroutineScope { symbols.map { s -> async { fetchTse(source, s) } }.awaitAll() }
 
-            val body: String = client.newCall(request).execute().use { resp ->
-                val text = resp.body?.string().orEmpty()
-                if (!resp.isSuccessful && text.isBlank()) error("HTTP ${resp.code}")
-                text
+                source.batchTemplate != null -> fetchBatch(source, symbols)
+
+                else ->
+                    coroutineScope { symbols.map { s -> async { fetchOne(source, s) } }.awaitAll() }
             }
-
-            val rawPrice: Double?
-            var change: Double? = null
-            var spark: List<Double> = emptyList()
-
-            when (source.kind) {
-                FetchKind.JSON_REST -> {
-                    val json: Any = runCatching { JSONObject(body) as Any }
-                        .getOrElse { JSONArray(body) as Any }
-                    val directPrice = JsonPath.readDouble(json, source.pricePath?.replace("{symbol}", symbol.code))
-                    // اگر TSETMC است و قیمت مستقیم نیامد، آخرین معامله یا closingPriceInfo را بررسی کن
-                    rawPrice = directPrice ?: if (source.id == "tse_tsetmc" || source.urlTemplate.contains("tsetmc.com")) {
-                        JsonPath.readDouble(json, "instrumentSearch[0].pDrCotVal")
-                            ?: JsonPath.readDouble(json, "closingPriceInfo.pClosing")
-                            ?: JsonPath.readDouble(json, "closingPriceInfo.pDrCotVal")
-                    } else null
-
-                    change = readChange(json, source, symbol, rawPrice)
-                    spark = readSpark(json, source, symbol)
-                }
-
-                FetchKind.HTML_CSS -> {
-                    val doc = Jsoup.parse(body, url)
-                    val selector = source.cssSelector
-                    val el = if (selector.isNullOrBlank()) {
-                        null
-                    } else {
-                        runCatching { doc.selectFirst(selector) }.getOrNull()
-                            ?: runCatching { doc.select(selector).firstOrNull() }.getOrNull()
-                    }
-                    val raw = when {
-                        el == null -> error("سلکتور در صفحه پیدا نشد")
-                        source.cssAttr.isNullOrBlank() -> el.text()
-                        else -> el.attr(source.cssAttr)
-                    }
-                    rawPrice = Num.parse(raw)
-                    change = null
-                }
-            }
-
-            val scaled = rawPrice?.let { it * source.scale }
-            Quote(
-                code = symbol.code,
-                label = symbol.label,
-                price = scaled,
-                changePct = change,
-                unit = source.unit,
-                error = if (scaled == null) "داده پیدا نشد" else null,
-                ts = started,
-                spark = spark
-            )
-        } catch (t: Throwable) {
-            Quote(
-                code = symbol.code,
-                label = symbol.label,
-                error = t.message?.take(60) ?: "خطای شبکه",
-                unit = source.unit,
-                ts = started
-            )
         }
     }
 
-    /** خواندن سری اعداد برای نمودار مینیاتوری */
-    private fun readSpark(json: Any, source: SourceDef, symbol: SymbolDef): List<Double> {
-        val path = source.sparkPath?.replace("{symbol}", symbol.code) ?: return emptyList()
-        val arr = JsonPath.read(json, path) as? JSONArray ?: return emptyList()
-        val out = ArrayList<Double>(arr.length())
-        for (i in 0 until arr.length()) {
-            val v = arr.opt(i)
-            val d = when (v) {
-                is Number -> v.toDouble()
-                is String -> Num.parse(v)
-                else -> null
-            }
-            if (d != null) { out.add(d * source.scale); if (out.size >= 48) break }
+    /** گرفتن قیمت یک نماد (برای دکمه‌ی «تست داده» و منابع دلخواه) */
+    suspend fun fetch(source: SourceDef, symbol: SymbolDef): Quote =
+        withContext(Dispatchers.IO) { fetchOne(source, symbol) }
+
+    // ───────────────────── انواع خواندن ─────────────────────
+
+    private suspend fun fetchOne(source: SourceDef, sym: SymbolDef): Quote = when (source.kind) {
+        FetchKind.TSE_TSETMC -> fetchTse(source, sym)
+        FetchKind.JSON_REST -> try {
+            quoteFromJson(source, sym, parseJson(get(url(source, sym.code), source)))
+        } catch (t: Throwable) {
+            errorQuote(source, sym, t)
         }
-        return if (out.size >= 3) out else emptyList()
+
+        FetchKind.HTML_CSS -> fetchHtml(source, sym)
+    }
+
+    /** یک درخواست برای همه‌ی نمادها؛ اگر شکست خورد به فچ تکی برمی‌گردد */
+    private suspend fun fetchBatch(source: SourceDef, symbols: List<SymbolDef>): List<Quote> {
+        return try {
+            val joined = symbols.joinToString(",") { enc(it.code) }
+            val batchUrl = source.batchTemplate!!.replace("{symbols}", joined)
+            val json = parseJson(get(batchUrl, source))
+            symbols.map { quoteFromJson(source, it, json) }
+        } catch (_: Throwable) {
+            // اگر درخواست گروهی شکست خورد، تک‌تک امتحان کن
+            coroutineScope { symbols.map { s -> async { fetchOne(source, s) } }.awaitAll() }
+        }
+    }
+
+    private suspend fun fetchTse(source: SourceDef, sym: SymbolDef): Quote {
+        val started = System.currentTimeMillis()
+        return try {
+            val inst = TseService.fetchQuote(sym.code)
+            val price = inst.closePrice ?: inst.lastPrice
+            Quote(
+                code = sym.code, sourceId = source.id,
+                label = sym.label.ifBlank { inst.name },
+                price = price,
+                changePct = inst.changePct,
+                volume = inst.volume,
+                unit = source.unit,
+                error = if (price == null) "قیمت پیدا نشد" else null,
+                ts = started
+            )
+        } catch (t: Throwable) {
+            errorQuote(source, sym, t, started)
+        }
+    }
+
+    private fun fetchHtml(source: SourceDef, sym: SymbolDef): Quote {
+        val started = System.currentTimeMillis()
+        return try {
+            val body = get(url(source, sym.code), source)
+            val doc = Jsoup.parse(body, url(source, sym.code))
+            val selector = source.cssSelector
+            val el = if (selector.isNullOrBlank()) {
+                error("سلکتور CSS برای منبع HTML تعریف نشده")
+            } else {
+                runCatching { doc.selectFirst(selector) ?: doc.select(selector).firstOrNull() }.getOrNull()
+                    ?: error("سلکتور در صفحه پیدا نشد")
+            }
+            val raw = if (source.cssAttr.isNullOrBlank()) el.text() else el.attr(source.cssAttr)
+            val scaled = Num.parse(raw)?.let { it * source.scale }
+            Quote(
+                code = sym.code, sourceId = source.id, label = sym.label, price = scaled, unit = source.unit,
+                error = if (scaled == null) "«$raw» عدد نبود" else null,
+                ts = started
+            )
+        } catch (t: Throwable) {
+            errorQuote(source, sym, t, started)
+        }
+    }
+
+    // ───────────────────── ساخت Quote از JSON ─────────────────────
+
+    private fun quoteFromJson(source: SourceDef, sym: SymbolDef, json: Any): Quote {
+        val started = System.currentTimeMillis()
+        val rawPrice = JsonPath.readDouble(json, source.pricePath?.replace("{symbol}", sym.code))
+        val change = readChange(json, source, sym, rawPrice)
+        val spark = JsonPath.readDoubleList(json, source.sparkPath?.replace("{symbol}", sym.code))
+            .map { it * source.scale }
+            .let { if (it.size >= 3) it.takeLast(48) else emptyList() }
+        val scaled = rawPrice?.let { it * source.scale }
+        return Quote(
+            code = sym.code, sourceId = source.id,
+            label = sym.label,
+            price = scaled,
+            changePct = change,
+            volume = readVolume(json, source, sym),
+            unit = source.unit,
+            error = if (scaled == null) "قیمت در پاسخ پیدا نشد" else null,
+            ts = started,
+            spark = spark
+        )
+    }
+
+    /** حجم معاملات/حجم ۲۴ ساعت — عدد یا آرایه‌ی میله‌ها (که جمع زده می‌شود) */
+    private fun readVolume(json: Any, source: SourceDef, sym: SymbolDef): Double? {
+        val path = source.volumePath?.replace("{symbol}", sym.code) ?: return null
+        JsonPath.readDouble(json, path)?.let { return it * source.scale }
+        val list = JsonPath.readDoubleList(json, path)
+        return if (list.isEmpty()) null else list.sum() * source.scale
     }
 
     /** تبدیل عدد «تغییر» سایت به درصد، بر اساس حالت انتخاب‌شده */
-    private fun readChange(json: Any, source: SourceDef, symbol: SymbolDef, rawPrice: Double?): Double? {
-        // برای بورس تهران (TSETMC) اگر دیتای دیروز وجود دارد، درصد تغییر رسمی روز را حساب کن
-        if (source.id == "tse_tsetmc" || source.urlTemplate.contains("tsetmc.com")) {
-            val pClosing = rawPrice
-                ?: JsonPath.readDouble(json, "instrumentSearch[0].pClosing")
-                ?: JsonPath.readDouble(json, "closingPriceInfo.pClosing")
-            val pYesterday = JsonPath.readDouble(json, "instrumentSearch[0].priceYesterday")
-                ?: JsonPath.readDouble(json, "closingPriceInfo.priceYesterday")
-            if (pClosing != null && pYesterday != null && pYesterday > 0.0) {
-                return ((pClosing - pYesterday) / pYesterday) * 100.0
-            }
-            val pChange = JsonPath.readDouble(json, "instrumentSearch[0].priceChange")
-                ?: JsonPath.readDouble(json, "closingPriceInfo.priceChange")
-            if (pChange != null && pYesterday != null && pYesterday > 0.0) {
-                return (pChange / pYesterday) * 100.0
-            }
-        }
-
+    private fun readChange(json: Any, source: SourceDef, sym: SymbolDef, rawPrice: Double?): Double? {
         if (source.changeMode == ChangeMode.NONE) return null
-        val raw = JsonPath.readDouble(json, source.changePath?.replace("{symbol}", symbol.code)) ?: return null
+        val raw = JsonPath.readDouble(json, source.changePath?.replace("{symbol}", sym.code)) ?: return null
         return when (source.changeMode) {
             ChangeMode.PERCENT -> raw
             ChangeMode.ABSOLUTE -> {
@@ -153,11 +168,58 @@ object Fetcher {
                 val base = (price / source.scale) - raw
                 if (base == 0.0) null else (raw / base) * 100.0
             }
+
             ChangeMode.PREV_CLOSE -> {
                 val price = rawPrice ?: return null
                 if (raw == 0.0) null else ((price / source.scale - raw) / raw) * 100.0
             }
+
             ChangeMode.NONE -> null
         }
     }
+
+    // ───────────────────── ابزارهای HTTP ─────────────────────
+
+    private fun url(source: SourceDef, code: String): String =
+        source.urlTemplate.replace("{symbol}", enc(code))
+
+    private fun get(url: String, source: SourceDef): String {
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", UA)
+            .header("Accept-Language", "fa,en;q=0.8")
+            .header(
+                "Accept",
+                if (source.kind == FetchKind.HTML_CSS) "text/html,application/xhtml+xml,*/*"
+                else "application/json, text/plain, */*"
+            )
+            .apply { source.headers.forEach { (k, v) -> header(k, v) } }
+            .build()
+        return client.newCall(request).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) {
+                error("HTTP ${resp.code}" + if (text.isNotBlank()) " — ${text.trim().take(60)}" else "")
+            }
+            text
+        }
+    }
+
+    private fun parseJson(body: String): Any =
+        runCatching { JSONObject(body) as Any }.getOrElse { JSONArray(body) as Any }
+
+    private fun enc(code: String): String =
+        URLEncoder.encode(code, "UTF-8").replace("+", "%20")
+
+    private fun errorQuote(
+        source: SourceDef,
+        sym: SymbolDef,
+        t: Throwable,
+        started: Long = System.currentTimeMillis()
+    ): Quote = Quote(
+        code = sym.code, sourceId = source.id,
+        label = sym.label,
+        error = t.message?.take(80) ?: "خطای شبکه",
+        unit = source.unit,
+        ts = started
+    )
 }

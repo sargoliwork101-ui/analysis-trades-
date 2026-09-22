@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - master
+      - 'arena/**'
     tags:
       - 'v*'
   workflow_dispatch:
@@ -32,12 +33,24 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build Debug APK
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        run: |
+          set +e
+          ./gradlew assembleDebug --no-daemon --stacktrace > build.log 2>&1
+          code=$?
+          tail -n 40 build.log
+          if [ "$code" -ne 0 ]; then
+            emit() { enc="${1//'%'/'%25'}"; enc="${enc//$'\r'/'%0D'}"; enc="${enc//$'\n'/'%0A'}"; echo "::error::${enc}"; }
+            grep -E "^(e: |error: |Error: )" build.log | head -n 15 | while IFS= read -r line; do emit "$line"; done
+            grep -E "FAILED|FAILURE:" build.log | head -n 6 | while IFS= read -r line; do emit "$line"; done
+            awk '/\* What went wrong:/{f=1} f{print; c++} c>12{exit}' build.log | while IFS= read -r line; do emit "$line"; done
+          fi
+          exit "$code"
 
       - name: Rename APK for Easy Download
         run: |
+          VER=$(grep -o 'versionName = "[^"]*"' app/build.gradle.kts | cut -d'"' -f2)
           mkdir -p build-output
-          cp app/build/outputs/apk/debug/app-debug.apk build-output/PulseMarket-v1.0.apk
+          cp app/build/outputs/apk/debug/app-debug.apk "build-output/PulseMarket-v${VER}.apk"
           ls -la build-output/
 
       - name: Upload APK to Artifacts (Actions tab)
@@ -51,7 +64,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: build-output/PulseMarket-v1.0.apk
+          files: build-output/PulseMarket-v*.apk
           name: Release ${{ github.ref_name }}
           draft: false
           prerelease: false

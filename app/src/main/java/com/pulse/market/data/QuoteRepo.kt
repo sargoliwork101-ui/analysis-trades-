@@ -6,50 +6,166 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 
 /**
- * گرفتن قیمت‌ها به‌صورت موازی + کش کردن آخرین نتیجه،
- * تا ویجت حتی وقتی شبکه قطع است عدد قبلی را نشان بدهد.
+ * گرفتن قیمت‌ها به‌صورت موازی + کش مشترک بین ویجت‌ها:
+ * هر نماد فقط یک بار از شبکه گرفته می‌شود، حتی اگر چند ویجت آن را نشان دهند.
+ *
+ * «تاریخچه‌ی قیمت» هم اینجا نگه داشته می‌شود: با هر به‌روزرسانی سالم، یک نقطه به
+ * سری هر نماد اضافه می‌شود تا نمودار مینیاتوری (sparkline) حتی برای منابعی مثل
+ * بورس تهران که سری آماده نمی‌دهند، تدریجاً شکل بگیرد.
  */
 object QuoteRepo {
 
     private const val PREF = "pulse_cache"
     private const val KEY_QUOTES = "quotes"
+    private const val KEY_HISTORY = "price_history"
+
+    /** بیشترین نقاط تاریخچه‌ی هر نماد برای نمودار */
+    private const val HISTORY_MAX = 48
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+    private val historySerializer =
+        MapSerializer(String.serializer(), ListSerializer(Double.serializer()))
 
     private fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
 
-    fun loadCached(context: Context): List<Quote> {
-        val raw = prefs(context).getString(KEY_QUOTES, null) ?: return emptyList()
-        return runCatching {
+    /** کلید یکتای هر نماد: منبع + کد */
+    fun key(sourceId: String, code: String) = "$sourceId|$code"
+
+    // ───────────── کش ─────────────
+
+    fun loadCachedMap(context: Context): Map<String, Quote> {
+        val raw = prefs(context).getString(KEY_QUOTES, null) ?: return emptyMap()
+        val list = runCatching {
             json.decodeFromString(ListSerializer(Quote.serializer()), raw)
         }.getOrDefault(emptyList())
+        return list.associateBy { key(it.sourceId, it.code) }
     }
 
-    fun saveCached(context: Context, quotes: List<Quote>) {
+    private fun mergeCached(context: Context, fresh: List<Quote>) {
+        val merged = loadCachedMap(context).toMutableMap()
+        // فقط داده‌ی سالم (با قیمت) در کش نوشته می‌شود تا با خطا، مقدار قبلی از بین نرود
+        fresh.filter { it.price != null }.forEach { merged[key(it.sourceId, it.code)] = it }
         prefs(context).edit()
-            .putString(KEY_QUOTES, json.encodeToString(ListSerializer(Quote.serializer()), quotes))
+            .putString(
+                KEY_QUOTES,
+                json.encodeToString(ListSerializer(Quote.serializer()), merged.values.toList())
+            )
             .putLong("ts", System.currentTimeMillis())
             .apply()
     }
 
     fun lastUpdated(context: Context): Long = prefs(context).getLong("ts", 0L)
 
-    /** گرفتن همه‌ی نمادهای انتخاب‌شده به‌صورت هم‌زمان */
-    suspend fun refresh(context: Context, cfg: WidgetConfig): List<Quote> {
-        val source = ConfigStore.resolveSource(context, cfg.sourceId) ?: return emptyList()
-        val symbols = cfg.symbols.ifEmpty { source.symbols.take(cfg.rows) }
-        if (symbols.isEmpty()) return emptyList()
+    // ───────────── تاریخچه‌ی قیمت برای نمودار مینیاتوری ─────────────
 
-        val quotes = coroutineScope {
-            symbols.map { sym -> async { Fetcher.fetch(source, sym) } }.awaitAll()
+    private fun loadHistory(context: Context): MutableMap<String, List<Double>> {
+        val raw = prefs(context).getString(KEY_HISTORY, null) ?: return mutableMapOf()
+        return runCatching {
+            json.decodeFromString(historySerializer, raw)
+        }.getOrDefault(emptyMap<String, List<Double>>()).toMutableMap()
+    }
+
+    /** با هر مقدار سالم یک نقطه به سری نماد اضافه می‌شود؛ تکرارِ قیمت قبلی دوباره ثبت نمی‌شود */
+    private fun appendHistory(context: Context, fresh: List<Quote>) {
+        val good = fresh.filter { it.price != null }
+        if (good.isEmpty()) return
+        val hist = loadHistory(context)
+        good.forEach { q ->
+            val k = key(q.sourceId, q.code)
+            val series = (hist[k] ?: emptyList()).toMutableList()
+            if (series.lastOrNull() != q.price) {
+                series += q.price!!
+                hist[k] = series.takeLast(HISTORY_MAX)
+            }
+        }
+        prefs(context).edit()
+            .putString(KEY_HISTORY, json.encodeToString(historySerializer, hist))
+            .apply()
+    }
+
+    /**
+     * اگر منبع سری آماده‌ی نمودار نداده (مثل بورس تهران یا منابع دلخواه بدون sparkPath)،
+     * از تاریخچه‌ی محلی سری می‌سازد؛ سری آماده‌ی منبع همیشه اولویت دارد.
+     */
+    fun withLocalSpark(context: Context, quotes: List<Quote>): List<Quote> {
+        val hist = loadHistory(context)
+        return quotes.map { q ->
+            val local = hist[key(q.sourceId, q.code)] ?: emptyList()
+            if (q.spark.size >= 3 || local.size < 3) q else q.copy(spark = local)
+        }
+    }
+
+    // ───────────── شبکه ─────────────
+
+    /**
+     * نمادهایی که این پیکربندی باید نشان دهد:
+     * (منبع، نماد) — انتخاب صریح یا چند نماد پیش‌فرض از هر منبع
+     */
+    suspend fun wantedFor(context: Context, cfg: WidgetConfig): List<Pair<String, SymbolDef>> {
+        val sourceIds = cfg.activeSourceIds
+        return sourceIds.flatMap { sid ->
+            val syms = cfg.symbolsOf(sid).ifEmpty {
+                ConfigStore.resolveSource(context, sid)
+                    ?.symbols?.take(maxOf(1, com.pulse.market.data.MAX_SYMBOLS / sourceIds.size))
+                    ?: emptyList()
+            }
+            syms.map { sid to it }
+        }
+    }
+
+    /**
+     * گرفتن همه‌ی نمادهای همه‌ی ویجت‌ها با کم‌ترین درخواست ممکن:
+     * هر منبع فقط یک بار (و دسته‌ای) پرسیده می‌شود؛ نتیجه در کش مشترک ادغام می‌شود.
+     *
+     * اگر به‌روزرسانی نمادی شکست بخورد، «آخرین مقدار سالم» نگه داشته می‌شود و
+     * با علامت stale برمی‌گردد تا ویجت چراغ قرمز نشان دهد — هرگز داده پاک نمی‌شود.
+     */
+    suspend fun refreshMany(
+        context: Context,
+        wantedPerWidget: List<List<Pair<String, SymbolDef>>>
+    ): Map<String, Quote> {
+        val bySource: Map<String, List<SymbolDef>> = wantedPerWidget.flatten()
+            .distinctBy { it.first to it.second.code }
+            .groupBy({ it.first }, { it.second })
+        if (bySource.isEmpty()) return loadCachedMap(context)
+
+        val fetched = coroutineScope {
+            bySource.map { (sid, syms) ->
+                async {
+                    val src = ConfigStore.resolveSource(context, sid) ?: return@async emptyList()
+                    Fetcher.fetchAll(src, syms)
+                }
+            }.awaitAll().flatten()
         }
 
-        // اگر همه خطا دادند، کش قدیمی را نگه دار
-        if (quotes.any { it.price != null }) saveCached(context, quotes)
-        return quotes
+        // کش دائمی فقط با داده‌ی سالم تازه می‌شود (+ ثبت نقطه‌ی تاریخچه برای نمودار)
+        val good = fetched.filter { it.price != null }
+        if (good.isNotEmpty()) {
+            mergeCached(context, good)
+            appendHistory(context, good)
+        }
+        val cached = loadCachedMap(context)
+        val fresh = fetched.associateBy { key(it.sourceId, it.code) }
+
+        // نقشه‌ی نمایش: تازه اگر آمده؛ وگرنه آخرین مقدار سالم + علامت stale (چراغ قرمز)
+        val out = mutableMapOf<String, Quote>()
+        (cached.keys + fresh.keys).forEach { k ->
+            val f = fresh[k]
+            val c = cached[k]
+            val quote = when {
+                f != null && f.price != null -> f
+                c != null && c.price != null -> c.copy(stale = true, ts = f?.ts ?: c.ts)
+                f != null -> f
+                else -> c
+            }
+            if (quote != null) out[k] = quote
+        }
+        return out
     }
 }

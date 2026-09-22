@@ -2,6 +2,7 @@ package com.pulse.market.data
 
 import com.pulse.market.data.FetchKind.HTML_CSS
 import com.pulse.market.data.FetchKind.JSON_REST
+import com.pulse.market.data.FetchKind.TSE_TSETMC
 
 /**
  * لیست منابع آماده‌ی داخل اپ.
@@ -9,19 +10,25 @@ import com.pulse.market.data.FetchKind.JSON_REST
  */
 object SourceCatalog {
 
+    private const val MIRROR = "https://raw.githubusercontent.com/HosseinOdd/Navasan-API/main/data"
+
     val builtIn: List<SourceDef> = listOf(
 
         // ────────────────────────── کریپتو ──────────────────────────
         SourceDef(
             id = "crypto_coingecko",
             title = "کریپتو — CoinGecko",
-            subtitle = "قیمت دلاری + تغییر ۲۴ ساعت (بدون کلید API)",
+            subtitle = "قیمت دلاری + تغییر ۲۴ ساعت • به‌روزرسانی لحظه‌ای",
             kind = JSON_REST,
             urlTemplate = "https://api.coingecko.com/api/v3/simple/price" +
-                    "?ids={symbol}&vs_currencies=usd&include_24hr_change=true",
+                    "?ids={symbol}&vs_currencies=usd&include_24hr_change=true&include_24hr_vol=true",
+            // همه‌ی نمادها با یک درخواست (جلوگیری از محدودیت تعداد درخواست CoinGecko)
+            batchTemplate = "https://api.coingecko.com/api/v3/simple/price" +
+                    "?ids={symbols}&vs_currencies=usd&include_24hr_change=true&include_24hr_vol=true",
             pricePath = "{symbol}.usd",
             changePath = "{symbol}.usd_24h_change",
             changeMode = ChangeMode.PERCENT,
+            volumePath = "{symbol}.usd_24h_vol",
             unit = "$",
             symbols = listOf(
                 SymbolDef("bitcoin", "بیت‌کوین"),
@@ -39,13 +46,9 @@ object SourceCatalog {
         SourceDef(
             id = "tse_tsetmc",
             title = "بورس تهران — TSETMC",
-            subtitle = "قیمت پایانی نمادهای بورس (ریال)",
-            kind = JSON_REST,
-            // این آدرس با l18 یا نام نماد کار می‌کند
-            urlTemplate = "https://cdn.tsetmc.com/api/Instrument/GetInstrumentSearch/{symbol}",
-            pricePath = "instrumentSearch[0].pClosing",
-            changePath = "instrumentSearch[0].pDrCotVal",
-            changeMode = ChangeMode.NONE,
+            subtitle = "قیمت پایانی + درصد تغییر روز (ریال)",
+            kind = TSE_TSETMC,
+            urlTemplate = "https://cdn.tsetmc.com/api/ClosingPrice/GetClosingPriceInfo/{symbol}",
             unit = "ریال",
             symbols = listOf(
                 SymbolDef("فولاد", "فولاد مبارکه"),
@@ -53,7 +56,7 @@ object SourceCatalog {
                 SymbolDef("خساپا", "سایپا"),
                 SymbolDef("شپنا", "پالایش نفت اصفهان"),
                 SymbolDef("وبملت", "بانک ملت"),
-                SymbolDef("فملی", " ملی صنایع مس"),
+                SymbolDef("فملی", "ملی صنایع مس"),
                 SymbolDef("شستا", "سرمایه‌گذاری تأمین اجتماعی"),
                 SymbolDef("خگستر", "گسترش سرمایه‌گذاری ایران‌خودرو")
             )
@@ -62,36 +65,58 @@ object SourceCatalog {
         SourceDef(
             id = "tse_index",
             title = "شاخص کل بورس",
-            subtitle = "شاخص کل از TSETMC",
+            subtitle = "شاخص کل بازار از TSETMC",
             kind = JSON_REST,
             urlTemplate = "https://cdn.tsetmc.com/api/Index/GetIndexB1LastAll/0",
-            pricePath = "[0].lastValue",
-            changeMode = ChangeMode.NONE,
+            pricePath = "[0].lastValue | indexB1LastAll[0].lastValue | lastValue",
+            changePath = "[0].indexChange | indexB1LastAll[0].indexChange | indexChange",
+            changeMode = ChangeMode.ABSOLUTE,
             unit = "واحد",
             symbols = listOf(SymbolDef("index", "شاخص کل"))
         ),
 
         // ─────────────────────── طلا و ارز ───────────────────────
         SourceDef(
-            id = "fx_navasan",
-            title = "طلا و ارز — Navasan",
-            subtitle = "دلار، یورو، طلای ۱۸ عیار، سکه (تومان)",
+            id = "fx_rates",
+            title = "ارز — دلار، یورو، …",
+            subtitle = "نرخ ارز آزاد (تومان) • داده‌های Navasan",
             kind = JSON_REST,
-            // کلید دمو «free» هست؛ برای پایداری بیشتر از سایت navasan.tech کلید رایگان بگیر
-            urlTemplate = "https://api.navasan.tech/latest/?api_key=free&item={symbol}",
+            urlTemplate = "$MIRROR/fiat.json",
+            batchTemplate = "$MIRROR/fiat.json",
             pricePath = "{symbol}.value",
-            changePath = "{symbol}.change",
-            changeMode = ChangeMode.ABSOLUTE,
+            changePath = "{symbol}.change_pct",
+            changeMode = ChangeMode.PERCENT,
             unit = "تومان",
             symbols = listOf(
-                SymbolDef("price_dollar_rl", "دلار"),
-                SymbolDef("price_eur", "یورو"),
-                SymbolDef("price_gbp", "پوند"),
-                SymbolDef("price_aed", "درهم امارات"),
-                SymbolDef("price_try", "لیر ترکیه"),
-                SymbolDef("gold_18k", "طلای ۱۸ عیار"),
-                SymbolDef("coin_emami", "سکه امامی"),
-                SymbolDef("mesghal", "مثقال طلا")
+                SymbolDef("usd", "دلار"),
+                SymbolDef("eur", "یورو"),
+                SymbolDef("gbp", "پوند"),
+                SymbolDef("aed", "درهم امارات"),
+                SymbolDef("try", "لیر ترکیه"),
+                SymbolDef("jpy", "ین ژاپن"),
+                SymbolDef("chf", "فرانک سوئیس"),
+                SymbolDef("cny", "یوان چین")
+            )
+        ),
+
+        SourceDef(
+            id = "gold_rates",
+            title = "طلا و سکه",
+            subtitle = "طلای ۱۸ عیار، مثقال، سکه (تومان) • داده‌های Navasan",
+            kind = JSON_REST,
+            urlTemplate = "$MIRROR/gold.json",
+            batchTemplate = "$MIRROR/gold.json",
+            pricePath = "{symbol}.value",
+            changePath = "{symbol}.change_pct",
+            changeMode = ChangeMode.PERCENT,
+            unit = "تومان",
+            symbols = listOf(
+                SymbolDef("18ayar", "طلای ۱۸ عیار (گرم)"),
+                SymbolDef("gerami", "مثقال طلا"),
+                SymbolDef("sekkeh", "سکه"),
+                SymbolDef("bahar", "سکه بهار آزادی"),
+                SymbolDef("nim", "نیم‌سکه"),
+                SymbolDef("rob", "ربع‌سکه")
             )
         ),
 
@@ -107,6 +132,7 @@ object SourceCatalog {
             changePath = "chart.result[0].meta.chartPreviousClose",
             changeMode = ChangeMode.PREV_CLOSE,
             sparkPath = "chart.result[0].indicators.quote[0].close",
+            volumePath = "chart.result[0].indicators.quote[0].volume",
             unit = "$",
             symbols = listOf(
                 SymbolDef("AAPL", "اپل"),
@@ -123,11 +149,11 @@ object SourceCatalog {
         // ─────────────────── نمونه‌ی اسکرپ صفحه‌ی وب ───────────────────
         SourceDef(
             id = "web_tgju",
-            title = "نمونه‌ی اسکرپ وب — TGJU",
+            title = "نمونه‌ی اسکرپ وب — TGJU (آزمایشی)",
             subtitle = "خواندن مستقیم از HTML سایت (سلکتور قابل تغییر)",
             kind = HTML_CSS,
             urlTemplate = "https://www.tgju.org/profile/{symbol}",
-            cssSelector = "#chart-form .price, .info-price .value, span[data-col='info-last-trade']",
+            cssSelector = "span[data-col='info-last-trade'], .price, .info-price .value",
             scale = 1.0,
             unit = "تومان",
             symbols = listOf(

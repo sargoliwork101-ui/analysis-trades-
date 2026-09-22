@@ -25,7 +25,11 @@ import kotlin.math.abs
 object AlertEngine {
 
     private const val PREF = "pulse_alerts"
-    private const val CHANNEL_ID = "pulse_price_alerts"
+    // کانال جدید — الگوی ویبره‌ی قدیمیِ طولانی برای همه تعویض شود
+    private const val CHANNEL_ID = "pulse_price_alerts_v2"
+
+    /** یک «تپ» کوتاه و محتاطانه (۷۰ میلی‌ثانیه) — بدون ویبره‌ی طولانی و تکراری */
+    private val VIBRATION_PATTERN = longArrayOf(0L, 70L)
 
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
@@ -34,14 +38,19 @@ object AlertEngine {
         val rules = cfg.alerts.filter { it.enabled }
         if (rules.isEmpty() || quotes.isEmpty()) return
 
+        // خواب موقت (میتینگ/شب): در این بازه هیچ هشداری بررسی و نوتیفی نمی‌رود
+        if (isSnoozed(context)) return
+
         val now = System.currentTimeMillis()
         val cal = Calendar.getInstance().apply { timeInMillis = now }
         val minuteOfDay = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
         val dayIndex = persianDayIndex(cal.get(Calendar.DAY_OF_WEEK))
 
         for (rule in rules) {
-            val quote = quotes.firstOrNull { it.code.equals(rule.symbolCode, ignoreCase = true) }
-                ?: continue
+            val quote = quotes.firstOrNull {
+                it.code.equals(rule.symbolCode, ignoreCase = true) &&
+                        (rule.sourceId.isEmpty() || it.sourceId.isEmpty() || it.sourceId == rule.sourceId)
+            } ?: continue
             val price = quote.price ?: continue
 
             // ── زمان‌بندی: آیا همین حالا این هشدار مجاز است؟ ──
@@ -74,13 +83,12 @@ object AlertEngine {
         }
     }
 
-    private fun isTriggered(rule: AlertRule, price: Double, changePct: Double?): Boolean =
-        when (rule.condition) {
-            AlertCondition.ABOVE -> price >= rule.threshold
-            AlertCondition.BELOW -> price <= rule.threshold
-            AlertCondition.PCT_UP -> (changePct ?: return false) >= abs(rule.threshold)
-            AlertCondition.PCT_DOWN -> (changePct ?: return false) <= -abs(rule.threshold)
-        }
+    private fun isTriggered(rule: AlertRule, price: Double, changePct: Double?): Boolean = when (rule.condition) {
+        AlertCondition.ABOVE -> price >= rule.threshold
+        AlertCondition.BELOW -> price <= rule.threshold
+        AlertCondition.PCT_UP -> changePct != null && changePct >= abs(rule.threshold)
+        AlertCondition.PCT_DOWN -> changePct != null && changePct <= -abs(rule.threshold)
+    }
 
     /** بازه‌ی زمانی معمولی و بازه‌های شب‌گذر (مثلاً ۲۲:۰۰ تا ۰۶:۰۰) */
     private fun insideWindow(minute: Int, from: Int, to: Int): Boolean =
@@ -96,6 +104,26 @@ object AlertEngine {
         Calendar.THURSDAY -> 5
         else -> 6
     }
+
+    // ───────────── خواب موقت هشدارها (میتینگ/شب) ─────────────
+
+    private const val KEY_SNOOZE = "snooze_until"
+
+    fun snooze(context: Context, minutes: Int) {
+        prefs(context).edit()
+            .putLong(KEY_SNOOZE, System.currentTimeMillis() + minutes * 60_000L)
+            .apply()
+    }
+
+    fun cancelSnooze(context: Context) {
+        prefs(context).edit().remove(KEY_SNOOZE).apply()
+    }
+
+    /** ۰ یعنی بیدار؛ غیره = زمان پایان خواب (timestamp) */
+    fun snoozeUntil(context: Context): Long =
+        prefs(context).getLong(KEY_SNOOZE, 0L).takeIf { it > System.currentTimeMillis() } ?: 0L
+
+    fun isSnoozed(context: Context): Boolean = snoozeUntil(context) > 0L
 
     // ─────────────────────── نوتیف ───────────────────────
 
@@ -135,6 +163,7 @@ object AlertEngine {
             )
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setVibrate(VIBRATION_PATTERN)
             .setAutoCancel(true)
             .setContentIntent(open)
             .build()
@@ -158,6 +187,7 @@ object AlertEngine {
             .setContentTitle("🔔 نوتیف تستی")
             .setContentText("اگر این را می‌بینی، هشدارها درست کار می‌کنند.")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setVibrate(VIBRATION_PATTERN)
             .setAutoCancel(true)
             .setContentIntent(open)
             .build()
@@ -175,6 +205,7 @@ object AlertEngine {
         ).apply {
             description = "وقتی نماد به حدی که تعیین کرده‌ای رسید"
             enableVibration(true)
+            vibrationPattern = VIBRATION_PATTERN
         }
         manager.createNotificationChannel(channel)
     }

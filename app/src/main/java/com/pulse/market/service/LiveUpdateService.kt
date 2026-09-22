@@ -46,14 +46,15 @@ class LiveUpdateService : Service() {
 
     private suspend fun loop() {
         while (currentCoroutineContext().isActive) {
-            val cfg = ConfigStore.current(this)
-            if (!cfg.liveService || WidgetRenderer.allWidgetIds(this).isEmpty()) {
+            // سرویس زنده فقط وقتی لازم است که هیچ ویجتی liveService داشته باشد
+            if (!ConfigStore.anyLive(this) || WidgetRenderer.allWidgetIds(this).isEmpty()) {
                 stopSelf()
                 return
             }
-            runCatching { StockWidgetProvider.refreshAll(this, force = true) }
-            updateNotification("قیمت‌ها هر ${cfg.intervalSec} ثانیه تازه می‌شوند")
-            delay(cfg.intervalSec.coerceIn(5, 3600) * 1000L)
+            runCatching { StockWidgetProvider.refreshAll(this, force = true, respectSchedule = true) }
+            val sec = ConfigStore.minLiveInterval(this)
+            updateNotification("قیمت‌ها هر $sec ثانیه تازه می‌شوند")
+            delay(sec * 1000L)
         }
     }
 
