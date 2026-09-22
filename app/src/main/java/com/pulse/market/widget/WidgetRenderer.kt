@@ -142,13 +142,18 @@ object WidgetRenderer {
             row.setTextViewText(R.id.row_sub, text("دکمه‌ی رفرش را بزن", cfg))
             row.setTextViewText(R.id.row_price, "—")
             row.setViewVisibility(R.id.row_change, View.GONE)
+            row.setViewVisibility(R.id.row_unit, View.GONE)
             row.setViewVisibility(R.id.row_spark, View.GONE)
             views.addView(R.id.rows, row)
         } else {
             shown.forEachIndexed { i, q ->
                 views.addView(
                     R.id.rows,
-                    buildRow(context, q, cfg, pal, i, sparkVisible, subVisible, scale, blinkOn, dataStale)
+                    buildRow(
+                        context, q, cfg, pal, i, sparkVisible, subVisible, scale,
+                        blinkOn, dataStale,
+                        unitInline = sizeW >= 200
+                    )
                 )
             }
         }
@@ -215,7 +220,8 @@ object WidgetRenderer {
         subVisible: Boolean,
         scale: Float,
         blinkOn: Boolean,
-        dataStale: Boolean
+        dataStale: Boolean,
+        unitInline: Boolean
     ): RemoteViews {
         val row = RemoteViews(context.packageName, R.layout.widget_row)
         applyRowChrome(row, pal, cfg, index, scale)
@@ -234,9 +240,23 @@ object WidgetRenderer {
             if (subVisible && sub.isNotEmpty()) View.VISIBLE else View.GONE
         )
 
+        // واحد هر نماد: در ویجت پهن جلوی عدد قیمت، در ویجت باریک زیر عدد — نه زیر نام نماد
         val priceText = Format.price(q.price, cfg.persianDigits, cfg.compactNumbers)
-        row.setTextViewText(R.id.row_price, priceText)
+        val unit = q.unit.trim()
+        val inlineUnit = unitInline && unit.isNotEmpty() && q.price != null
+        row.setTextViewText(
+            R.id.row_price,
+            if (inlineUnit) text("$priceText $unit", cfg) else priceText
+        )
         row.setTextColor(R.id.row_price, if (q.price != null) pal.text else pal.sub)
+        if (!inlineUnit && unit.isNotEmpty() && q.price != null) {
+            row.setTextViewText(R.id.row_unit, text(unit, cfg))
+            row.setTextColor(R.id.row_unit, pal.sub)
+            sp(row, R.id.row_unit, SZ_SUB, scale)
+            row.setViewVisibility(R.id.row_unit, View.VISIBLE)
+        } else {
+            row.setViewVisibility(R.id.row_unit, View.GONE)
+        }
 
         val ch = q.changePct
         if (!cfg.showChange || ch == null || q.price == null) {
@@ -297,21 +317,16 @@ object WidgetRenderer {
         }
     }
 
-    /** خط دوم هر نماد: کد/واحد + حجم معاملات — هر کدام با تنظیم همان ویجت روشن/خاموش */
+    /** خط دوم هر نماد: کد نماد + حجم معاملات — واحد دیگر اینجا نمی‌شیند، کنار عدد قیمت است */
     private fun subLabel(q: Quote, cfg: WidgetConfig): String {
         // خطا فقط وقتی نشان داده می‌شود که مقداری برای نمایش نداشته باشیم؛
         // در حالت stale (آخرین مقدار سالم) عدد می‌ماند و فقط LED قرمز می‌شود
         if (q.error != null && q.price == null) return "⚠ ${q.error}"
         val parts = mutableListOf<String>()
-        if (cfg.showCode) {
-            val codeOrUnit = q.code.ifBlank { q.unit }
-            if (codeOrUnit.isNotBlank()) parts += codeOrUnit
-            else if (q.unit.isNotBlank()) parts += q.unit
-        }
+        if (cfg.showCode && q.code.isNotBlank()) parts += q.code
         if (cfg.showVolume && q.volume != null) {
             parts += "حجم ${Format.volume(q.volume, cfg.persianDigits)}"
         }
-        if (parts.isEmpty() && q.unit.isNotBlank()) parts += q.unit
         return parts.joinToString(" • ")
     }
 

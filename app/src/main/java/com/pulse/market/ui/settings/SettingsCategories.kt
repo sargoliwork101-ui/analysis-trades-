@@ -402,7 +402,7 @@ fun ValuesCategory(
                 onChange(cfg.copy(showChange = it))
             }
             RowDivider()
-            SwitchRow("کد نماد / واحد", "زیر نام نماد", cfg.showCode) {
+            SwitchRow("کد نماد", "زیر نام نماد — واحد همیشه کنار عدد قیمت می‌نشیند", cfg.showCode) {
                 onChange(cfg.copy(showCode = it))
             }
             RowDivider()

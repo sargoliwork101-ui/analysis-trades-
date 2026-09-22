@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- یک ردیف نماد به شکل کارت: (راست) LED + نام + کد/حجم | نمودار | (چپ) قیمت + تغییر -->
+<!-- یک ردیف نماد به شکل کارت: (راست) LED + نام + کد/حجم | نمودار | (چپ) قیمت/واحد + تغییر -->
 <!-- فقط کلاس‌های مجاز RemoteViews — بدون فونت سفارشی -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/row_root"
@@ -88,6 +88,17 @@
             android:textColor="#F1F5F9"
             android:textSize="14.5sp"
             android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/row_unit"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="end"
+            android:layout_marginTop="1dp"
+            android:maxLines="1"
+            android:text=""
+            android:textColor="#8B9AB1"
+            android:textSize="9.5sp" />
 
         <TextView
             android:id="@+id/row_change"
