@@ -49,22 +49,30 @@ object WidgetRenderer {
         val bgRes = when (cfg.theme) {
             WidgetTheme.DARK -> R.drawable.widget_bg_dark
             WidgetTheme.LIGHT -> R.drawable.widget_bg_light
-            WidgetTheme.AMOLED -> R.drawable.widget_bg_amoled
+            WidgetTheme.NEON -> R.drawable.widget_bg_neon
+            WidgetTheme.AURORA -> R.drawable.widget_bg_aurora
+            WidgetTheme.MOCHA -> R.drawable.widget_bg_mocha
         }
         val textColor = when (cfg.theme) {
             WidgetTheme.DARK -> 0xFFF1F5F9.toInt()
             WidgetTheme.LIGHT -> 0xFF0F172A.toInt()
-            WidgetTheme.AMOLED -> 0xFFFFFFFF.toInt()
+            WidgetTheme.NEON -> 0xFFE4F8FF.toInt()
+            WidgetTheme.AURORA -> 0xFFEDEAFF.toInt()
+            WidgetTheme.MOCHA -> 0xFFF3E9DD.toInt()
         }
         val subColor = when (cfg.theme) {
             WidgetTheme.DARK -> 0xFF8B9AB1.toInt()
             WidgetTheme.LIGHT -> 0xFF64748B.toInt()
-            WidgetTheme.AMOLED -> 0xFF7A8899.toInt()
+            WidgetTheme.NEON -> 0xFF67E8F9.toInt()
+            WidgetTheme.AURORA -> 0xFFA5B4FC.toInt()
+            WidgetTheme.MOCHA -> 0xFFC8A98E.toInt()
         }
         val dividerColor = when (cfg.theme) {
             WidgetTheme.DARK -> 0xFF1B2740.toInt()
             WidgetTheme.LIGHT -> 0xFFE2E8F0.toInt()
-            WidgetTheme.AMOLED -> 0xFF161616.toInt()
+            WidgetTheme.NEON -> 0xFF155E75.toInt()
+            WidgetTheme.AURORA -> 0xFF3E2E78.toInt()
+            WidgetTheme.MOCHA -> 0xFF3E3138.toInt()
         }
 
         views.setInt(R.id.widget_root, "setBackgroundResource", bgRes)

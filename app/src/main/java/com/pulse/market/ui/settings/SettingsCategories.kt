@@ -249,7 +249,9 @@ fun LookCategory(
             listOf(
                 WidgetTheme.DARK to "🌙 تیره",
                 WidgetTheme.LIGHT to "☀️ روشن",
-                WidgetTheme.AMOLED to "⬛ AMOLED"
+                WidgetTheme.NEON to "🌃 نئون",
+                WidgetTheme.AURORA to "🌌 شفق",
+                WidgetTheme.MOCHA to "☕ موکا"
             ).forEach { (t, label) ->
                 FilterChip(
                     selected = cfg.theme == t,
@@ -258,7 +260,15 @@ fun LookCategory(
                 )
             }
         }
-        Hint("AMOLED برای نمایشگرهای OLED و مصرف کمتر باتری • اندازه‌ی ویجت با نگه‌داشتن روی آن قابل تغییر است")
+        Hint(
+            when (cfg.theme) {
+                WidgetTheme.DARK -> "تم تیره‌ی کلاسیک"
+                WidgetTheme.LIGHT -> "روشن و تمیز"
+                WidgetTheme.NEON -> "نئون سایبرپانک با اکسنت فیروزه‌ای — ترند این روزها"
+                WidgetTheme.AURORA -> "شفق قطبی بنفش و آبی — ترند این روزها"
+                WidgetTheme.MOCHA -> "گرم و خودمانی به سبک موکا — ترند این روزها"
+            } + " • اندازه‌ی ویجت با نگه‌داشتن روی آن قابل تغییر است"
+        )
     }
 }
 

@@ -32,7 +32,12 @@ object ConfigStore {
     private val KEY_CONFIG = stringPreferencesKey("widget_config")      // قدیمی (تک‌تنظیماتی)
     private val KEY_WIDGETS = stringPreferencesKey("widgets_config")    // جدید (هر ویجت جدا)
 
-    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+    private val json = Json {
+        ignoreUnknownKeys = true
+        encodeDefaults = true
+        // مثلاً تم قدیمی AMOLED که دیگر وجود ندارد ← پیش‌فرض، بدون از دست رفتن بقیه‌ی تنظیمات
+        coerceInputValues = true
+    }
 
     // ───────────── بارگذاری/ذخیره ─────────────
 

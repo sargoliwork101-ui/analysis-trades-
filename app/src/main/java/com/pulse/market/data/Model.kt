@@ -82,7 +82,7 @@ data class Quote(
 
 /** تم ویجت */
 @Serializable
-enum class WidgetTheme { DARK, LIGHT, AMOLED }
+enum class WidgetTheme { DARK, LIGHT, NEON, AURORA, MOCHA }
 
 /** تنظیمات کاربر برای ویجت */
 @Serializable
