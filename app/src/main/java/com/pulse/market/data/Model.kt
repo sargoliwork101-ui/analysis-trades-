@@ -43,6 +43,8 @@ data class SourceDef(
     val subtitle: String = "",
     val kind: FetchKind = FetchKind.JSON_REST,
     val urlTemplate: String,
+    /** الگوی درخواست گروهی همه‌ی نمادها با یک HTTP (برای جلوگیری از rate-limit) — جای {symbols} */
+    val batchTemplate: String? = null,
     val pricePath: String? = null,
     val changePath: String? = null,
     val changeMode: ChangeMode = ChangeMode.PERCENT,

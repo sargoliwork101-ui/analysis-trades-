@@ -18,11 +18,12 @@
         android:gravity="center_vertical"
         android:orientation="horizontal">
 
-        <View
+        <ImageView
             android:id="@+id/dot_live"
             android:layout_width="7dp"
             android:layout_height="7dp"
-            android:background="@drawable/dot_idle" />
+            android:contentDescription="@null"
+            android:src="@drawable/dot_idle" />
 
         <TextView
             android:id="@+id/txt_title"

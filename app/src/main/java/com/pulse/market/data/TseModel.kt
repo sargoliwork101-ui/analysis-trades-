@@ -278,10 +278,71 @@ object TseService {
         )
     }
 
+    /**
+     * گرفتن قیمت یک نماد بورس تهران در دو مرحله:
+     * ۱) پیدا کردن insCode (کد عددی، کاتالوگ داخلی یا جستجوی آنلاین)
+     * ۲) خواندن قیمت پایانی/آخرین معامله و درصد تغییر از سرویس ClosingPrice
+     */
+    suspend fun fetchQuote(code: String): TseInstrument {
+        val resolved = resolve(code)
+        val closing = fetchClosing(resolved.insCode)
+        return resolved.copy(
+            lastPrice = closing.last ?: resolved.lastPrice,
+            closePrice = closing.close ?: resolved.closePrice,
+            changePct = closing.changePct ?: resolved.changePct
+        )
+    }
+
+    private suspend fun resolve(code: String): TseInstrument {
+        // کد عددی insCode مستقیم
+        if (code.matches(Regex("\\d{8,20}"))) {
+            return fetchByInsCode(code) ?: TseInstrument(code, code, "نماد $code")
+        }
+        // کاتالوگ داخلی — سریع و آفلاین
+        POPULAR_INSTRUMENTS.firstOrNull {
+            it.symbol == code || it.name == code || it.insCode == code
+        }?.let { return it }
+        // جستجوی آنلاین
+        val results = search(code)
+        return results.firstOrNull { it.symbol.equals(code, ignoreCase = true) }
+            ?: results.firstOrNull()
+            ?: TseInstrument(code, code, code)
+    }
+
+    private data class Closing(val close: Double?, val last: Double?, val changePct: Double?)
+
+    private fun fetchClosing(insCode: String): Closing {
+        return try {
+            val req = Request.Builder()
+                .url("https://cdn.tsetmc.com/api/ClosingPrice/GetClosingPriceInfo/$insCode")
+                .header("User-Agent", UA)
+                .header("Accept", "application/json, text/plain, */*")
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@use Closing(null, null, null)
+                val root = runCatching { JSONObject(resp.body?.string().orEmpty()) }.getOrNull()
+                    ?: return@use Closing(null, null, null)
+                val info = root.optJSONObject("closingPriceInfo") ?: root
+                val close = info.optDouble("pClosing", 0.0).takeIf { it > 0 }
+                val last = info.optDouble("pDrCotVal", 0.0).takeIf { it > 0 }
+                val yesterday = info.optDouble("priceYesterday", 0.0)
+                val change = info.optDouble("priceChange", 0.0)
+                val price = close ?: last
+                val pct = when {
+                    price != null && yesterday > 0 -> ((price - yesterday) / yesterday) * 100.0
+                    change != 0.0 && yesterday > 0 -> (change / yesterday) * 100.0
+                    else -> null
+                }
+                Closing(close, last, pct)
+            }
+        } catch (_: Throwable) {
+            Closing(null, null, null)
+        }
+    }
+
     private fun parseSearchResponse(body: String): List<TseInstrument> {
         val list = mutableListOf<TseInstrument>()
-        val root = runCatching { JSONObject(body) }.getOrNull() ?: return list
-        val arr = root.optJSONArray("instrumentSearch") ?: return list
+        val arr = parseArray(body, "instrumentSearch") ?: return list
 
         for (i in 0 until arr.length()) {
             val item = arr.optJSONObject(i) ?: continue
@@ -310,5 +371,17 @@ object TseService {
             }
         }
         return list
+    }
+
+    /** آرایه را از پاسخ خام `[...]` یا پیچیده `{"instrumentSearch":[...]}` بیرون می‌کشد */
+    private fun parseArray(body: String, vararg keys: String): JSONArray? {
+        runCatching { JSONArray(body) }.getOrNull()?.let { return it }
+        val root = runCatching { JSONObject(body) }.getOrNull() ?: return null
+        for (k in keys) root.optJSONArray(k)?.let { return it }
+        val names = root.keys()
+        while (names.hasNext()) {
+            root.optJSONArray(names.next())?.let { return it }
+        }
+        return null
     }
 }

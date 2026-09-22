@@ -264,7 +264,12 @@ fun TseSearchDialog(
                             inst = inst,
                             isAdded = isAlreadyAdded,
                             onAdd = {
-                                onAddSymbol(SymbolDef(code = inst.symbol, label = inst.symbol))
+                                onAddSymbol(
+                                    SymbolDef(
+                                        code = inst.symbol,
+                                        label = inst.name.ifBlank { inst.symbol }
+                                    )
+                                )
                             }
                         )
                     }

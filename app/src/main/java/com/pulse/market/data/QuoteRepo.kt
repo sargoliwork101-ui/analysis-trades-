@@ -2,9 +2,6 @@ package com.pulse.market.data
 
 import android.content.Context
 import android.content.SharedPreferences
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 
@@ -38,15 +35,13 @@ object QuoteRepo {
 
     fun lastUpdated(context: Context): Long = prefs(context).getLong("ts", 0L)
 
-    /** گرفتن همه‌ی نمادهای انتخاب‌شده به‌صورت هم‌زمان */
+    /** گرفتن همه‌ی نمادهای انتخاب‌شده با کم‌ترین تعداد درخواست شبکه */
     suspend fun refresh(context: Context, cfg: WidgetConfig): List<Quote> {
         val source = ConfigStore.resolveSource(context, cfg.sourceId) ?: return emptyList()
         val symbols = cfg.symbols.ifEmpty { source.symbols.take(cfg.rows) }
         if (symbols.isEmpty()) return emptyList()
 
-        val quotes = coroutineScope {
-            symbols.map { sym -> async { Fetcher.fetch(source, sym) } }.awaitAll()
-        }
+        val quotes = Fetcher.fetchAll(source, symbols)
 
         // اگر همه خطا دادند، کش قدیمی را نگه دار
         if (quotes.any { it.price != null }) saveCached(context, quotes)
