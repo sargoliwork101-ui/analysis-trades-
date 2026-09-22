@@ -185,7 +185,7 @@ fun SettingsScreen(fromWidget: Boolean, onApply: (WidgetConfig) -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 if (fromWidget) {
-                    InfoCard("منابع و نمادها را انتخاب کن و «ذخیره و به‌روزرسانی» را بزن.")
+                    InfoCard("منابع و نمادها را انتخاب کن و «ذخیره و افزودن ویجت» را بزن — با برگشتن هم ویجت با تنظیمات فعلی اضافه می‌شود.")
                 }
 
                 when (category) {
@@ -353,7 +353,7 @@ fun SettingsScreen(fromWidget: Boolean, onApply: (WidgetConfig) -> Unit) {
                                         LiveUpdateService.stop(context)
                                         LiveUpdateWorker.cancel(context)
                                     }
-                                    testResult = "ذخیره شد ✓ ویجت به‌روزرسانی شد."
+                                    testResult = if (fromWidget) "ذخیره شد ✓ ویجت اضافه شد." else "ذخیره شد ✓ ویجت به‌روزرسانی شد."
                                     busy = false
                                 }
                                 onApply(cfg)
@@ -365,7 +365,7 @@ fun SettingsScreen(fromWidget: Boolean, onApply: (WidgetConfig) -> Unit) {
                                 contentDescription = null
                             )
                             Spacer(Modifier.padding(3.dp))
-                            Text("ذخیره و به‌روزرسانی", fontSize = 12.sp)
+                            Text(if (fromWidget) "ذخیره و افزودن ویجت" else "ذخیره و به‌روزرسانی", fontSize = 12.sp)
                         }
                     }
                 }

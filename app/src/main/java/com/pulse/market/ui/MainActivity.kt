@@ -4,6 +4,7 @@ import android.appwidget.AppWidgetManager
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
@@ -19,7 +20,20 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        widgetId = intent?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, 0) ?: 0
+        readWidgetId(intent)
+
+        // در جریان «افزودن ویجت»، حتی با دکمه‌ی برگشت هم ویجت اضافه شود
+        // (اگر نتیجه cancel شود، لانچر پیام Couldn't add widget را نشان می‌دهد)
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (widgetId != 0) {
+                    closeAsConfigure()
+                } else {
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                }
+            }
+        })
 
         setContent {
             PulseTheme {
@@ -33,9 +47,24 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** اگر از دکمه‌ی «افزودن ویجت» باز شده باشیم، باید نتیجه را به لانچر برگردانیم */
+    /** با singleTop ممکن است اکتیویتی زنده بماند و ویجت بعدی از onNewIntent بیاید */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        readWidgetId(intent)
+    }
+
+    private fun readWidgetId(intent: Intent?) {
+        widgetId = intent?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, 0) ?: 0
+    }
+
+    /** ذخیره‌ی تنظیمات + پایان جریان افزودن ویجت */
     private fun finishConfigure(cfg: WidgetConfig) {
         StockWidgetProvider.requestUpdate(this)
+        closeAsConfigure()
+    }
+
+    /** نتیجه‌ی موفق به لانچر — بدون این خط، ویجت اضافه نمی‌شود */
+    private fun closeAsConfigure() {
         if (widgetId != 0) {
             setResult(
                 RESULT_OK,

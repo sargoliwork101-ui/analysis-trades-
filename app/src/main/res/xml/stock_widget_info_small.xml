@@ -13,4 +13,4 @@
     android:targetCellWidth="2"
     android:updatePeriodMillis="0"
     android:widgetCategory="home_screen"
-    android:widgetFeatures="reconfigurable" />
+    android:widgetFeatures="reconfigurable|configuration_optional" />
