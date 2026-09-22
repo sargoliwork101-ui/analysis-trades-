@@ -118,10 +118,10 @@ open class StockWidgetProvider : AppWidgetProvider() {
         fun renderAll(context: Context, cfg: WidgetConfig, quotes: List<Quote>) {
             val ids = WidgetRenderer.allWidgetIds(context)
             if (ids.isEmpty()) return
-            val ids = cfg.activeSourceIds
+            val sourceIds = cfg.activeSourceIds
             val sourceTitle = when {
-                ids.size == 1 ->
-                    SourceCatalog.byId(ids.first())?.title?.substringBefore(" —") ?: "منبع دلخواه"
+                sourceIds.size == 1 ->
+                    SourceCatalog.byId(sourceIds.first())?.title?.substringBefore(" —") ?: "منبع دلخواه"
                 else -> "نبض بازار"
             }
             val updatedAt = QuoteRepo.lastUpdated(context).takeIf { it > 0 } ?: System.currentTimeMillis()
