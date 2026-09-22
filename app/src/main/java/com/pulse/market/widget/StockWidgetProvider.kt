@@ -4,6 +4,7 @@ import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
 import android.content.Context
 import android.content.Intent
+import android.os.Bundle
 import com.pulse.market.data.AlertEngine
 import com.pulse.market.data.ConfigStore
 import com.pulse.market.data.Quote
@@ -16,7 +17,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-class StockWidgetProvider : AppWidgetProvider() {
+open class StockWidgetProvider : AppWidgetProvider() {
 
     override fun onUpdate(
         context: Context,
@@ -27,6 +28,24 @@ class StockWidgetProvider : AppWidgetProvider() {
         scope.launch {
             try {
                 refreshAll(context)
+            } finally {
+                pending.finish()
+            }
+        }
+    }
+
+    /** با تغییر اندازه‌ی ویجت (کشیدن گوشه‌ها)، محتوا دوباره با اندازه‌ی جدید رندر می‌شود */
+    override fun onAppWidgetOptionsChanged(
+        context: Context,
+        appWidgetManager: AppWidgetManager,
+        appWidgetId: Int,
+        newOptions: Bundle
+    ) {
+        super.onAppWidgetOptionsChanged(context, appWidgetManager, appWidgetId, newOptions)
+        val pending = goAsync()
+        scope.launch {
+            try {
+                renderAll(context, ConfigStore.current(context), QuoteRepo.loadCached(context))
             } finally {
                 pending.finish()
             }
@@ -99,7 +118,12 @@ class StockWidgetProvider : AppWidgetProvider() {
         fun renderAll(context: Context, cfg: WidgetConfig, quotes: List<Quote>) {
             val ids = WidgetRenderer.allWidgetIds(context)
             if (ids.isEmpty()) return
-            val sourceTitle = SourceCatalog.byId(cfg.sourceId)?.title?.substringBefore(" —") ?: "منبع دلخواه"
+            val ids = cfg.activeSourceIds
+            val sourceTitle = when {
+                ids.size == 1 ->
+                    SourceCatalog.byId(ids.first())?.title?.substringBefore(" —") ?: "منبع دلخواه"
+                else -> "نبض بازار"
+            }
             val updatedAt = QuoteRepo.lastUpdated(context).takeIf { it > 0 } ?: System.currentTimeMillis()
             ids.forEach { id ->
                 WidgetRenderer.render(
@@ -128,3 +152,9 @@ class StockWidgetProvider : AppWidgetProvider() {
         }
     }
 }
+
+/** ویجت کوچک (۲×۱) — یک ردیف، مناسب فضای کم */
+class SmallWidgetProvider : StockWidgetProvider()
+
+/** ویجت بزرگ (۴×۳) — تا ۴ ردیف با نمودار */
+class LargeWidgetProvider : StockWidgetProvider()

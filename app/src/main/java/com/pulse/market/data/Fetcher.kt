@@ -88,7 +88,7 @@ object Fetcher {
             val inst = TseService.fetchQuote(sym.code)
             val price = inst.closePrice ?: inst.lastPrice
             Quote(
-                code = sym.code,
+                code = sym.code, sourceId = source.id,
                 label = sym.label.ifBlank { inst.name },
                 price = price,
                 changePct = inst.changePct,
@@ -116,7 +116,7 @@ object Fetcher {
             val raw = if (source.cssAttr.isNullOrBlank()) el.text() else el.attr(source.cssAttr)
             val scaled = Num.parse(raw)?.let { it * source.scale }
             Quote(
-                code = sym.code, label = sym.label, price = scaled, unit = source.unit,
+                code = sym.code, sourceId = source.id, label = sym.label, price = scaled, unit = source.unit,
                 error = if (scaled == null) "«$raw» عدد نبود" else null,
                 ts = started
             )
@@ -136,7 +136,7 @@ object Fetcher {
             .let { if (it.size >= 3) it.takeLast(48) else emptyList() }
         val scaled = rawPrice?.let { it * source.scale }
         return Quote(
-            code = sym.code,
+            code = sym.code, sourceId = source.id,
             label = sym.label,
             price = scaled,
             changePct = change,
@@ -206,7 +206,7 @@ object Fetcher {
         t: Throwable,
         started: Long = System.currentTimeMillis()
     ): Quote = Quote(
-        code = sym.code,
+        code = sym.code, sourceId = source.id,
         label = sym.label,
         error = t.message?.take(80) ?: "خطای شبکه",
         unit = source.unit,

@@ -9,7 +9,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -68,7 +67,7 @@ import kotlinx.coroutines.launch
 
 /** دسته‌های صفحه‌ی تنظیمات */
 enum class SettingsCategory(val title: String) {
-    SOURCES("📡 منبع داده"),
+    SOURCES("📡 منابع داده"),
     SYMBOLS("📈 نمادها"),
     LOOK("🎨 ظاهر و سرعت"),
     ALERTS("🔔 هشدارها")
@@ -76,10 +75,10 @@ enum class SettingsCategory(val title: String) {
 
 /**
  * صفحه‌ی تنظیمات با چهار دسته‌بندی:
- * منبع داده • نمادها • ظاهر و سرعت • هشدارها
+ * منابع داده (چند انتخابی) • نمادها • ظاهر و سرعت • هشدارها
  * نوار پایین همیشه دکمه‌های «تست داده» و «ذخیره و به‌روزرسانی» را دارد.
  */
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(fromWidget: Boolean, onApply: (WidgetConfig) -> Unit) {
 
@@ -128,13 +127,8 @@ fun SettingsScreen(fromWidget: Boolean, onApply: (WidgetConfig) -> Unit) {
     }
 
     val allSources = SourceCatalog.all(customSources)
-    val currentSource = allSources.firstOrNull { it.id == cfg.sourceId } ?: allSources.first()
-    val isTseSource = currentSource.id == "tse_tsetmc"
-    val availableSymbols = if (isTseSource) {
-        (currentSource.symbols + tseCustomSymbols).distinctBy { it.code }
-    } else {
-        currentSource.symbols
-    }
+    val selectedIds = cfg.activeSourceIds
+    val selectedSources = allSources.filter { it.id in selectedIds }
 
     // ─── اسکلت صفحه ───
 
@@ -191,25 +185,48 @@ fun SettingsScreen(fromWidget: Boolean, onApply: (WidgetConfig) -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 if (fromWidget) {
-                    InfoCard("منبع و نمادها را انتخاب کن و «ذخیره و به‌روزرسانی» را بزن.")
+                    InfoCard("منابع و نمادها را انتخاب کن و «ذخیره و به‌روزرسانی» را بزن.")
                 }
 
                 when (category) {
                     SettingsCategory.SOURCES -> SourcesCategory(
                         allSources = allSources,
-                        selectedId = cfg.sourceId,
-                        onSelect = { src ->
-                            cfg = cfg.copy(sourceId = src.id, symbols = src.symbols.take(cfg.rows))
+                        selectedIds = selectedIds,
+                        onToggle = { src ->
+                            val ids = selectedIds.toMutableList()
+                            if (src.id in ids) {
+                                ids.remove(src.id)
+                                if (ids.isEmpty()) ids.add(src.id) // حداقل یک منبع روشن بماند
+                                cfg = cfg.copy(
+                                    sourceIds = ids,
+                                    sourceId = ids.first(),
+                                    symbols = cfg.symbols.filterNot { it.sourceId == src.id }
+                                )
+                            } else {
+                                ids.add(src.id)
+                                val room = (4 - cfg.symbols.size).coerceAtLeast(0)
+                                cfg = cfg.copy(
+                                    sourceIds = ids,
+                                    sourceId = ids.first(),
+                                    symbols = cfg.symbols +
+                                            src.symbols.take(minOf(room, maxOf(1, 4 / (ids.size)))).map {
+                                                it.copy(sourceId = src.id)
+                                            }
+                                )
+                            }
                         },
                         onDelete = { src ->
                             scope.launch {
                                 val list = customSources.filterNot { it.id == src.id }
                                 ConfigStore.saveCustomSources(context, list)
                                 customSources = list
-                                if (cfg.sourceId == src.id) {
+                                if (src.id in cfg.activeSourceIds) {
+                                    val ids = cfg.activeSourceIds.filterNot { it == src.id }
+                                        .ifEmpty { listOf(SourceCatalog.builtIn.first().id) }
                                     cfg = cfg.copy(
-                                        sourceId = SourceCatalog.builtIn.first().id,
-                                        symbols = SourceCatalog.builtIn.first().symbols.take(cfg.rows)
+                                        sourceIds = ids,
+                                        sourceId = ids.first(),
+                                        symbols = cfg.symbols.filterNot { it.sourceId == src.id }
                                     )
                                     ConfigStore.save(context, cfg)
                                 }
@@ -219,14 +236,17 @@ fun SettingsScreen(fromWidget: Boolean, onApply: (WidgetConfig) -> Unit) {
                     )
 
                     SettingsCategory.SYMBOLS -> SymbolsCategory(
-                        currentSource = currentSource,
+                        selectedSources = selectedSources,
                         selectedSymbols = cfg.symbols,
-                        availableSymbols = availableSymbols,
-                        onToggle = { sym ->
+                        tseCustomSymbols = tseCustomSymbols,
+                        onToggle = { sym, src ->
                             val list = cfg.symbols.toMutableList()
-                            val selected = list.any { it.code == sym.code }
-                            if (selected) list.removeAll { it.code == sym.code }
-                            else if (list.size < 4) list.add(sym)
+                            val selected = list.any { it.code == sym.code && it.sourceId == src.id }
+                            if (selected) {
+                                list.removeAll { it.code == sym.code && it.sourceId == src.id }
+                            } else if (list.size < 4) {
+                                list.add(sym.copy(sourceId = src.id))
+                            }
                             cfg = cfg.copy(symbols = list)
                         },
                         onOpenTseSearch = { showTseSearchDialog = true }
@@ -299,8 +319,10 @@ fun SettingsScreen(fromWidget: Boolean, onApply: (WidgetConfig) -> Unit) {
                                 busy = true
                                 testResult = "در حال تست…"
                                 scope.launch {
-                                    val src = ConfigStore.resolveSource(context, cfg.sourceId)
-                                    val lines = cfg.symbols.take(4).map { sym ->
+                                    val byId = allSources.associateBy { it.id }
+                                    val lines = cfg.symbols.take(6).map { sym ->
+                                        val src = byId[sym.sourceId]
+                                            ?: byId[cfg.activeSourceIds.firstOrNull().orEmpty()]
                                         val q = src?.let { Fetcher.fetch(it, sym) }
                                         if (q?.price != null)
                                             "${q.label}: ${Format.price(q.price)} ${q.unit}  ${Format.pct(q.changePct)}"
@@ -361,7 +383,15 @@ fun SettingsScreen(fromWidget: Boolean, onApply: (WidgetConfig) -> Unit) {
                     val list = customSources + newSource
                     ConfigStore.saveCustomSources(context, list)
                     customSources = list
-                    cfg = cfg.copy(sourceId = newSource.id, symbols = newSource.symbols)
+                    // منبع تازه خودکار روشن و نمادهایش انتخاب شود
+                    val ids = (cfg.activeSourceIds + newSource.id).distinct()
+                    val room = (4 - cfg.symbols.size).coerceAtLeast(0)
+                    cfg = cfg.copy(
+                        sourceIds = ids,
+                        sourceId = ids.first(),
+                        symbols = (cfg.symbols + newSource.symbols.take(room)
+                            .map { it.copy(sourceId = newSource.id) })
+                    )
                     showAddDialog = false
                 }
             }
@@ -379,7 +409,7 @@ fun SettingsScreen(fromWidget: Boolean, onApply: (WidgetConfig) -> Unit) {
                     tseCustomSymbols = updatedCustom
 
                     val currentList = cfg.symbols.toMutableList()
-                    if (!currentList.any { it.code == newSym.code }) {
+                    if (!currentList.any { it.code == newSym.code && it.sourceId == newSym.sourceId }) {
                         if (currentList.size >= 4) {
                             currentList.removeAt(currentList.size - 1)
                         }
@@ -394,15 +424,21 @@ fun SettingsScreen(fromWidget: Boolean, onApply: (WidgetConfig) -> Unit) {
 
     if (alertDialogOpen) {
         AddAlertDialog(
-            source = currentSource,
+            sources = selectedSources,
             existing = editingAlert,
             onDismiss = { alertDialogOpen = false; editingAlert = null },
             onSave = { rule ->
                 val list = cfg.alerts.filterNot { it.id == rule.id } + rule
                 persistAlerts(list)
                 // اگر نماد هشدار در ویجت نیست، اضافه‌اش کن تا هشدار قابل بررسی باشد
-                if (cfg.symbols.none { it.code == rule.symbolCode } && cfg.symbols.size < 4) {
-                    cfg = cfg.copy(symbols = cfg.symbols + SymbolDef(rule.symbolCode, rule.symbolLabel))
+                val already = cfg.symbols.any {
+                    it.code == rule.symbolCode &&
+                            (it.sourceId.isEmpty() || it.sourceId == rule.sourceId)
+                }
+                if (!already && cfg.symbols.size < 4) {
+                    cfg = cfg.copy(
+                        symbols = cfg.symbols + SymbolDef(rule.symbolCode, rule.symbolLabel, rule.sourceId)
+                    )
                     scope.launch { ConfigStore.save(context, cfg) }
                 }
                 alertDialogOpen = false

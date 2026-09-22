@@ -117,6 +117,16 @@ object TseService {
         TseInstrument("41699948011270271", "پالایش", "صندوق پالایشی یکم"),
         TseInstrument("65089307994467000", "دارا یکم", "صندوق واسطه‌گری مالی یکم"),
 
+        // ─── صندوق‌های درآمد ثابت ───
+        TseInstrument("", "کیان", "صندوق درآمد ثابت کیان"),
+        TseInstrument("", "آرمان", "صندوق درآمد ثابت آرمان"),
+        TseInstrument("", "همای", "صندوق درآمد ثابت همای"),
+        TseInstrument("", "ثبات", "صندوق درآمد ثابت ثبات"),
+        TseInstrument("", "پارند", "صندوق درآمد ثابت پارند"),
+        TseInstrument("", "سپاس", "صندوق درآمد ثابت سپاس"),
+        TseInstrument("", "کمند", "صندوق درآمد ثابت کمند"),
+        TseInstrument("", "اعتماد", "صندوق درآمد ثابت اعتماد"),
+
         // ─── سهام شاخص‌ساز و پرمعامله ───
         TseInstrument("46348633615832441", "فولاد", "فولاد مبارکه اصفهان"),
         TseInstrument("35425587644337450", "فملی", "ملی صنایع مس ایران"),
@@ -279,33 +289,46 @@ object TseService {
     }
 
     /**
-     * گرفتن قیمت یک نماد بورس تهران در دو مرحله:
-     * ۱) پیدا کردن insCode (کد عددی، کاتالوگ داخلی یا جستجوی آنلاین)
-     * ۲) خواندن قیمت پایانی/آخرین معامله و درصد تغییر از سرویس ClosingPrice
+     * گرفتن قیمت یک نماد بورس تهران — با چند لایه‌ی پشتیبان:
+     * ۱) insCode عددی  ۲) کاتالوگ داخلی  ۳) جستجوی آنلاین (نمادهای جدید و صندوق‌ها)
+     * اگر با کدی قیمت نیامد، از جستجوی آنلاین کمک گرفته می‌شود تا نماد «نیاید» نشود.
      */
     suspend fun fetchQuote(code: String): TseInstrument {
-        val resolved = resolve(code)
-        val closing = fetchClosing(resolved.insCode)
-        return resolved.copy(
-            lastPrice = closing.last ?: resolved.lastPrice,
-            closePrice = closing.close ?: resolved.closePrice,
-            changePct = closing.changePct ?: resolved.changePct
-        )
-    }
-
-    private suspend fun resolve(code: String): TseInstrument {
-        // کد عددی insCode مستقیم
+        // ۱) insCode عددی مستقیم
         if (code.matches(Regex("\\d{8,20}"))) {
-            return fetchByInsCode(code) ?: TseInstrument(code, code, "نماد $code")
+            val byIns = fetchByInsCode(code)
+            if (byIns != null && (byIns.closePrice != null || byIns.lastPrice != null)) return byIns
         }
-        // کاتالوگ داخلی — سریع و آفلاین
+
+        // ۲) کاتالوگ داخلی (سریع/آفلاین) — فقط اگر insCode داشته باشد و قیمت بدهد
         POPULAR_INSTRUMENTS.firstOrNull {
-            it.symbol == code || it.name == code || it.insCode == code
-        }?.let { return it }
-        // جستجوی آنلاین
-        val results = search(code)
-        return results.firstOrNull { it.symbol.equals(code, ignoreCase = true) }
-            ?: results.firstOrNull()
+            (it.symbol == code || it.name == code) && it.insCode.isNotBlank()
+        }?.let { local ->
+            val closing = fetchClosing(local.insCode)
+            if (closing.close != null || closing.last != null) {
+                return local.copy(
+                    lastPrice = closing.last ?: local.lastPrice,
+                    closePrice = closing.close ?: local.closePrice,
+                    changePct = closing.changePct ?: local.changePct
+                )
+            }
+        }
+
+        // ۳) جستجوی آنلاین — منبع حقیقت برای نمادهای جدید (صندوق‌های درآمد ثابت و ...)
+        val online = runCatching { searchTseOnline(code) }.getOrDefault(emptyList())
+        val best = online.firstOrNull { it.symbol.equals(code, ignoreCase = true) }
+            ?: online.firstOrNull()
+        if (best != null && best.insCode.isNotBlank()) {
+            val closing = fetchClosing(best.insCode)
+            return best.copy(
+                lastPrice = closing.last ?: best.lastPrice,
+                closePrice = closing.close ?: best.closePrice,
+                changePct = closing.changePct ?: best.changePct
+            )
+        }
+
+        // ۴) چیزی پیدا نشد — حداقل اسم نماد برگردد
+        return POPULAR_INSTRUMENTS.firstOrNull { it.symbol == code || it.name == code }
             ?: TseInstrument(code, code, code)
     }
 

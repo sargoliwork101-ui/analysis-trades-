@@ -40,25 +40,25 @@ import com.pulse.market.data.WidgetConfig
 import com.pulse.market.data.WidgetTheme
 import com.pulse.market.ui.Format
 
-// ═══════════════════ ۱) منبع داده ═══════════════════
+// ═══════════════════ ۱) منابع داده (چند انتخابی) ═══════════════════
 
 @Composable
 fun SourcesCategory(
     allSources: List<SourceDef>,
-    selectedId: String,
-    onSelect: (SourceDef) -> Unit,
+    selectedIds: List<String>,
+    onToggle: (SourceDef) -> Unit,
     onDelete: (SourceDef) -> Unit,
     onAddClick: () -> Unit
 ) {
     CategoryCard(
-        title = "منبع داده",
-        subtitle = "سایت/API‌ای که قیمت‌ها از آن خوانده می‌شود — یکی را انتخاب کن"
+        title = "منابع داده",
+        subtitle = "چند منبع را می‌توانی هم‌زمان روشن کنی — نمادهای همه‌ی منابع در یک ویجت"
     ) {
         allSources.forEach { src ->
             SourceCard(
                 src = src,
-                selected = src.id == selectedId,
-                onClick = { onSelect(src) },
+                selected = src.id in selectedIds,
+                onClick = { onToggle(src) },
                 onDelete = if (!src.builtIn) ({ onDelete(src) }) else null
             )
         }
@@ -93,6 +93,13 @@ private fun SourceCard(
                 .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            Text(
+                if (selected) "☑" else "☐",
+                fontSize = 16.sp,
+                color = if (selected) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.padding(5.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     src.title,
@@ -107,7 +114,6 @@ private fun SourceCard(
                     )
                 }
             }
-            if (selected) Text("✓", color = MaterialTheme.colorScheme.primary)
             if (onDelete != null) {
                 IconButton(onClick = onDelete) {
                     Icon(Icons.Default.Delete, contentDescription = "حذف منبع")
@@ -117,24 +123,24 @@ private fun SourceCard(
     }
 }
 
-// ═══════════════════ ۲) نمادها ═══════════════════
+// ═══════════════════ ۲) نمادها (گروه‌بندی بر اساس منبع) ═══════════════════
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SymbolsCategory(
-    currentSource: SourceDef,
+    selectedSources: List<SourceDef>,
     selectedSymbols: List<SymbolDef>,
-    availableSymbols: List<SymbolDef>,
-    onToggle: (SymbolDef) -> Unit,
+    tseCustomSymbols: List<SymbolDef>,
+    onToggle: (SymbolDef, SourceDef) -> Unit,
     onOpenTseSearch: () -> Unit
 ) {
-    val isTse = currentSource.id == "tse_tsetmc"
+    val isTseSelected = selectedSources.any { it.id == "tse_tsetmc" }
 
     CategoryCard(
         title = "نمادهای ویجت",
-        subtitle = "منبع فعلی: ${currentSource.title} • حداکثر ۴ نماد"
+        subtitle = "نمادها را از هر منبعی که روشن است انتخاب کن • حداکثر ۴ نماد"
     ) {
-        if (isTse) {
+        if (isTseSelected) {
             Button(
                 onClick = onOpenTseSearch,
                 modifier = Modifier.fillMaxWidth(),
@@ -144,25 +150,42 @@ fun SymbolsCategory(
                 Spacer(Modifier.padding(4.dp))
                 Text("🔍 جستجو در بورس تهران یا افزودن با لینک TSETMC", fontSize = 12.sp)
             }
-            Hint("هر نماد دلخواه (اهرم، عیار، طلا، …) یا لینک صفحه‌ی tsetmc.com را می‌توانی اضافه کنی.")
+            Hint("هر نماد دلخواه (صندوق‌ها، اهرم، عیار، طلا، …) یا لینک صفحه‌ی tsetmc.com را می‌توانی اضافه کنی.")
         }
 
-        if (availableSymbols.isEmpty()) {
-            InfoCard("این منبع نماد آماده ندارد؛ نمادها را در پنجره‌ی «منبع دلخواه» وارد کن.")
-        } else {
+        Text(
+            "انتخاب‌شده: ${selectedSymbols.size} از ۴ نماد",
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        selectedSources.forEach { src ->
+            val available = if (src.id == "tse_tsetmc") {
+                (src.symbols + tseCustomSymbols).distinctBy { it.code }
+            } else {
+                src.symbols
+            }
+
             Text(
-                "انتخاب‌شده: ${selectedSymbols.size} از ۴ نماد",
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                src.title.substringBefore(" —"),
+                fontSize = 11.5.sp,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.secondary
             )
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                availableSymbols.forEach { sym ->
-                    val selected = selectedSymbols.any { it.code == sym.code }
-                    FilterChip(
-                        selected = selected,
-                        onClick = { onToggle(sym) },
-                        label = { Text(sym.label, fontSize = 12.sp) }
-                    )
+            if (available.isEmpty()) {
+                Hint("نماد آماده ندارد — نمادها را در «منبع دلخواه» وارد کن.")
+            } else {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    available.forEach { sym ->
+                        val selected = selectedSymbols.any {
+                            it.code == sym.code && (it.sourceId.isEmpty() || it.sourceId == src.id)
+                        }
+                        FilterChip(
+                            selected = selected,
+                            onClick = { onToggle(sym, src) },
+                            label = { Text(sym.label, fontSize = 12.sp) }
+                        )
+                    }
                 }
             }
         }
@@ -198,7 +221,7 @@ fun LookCategory(
     }
 
     CategoryCard(title = "ظاهر ویجت") {
-        SettingRow("تعداد ردیف‌ها (${cfg.rows})") {
+        SettingRow("تعداد ردیف‌ها (${cfg.rows})", "در ویجت کوچک خودکار کمتر نمایش داده می‌شود") {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 (1..4).forEach { n ->
                     FilterChip(
@@ -209,7 +232,7 @@ fun LookCategory(
                 }
             }
         }
-        SettingRow("نمودار مینیاتوری", "نمودار خطی کوچک کنار هر نماد") {
+        SettingRow("نمودار مینیاتوری", "در ویجت باریک خودکار پنهان می‌شود") {
             Switch(
                 checked = cfg.showSparkline,
                 onCheckedChange = { onChange(cfg.copy(showSparkline = it)) }
@@ -235,7 +258,7 @@ fun LookCategory(
                 )
             }
         }
-        Hint("AMOLED برای نمایشگرهای OLED و مصرف کمتر باتری")
+        Hint("AMOLED برای نمایشگرهای OLED و مصرف کمتر باتری • اندازه‌ی ویجت با نگه‌داشتن روی آن قابل تغییر است")
     }
 }
 

@@ -26,7 +26,16 @@ object ConfigStore {
             prefs[KEY_CONFIG]?.let {
                 runCatching { json.decodeFromString(WidgetConfig.serializer(), it) }.getOrNull()
             } ?: WidgetConfig()
+        }.map { migrate(it) }
+
+    /** سازگاری با تنظیمات قدیمی: تک‌منبعی ← چندمنبعی + نام‌گذاری منبع نمادها */
+    private fun migrate(cfg: WidgetConfig): WidgetConfig {
+        val ids = cfg.sourceIds.ifEmpty { listOf(cfg.sourceId) }
+        val symbols = cfg.symbols.map { s ->
+            if (s.sourceId.isEmpty()) s.copy(sourceId = ids.first()) else s
         }
+        return cfg.copy(sourceIds = ids, symbols = symbols)
+    }
 
     suspend fun current(context: Context): WidgetConfig = configFlow(context).first()
 

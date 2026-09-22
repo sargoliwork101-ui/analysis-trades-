@@ -48,6 +48,34 @@
                 android:resource="@xml/stock_widget_info" />
         </receiver>
 
+        <receiver
+            android:name=".widget.SmallWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_name_small">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.pulse.market.ACTION_REFRESH" />
+                <action android:name="com.pulse.market.ACTION_TOGGLE_LIVE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/stock_widget_info_small" />
+        </receiver>
+
+        <receiver
+            android:name=".widget.LargeWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_name_large">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.pulse.market.ACTION_REFRESH" />
+                <action android:name="com.pulse.market.ACTION_TOGGLE_LIVE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/stock_widget_info_large" />
+        </receiver>
+
         <service
             android:name=".service.LiveUpdateService"
             android:exported="false"

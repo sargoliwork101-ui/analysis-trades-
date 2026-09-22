@@ -267,7 +267,8 @@ fun TseSearchDialog(
                                 onAddSymbol(
                                     SymbolDef(
                                         code = inst.symbol,
-                                        label = inst.name.ifBlank { inst.symbol }
+                                        label = inst.name.ifBlank { inst.symbol },
+                                        sourceId = "tse_tsetmc"
                                     )
                                 )
                             }

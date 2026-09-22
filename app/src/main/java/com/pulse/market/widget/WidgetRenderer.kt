@@ -35,6 +35,16 @@ object WidgetRenderer {
     ) {
         val views = RemoteViews(context.packageName, R.layout.widget_stock)
 
+        // ── اندازه‌ی واقعی ویجت ← تعداد ردیف و نمایش نمودار ──
+        val opts = AppWidgetManager.getInstance(context).getAppWidgetOptions(widgetId)
+        val sizeH = opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT).takeIf { it > 0 }
+            ?: opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 120)
+        val sizeW = opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH).takeIf { it > 0 }
+            ?: opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 250)
+        val rowCapacity = (((sizeH - 70f) / 42f) + 1f).toInt().coerceIn(1, 4)
+        val maxRows = minOf(cfg.rows.coerceIn(1, 4), rowCapacity)
+        val sparkVisible = cfg.showSparkline && sizeW >= 170
+
         // ── پوسته بر اساس تم ──
         val bgRes = when (cfg.theme) {
             WidgetTheme.DARK -> R.drawable.widget_bg_dark
@@ -70,7 +80,7 @@ object WidgetRenderer {
 
         // ── ردیف‌ها ──
         views.removeAllViews(R.id.rows)
-        val shown = quotes.take(cfg.rows.coerceIn(1, 4))
+        val shown = quotes.take(maxRows)
         if (shown.isEmpty()) {
             val row = RemoteViews(context.packageName, R.layout.widget_row)
             row.setTextViewText(R.id.row_label, "منتظر داده…")
@@ -83,7 +93,7 @@ object WidgetRenderer {
             row.setTextColor(R.id.row_price, textColor)
             views.addView(R.id.rows, row)
         } else {
-            shown.forEach { q -> views.addView(R.id.rows, buildRow(context, q, cfg, textColor, subColor)) }
+            shown.forEach { q -> views.addView(R.id.rows, buildRow(context, q, cfg, textColor, subColor, sparkVisible)) }
         }
 
         // ── نوار وضعیت ──
@@ -114,7 +124,8 @@ object WidgetRenderer {
         q: Quote,
         cfg: WidgetConfig,
         textColor: Int,
-        subColor: Int
+        subColor: Int,
+        sparkVisible: Boolean
     ): RemoteViews {
         val row = RemoteViews(context.packageName, R.layout.widget_row)
 
@@ -154,7 +165,7 @@ object WidgetRenderer {
             )
         }
 
-        if (cfg.showSparkline && q.spark.size >= 3) {
+        if (sparkVisible && q.spark.size >= 3) {
             val px = TypedValue.applyDimension(
                 TypedValue.COMPLEX_UNIT_DIP, 52f, context.resources.displayMetrics
             ).toInt()
@@ -231,7 +242,16 @@ object WidgetRenderer {
         )
     }
 
-    fun allWidgetIds(context: Context): IntArray =
-        AppWidgetManager.getInstance(context)
-            .getAppWidgetIds(ComponentName(context, StockWidgetProvider::class.java))
+    fun allWidgetIds(context: Context): IntArray {
+        val mgr = AppWidgetManager.getInstance(context)
+        // هر سه اندازه‌ی ویجت (کوچک/متوسط/بزرگ)
+        return PROVIDER_CLASSES.flatMap { mgr.getAppWidgetIds(ComponentName(context, it)).toList() }
+            .toIntArray()
+    }
+
+    private val PROVIDER_CLASSES = listOf(
+        StockWidgetProvider::class.java,
+        SmallWidgetProvider::class.java,
+        LargeWidgetProvider::class.java
+    )
 }

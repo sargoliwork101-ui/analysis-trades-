@@ -25,6 +25,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pulse.market.data.AlertCondition
@@ -33,29 +34,41 @@ import com.pulse.market.data.SourceDef
 
 /**
  * پنجره‌ی ساخت/ویرایش هشدار قیمت.
+ * نمادها از همه‌ی منابع روشن (چند منبعی) نمایش داده می‌شوند؛
  * شرط (بالاتر/پایین‌تر/درصد) + بازه‌ی زمانی و روزهای فعال + فاصله‌ی ضد‌اسپم.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AddAlertDialog(
-    source: SourceDef,
+    sources: List<SourceDef>,
     existing: AlertRule?,
     onDismiss: () -> Unit,
     onSave: (AlertRule) -> Unit
 ) {
-    var symbolCode by remember { mutableStateOf(existing?.symbolCode ?: source.symbols.firstOrNull()?.code ?: "") }
+    val manualMode = sources.all { it.symbols.isEmpty() }
+
+    var symbolCode by remember {
+        mutableStateOf(existing?.symbolCode ?: sources.firstOrNull()?.symbols?.firstOrNull()?.code ?: "")
+    }
     var symbolLabel by remember {
         mutableStateOf(
             existing?.symbolLabel
-                ?: source.symbols.firstOrNull()?.label
+                ?: sources.firstOrNull()?.symbols?.firstOrNull()?.label
                 ?: ""
         )
     }
-    var manualCode by remember { mutableStateOf(if (source.symbols.isEmpty()) existing?.symbolCode ?: "" else "") }
-    var manualLabel by remember { mutableStateOf(if (source.symbols.isEmpty()) existing?.symbolLabel ?: "" else "") }
+    var symbolSourceId by remember {
+        mutableStateOf(
+            existing?.sourceId ?: sources.firstOrNull()?.id ?: ""
+        )
+    }
+    var manualCode by remember { mutableStateOf(if (manualMode) existing?.symbolCode ?: "" else "") }
+    var manualLabel by remember { mutableStateOf(if (manualMode) existing?.symbolLabel ?: "" else "") }
 
     var condition by remember { mutableStateOf(existing?.condition ?: AlertCondition.ABOVE) }
-    var threshold by remember { mutableStateOf(existing?.threshold?.let { Format.price(it, false).replace(",", "") } ?: "") }
+    var threshold by remember {
+        mutableStateOf(existing?.threshold?.let { Format.price(it, false).replace(",", "") } ?: "")
+    }
 
     var scheduleEnabled by remember { mutableStateOf(existing?.scheduleEnabled ?: true) }
     var fromMinute by remember { mutableStateOf(existing?.fromMinute ?: 9 * 60) }
@@ -65,7 +78,7 @@ fun AddAlertDialog(
     var cooldown by remember { mutableStateOf(existing?.cooldownMin ?: 30) }
     var onlyOnCross by remember { mutableStateOf(existing?.onlyOnCross ?: true) }
 
-    val canSave = (if (source.symbols.isEmpty()) manualCode.isNotBlank() else symbolCode.isNotBlank()) &&
+    val canSave = (if (manualMode) manualCode.isNotBlank() else symbolCode.isNotBlank()) &&
             (threshold.replace(",", "").toDoubleOrNull() != null)
 
     AlertDialog(
@@ -79,9 +92,9 @@ fun AddAlertDialog(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
 
-                // ── نماد ──
+                // ── نماد (گروه‌بندی بر اساس منبع) ──
                 Text("کدام نماد؟", fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
-                if (source.symbols.isEmpty()) {
+                if (manualMode) {
                     OutlinedTextField(
                         value = manualCode, onValueChange = { manualCode = it },
                         label = { Text("کد نماد (مثل فولاد یا AAPL)") },
@@ -93,13 +106,28 @@ fun AddAlertDialog(
                         modifier = Modifier.fillMaxWidth(), singleLine = true
                     )
                 } else {
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        source.symbols.forEach { sym ->
-                            FilterChip(
-                                selected = symbolCode == sym.code,
-                                onClick = { symbolCode = sym.code; symbolLabel = sym.label },
-                                label = { Text(sym.label) }
+                    sources.forEach { src ->
+                        if (src.symbols.isNotEmpty()) {
+                            Text(
+                                src.title.substringBefore(" —"),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.secondary
                             )
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                src.symbols.forEach { sym ->
+                                    val selected = symbolCode == sym.code && symbolSourceId == src.id
+                                    FilterChip(
+                                        selected = selected,
+                                        onClick = {
+                                            symbolCode = sym.code
+                                            symbolLabel = sym.label
+                                            symbolSourceId = src.id
+                                        },
+                                        label = { Text(sym.label) }
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -201,18 +229,24 @@ fun AddAlertDialog(
             TextButton(
                 enabled = canSave,
                 onClick = {
-                    val cleanCode = if (source.symbols.isEmpty()) manualCode.trim() else symbolCode
+                    val cleanCode = if (manualMode) manualCode.trim() else symbolCode
                     val cleanLabel = when {
-                        source.symbols.isEmpty() -> manualLabel.trim().ifBlank { cleanCode }
+                        manualMode -> manualLabel.trim().ifBlank { cleanCode }
                         symbolLabel.isNotBlank() -> symbolLabel
-                        else -> source.symbols.firstOrNull { it.code == cleanCode }?.label ?: cleanCode
+                        else -> cleanCode
+                    }
+                    val cleanSource = when {
+                        manualMode -> sources.firstOrNull()?.id ?: ""
+                        symbolSourceId.isNotBlank() -> symbolSourceId
+                        else -> sources.firstOrNull { src -> src.symbols.any { it.code == cleanCode } }?.id
+                            ?: sources.firstOrNull()?.id ?: ""
                     }
                     onSave(
                         AlertRule(
                             id = existing?.id ?: "alert_" + System.currentTimeMillis(),
                             symbolCode = cleanCode,
                             symbolLabel = cleanLabel,
-                            sourceId = source.id,
+                            sourceId = cleanSource,
                             condition = condition,
                             threshold = threshold.replace(",", "").toDoubleOrNull() ?: 0.0,
                             scheduleEnabled = scheduleEnabled,

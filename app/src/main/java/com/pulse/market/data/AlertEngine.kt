@@ -40,8 +40,10 @@ object AlertEngine {
         val dayIndex = persianDayIndex(cal.get(Calendar.DAY_OF_WEEK))
 
         for (rule in rules) {
-            val quote = quotes.firstOrNull { it.code.equals(rule.symbolCode, ignoreCase = true) }
-                ?: continue
+            val quote = quotes.firstOrNull {
+                it.code.equals(rule.symbolCode, ignoreCase = true) &&
+                        (rule.sourceId.isEmpty() || it.sourceId.isEmpty() || it.sourceId == rule.sourceId)
+            } ?: continue
             val price = quote.price ?: continue
 
             // ── زمان‌بندی: آیا همین حالا این هشدار مجاز است؟ ──
