@@ -42,6 +42,9 @@ An Android home-screen widget that shows **live market prices** — Tehran Stock
 ## 🔁 Releases & versioning
 - Every meaningful change ships with a **version bump** (`versionName`) and a GitHub Release (`v*` tag) so the in-app updater can pick it up.
 - CI (GitHub Actions) builds the APK on every push: see the [Actions tab](https://github.com/sargoliwork101-ui/analysis-trades-/actions).
+  - The installable file is always uploaded to that run's **Artifacts** as `PulseMarket-Android-APK` (containing `PulseMarket-vX.Y.apk`).
+- **Every version is signed with one stable key** (`app/ci-debug.keystore`) so a new APK installs *over the existing app* and the in-app updater works. A per-build key would make Android reject the update (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`). This is a debug/sideload key, not a Play Store key.
+- ⚠️ Versions 1.0–1.3 were signed with the CI runner's throwaway key; installing **1.4** over them needs one uninstall/reinstall. After 1.4 that is no longer needed.
 
 ## 🛠 Build
 ```bash

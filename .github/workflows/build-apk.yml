@@ -32,6 +32,15 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
+      - name: Check the stable signing key exists
+        run: |
+          if [ ! -f app/ci-debug.keystore ]; then
+            echo "::error::app/ci-debug.keystore is missing — without it Gradle invents a new random"
+            echo "::error::debug key on every run and the APK will NOT install over the previous app."
+            exit 1
+          fi
+          echo "keystore sha256: $(sha256sum app/ci-debug.keystore | awk '{print $1}')"
+
       - name: Build Debug APK
         run: |
           set +e
@@ -52,19 +61,46 @@ jobs:
           mkdir -p build-output
           cp app/build/outputs/apk/debug/app-debug.apk "build-output/PulseMarket-v${VER}.apk"
           ls -la build-output/
+          sha256sum build-output/*.apk
+          echo "APK_NAME=PulseMarket-v${VER}.apk" >> "$GITHUB_ENV"
+
+      # هر بیلد باید با همان کلیدِ ثابت امضا شود؛ وگرنه اندروید نصب روی نسخه‌ی قبلی را رد می‌کند
+      # (INSTALL_FAILED_UPDATE_INCOMPATIBLE) و آپدیت درون‌برنامه‌ای هم کار نمی‌کند.
+      - name: Verify APK is signed with the stable CI key
+        run: |
+          APK="build-output/$APK_NAME"
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          BT=$(ls -d "$SDK"/build-tools/* 2>/dev/null | sort -V | tail -n1)
+          echo "build-tools: $BT"
+          "$BT/apksigner" verify --print-certs "$APK" || true
+          SIGNER=$("$BT/apksigner" verify --print-certs "$APK" 2>&1 | grep -i "Signer #1 certificate SHA-256 digest" | head -n1 | awk '{print $NF}' | tr 'A-F' 'a-f' || true)
+          EXPECTED="d470d7af31125ef95c3a8f680e15189f7f15a3ea49e8580b28d415ffc13010d4"
+          echo "signer  : $SIGNER"
+          echo "expected: $EXPECTED"
+          if [ -z "$SIGNER" ]; then
+            echo "::error::could not read the APK signature"
+            exit 1
+          fi
+          if [ "$SIGNER" != "$EXPECTED" ]; then
+            echo "::error::APK signature is NOT the stable CI key — this APK will not install over the old app"
+            exit 1
+          fi
+          echo "✓ APK is signed with the stable CI key — it installs over previous versions"
 
       - name: Upload APK to Artifacts (Actions tab)
         uses: actions/upload-artifact@v4
         with:
           name: PulseMarket-Android-APK
-          path: build-output/PulseMarket-v1.0.apk
+          # نام فایل ثابت نیست: با هر بامپ نسخه عوض می‌شود، پس اینجا الگو می‌گذاریم
+          path: build-output/*.apk
+          if-no-files-found: error
           retention-days: 90
 
       - name: Create GitHub Release (Optional on tag or main)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: build-output/PulseMarket-v*.apk
+          files: build-output/*.apk
           name: Release ${{ github.ref_name }}
           draft: false
           prerelease: false
