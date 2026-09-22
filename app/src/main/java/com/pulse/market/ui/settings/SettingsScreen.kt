@@ -66,6 +66,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.pulse.market.data.AlertEngine
 import com.pulse.market.data.AlertRule
+import com.pulse.market.data.AppUpdater
 import com.pulse.market.data.ConfigStore
 import com.pulse.market.data.Fetcher
 import com.pulse.market.data.MAX_SYMBOLS
@@ -80,6 +81,7 @@ import com.pulse.market.ui.Format
 import com.pulse.market.ui.TseSearchDialog
 import com.pulse.market.widget.StockWidgetProvider
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
@@ -225,6 +227,14 @@ fun SettingsScreen(
     val selectedIds = cfg.activeSourceIds
     val selectedSources = allSources.filter { it.id in selectedIds }
 
+    // نتیجه‌ی «تست داده» سه ثانیه بعد خودش پاک می‌شود
+    LaunchedEffect(testResult) {
+        if (testResult.isNotEmpty() && testResult != "در حال تست…") {
+            delay(3000)
+            testResult = ""
+        }
+    }
+
     // ─── اسکلت صفحه ───
 
     Scaffold(
@@ -342,6 +352,8 @@ fun SettingsScreen(
                         tseCustomSymbols = tseCustomSymbols,
                         sortMode = cfg.sortMode,
                         onSortMode = { m -> persist(cfg.copy(sortMode = m)) },
+                        rows = cfg.rows,
+                        onRows = { n -> persist(cfg.copy(rows = n)) },
                         onToggle = { sym, src ->
                             val list = cfg.symbols.toMutableList()
                             val selected = list.any { it.code == sym.code && it.sourceId == src.id }
@@ -743,8 +755,13 @@ private fun AboutCategory() {
     val versionName = remember {
         runCatching {
             context.packageManager.getPackageInfo(context.packageName, 0).versionName
-        }.getOrNull()?.takeIf { it.isNotBlank() } ?: "1.1"
+        }.getOrNull()?.takeIf { it.isNotBlank() } ?: "1.2"
     }
+
+    // وضعیت بررسی آپدیت — نسخه‌ی جدید روی همین نصب نصب می‌شود؛ پاک کردن لازم نیست
+    val scope = rememberCoroutineScope()
+    var updateState by remember { mutableStateOf("idle") }
+    var latest by remember { mutableStateOf<AppUpdater.LatestRelease?>(null) }
 
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
 
@@ -781,6 +798,69 @@ private fun AboutCategory() {
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(top = 6.dp)
                 )
+            }
+        }
+
+        // ── به‌روزرسانی برنامه — نسخه‌ی جدید روی همین نصب می‌نشیند ──
+        SectionHeader("به‌روزرسانی برنامه")
+        RowsCard {
+            SettingRow(
+                title = "نسخه‌ی نصب‌شده: ${Format.toPersianDigits(versionName)}",
+                desc = when (updateState) {
+                    "checking" -> "در حال بررسی نسخه‌ی جدید…"
+                    "newer" -> "✨ نسخه‌ی ${latest?.tag ?: ""} هست — روی همین نصب آپدیت می‌شود"
+                    "uptodate" -> "✅ آخرین نسخه را داری"
+                    "norelease" -> "هنوز ریلیز رسمی منتشر نشده"
+                    "error" -> "ممکن نشد — اینترنت را چک کن و دوباره بزن"
+                    else -> "از اینجا نسخه‌ی جدید را چک و روی همین نصب آپدیت کن؛ پاک کردن لازم نیست"
+                }
+            ) {
+                if (updateState == "newer" && latest?.apkUrl != null) {
+                    Button(onClick = {
+                        runCatching {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(latest!!.apkUrl)))
+                        }
+                    }) { Text("⬇ دریافت", fontSize = 12.sp) }
+                } else {
+                    OutlinedButton(
+                        enabled = updateState != "checking",
+                        onClick = {
+                            scope.launch {
+                                updateState = "checking"
+                                val rel = AppUpdater.fetchLatest()
+                                when {
+                                    rel == null -> updateState = "error"
+                                    rel.tag.isBlank() -> updateState = "norelease"
+                                    AppUpdater.isNewer(rel.version, AppUpdater.parseVersion(versionName)) -> {
+                                        latest = rel
+                                        updateState = "newer"
+                                    }
+
+                                    else -> updateState = "uptodate"
+                                }
+                            }
+                        }
+                    ) { Text("بررسی", fontSize = 12.sp) }
+                }
+            }
+            if (updateState == "newer" && latest != null) {
+                RowDivider()
+                InnerRow {
+                    Text(
+                        "✨ نسخه‌ی ${latest!!.tag}",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    if (latest!!.notes.isNotBlank()) {
+                        Text(
+                            latest!!.notes,
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 6
+                        )
+                    }
+                }
             }
         }
 

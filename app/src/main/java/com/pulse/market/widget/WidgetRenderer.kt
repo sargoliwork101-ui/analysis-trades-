@@ -157,12 +157,15 @@ object WidgetRenderer {
         val errors = quotes.count { it.error != null && it.price == null }
         val activeAlerts = cfg.alerts.count { it.enabled }
         val alertInfo = if (activeAlerts > 0) " • 🔔 $activeAlerts هشدار" else ""
+        // بازه‌ی ساعتی تازه‌سازی — کاربر بفهمد چرا گاهی فقط آخرین داده می‌ماند
+        val windowInfo = if (cfg.refreshWindowEnabled && cfg.refreshFromMinute != cfg.refreshToMinute)
+            " • ⏰ ${time2d(cfg.refreshFromMinute)}–${time2d(cfg.refreshToMinute)}" else ""
         val status = when {
             errors == 0 && quotes.isNotEmpty() -> (if (live) "زنده" else "دستی") +
-                    " • هر ${cfg.intervalSec} ثانیه$alertInfo"
+                    " • هر ${cfg.intervalSec} ثانیه$alertInfo$windowInfo"
 
             quotes.isEmpty() -> "داده‌ای نیست — روی رفرش بزن"
-            else -> "$errors مورد خطا$alertInfo"
+            else -> "$errors مورد خطا$alertInfo$windowInfo"
         }
         views.setTextViewText(
             R.id.txt_status,
@@ -311,6 +314,9 @@ object WidgetRenderer {
         if (parts.isEmpty() && q.unit.isNotBlank()) parts += q.unit
         return parts.joinToString(" • ")
     }
+
+    /** HH:MM از دقیقه‌ی روز — برای نمایش بازه‌ی تازه‌سازی روی ویجت */
+    private fun time2d(minute: Int) = "${minute / 60}:${(minute % 60).toString().padStart(2, '0')}"
 
     /** ضریب اندازه بر اساس فضای واقعی ویجت — هرچه بزرگ‌تر، فونت درشت‌تر */
     private fun sizeFactor(sizeW: Int, sizeH: Int): Float = when {

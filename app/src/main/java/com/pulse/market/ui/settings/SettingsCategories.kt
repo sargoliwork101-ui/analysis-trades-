@@ -1,5 +1,6 @@
 package com.pulse.market.ui.settings
 
+import android.app.TimePickerDialog
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -181,6 +182,8 @@ fun SymbolsCategory(
     tseCustomSymbols: List<SymbolDef>,
     sortMode: SymbolSort = SymbolSort.MANUAL,
     onSortMode: (SymbolSort) -> Unit = {},
+    rows: Int = 3,
+    onRows: (Int) -> Unit = {},
     onToggle: (SymbolDef, SourceDef) -> Unit,
     onRemoveSymbol: (Int) -> Unit,
     onMoveSymbol: (Int, Int) -> Unit,
@@ -238,6 +241,25 @@ fun SymbolsCategory(
                             selected = sortMode == mode,
                             onClick = { onSortMode(mode) },
                             label = { Text(label) }
+                        )
+                    }
+                }
+            }
+        }
+
+        // ── چند نماد در ویجت دیده شود؟ ──
+        SectionHeader(
+            "تعداد نمایش در ویجت",
+            "چند نماد از فهرست بالا در ویجت دیده شود — اگر ویجت کوچک باشد خودش کم می‌کند"
+        )
+        RowsCard {
+            InnerRow {
+                Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    (1..6).forEach { n ->
+                        FilterChip(
+                            selected = rows == n,
+                            onClick = { onRows(n) },
+                            label = { Text(Format.toPersianDigits("$n"), fontSize = 12.sp) }
                         )
                     }
                 }
@@ -384,7 +406,11 @@ fun ValuesCategory(
                 onChange(cfg.copy(showCode = it))
             }
             RowDivider()
-            SwitchRow("نمودار مینیاتوری", "در ویجت باریک خودکار پنهان می‌شود", cfg.showSparkline) {
+            SwitchRow(
+                "نمودار مینیاتوری",
+                "روند هر نماد کنار قیمت — برای بورس تهران هم با هر به‌روزرسانی به‌تدریج شکل می‌گیرد",
+                cfg.showSparkline
+            ) {
                 onChange(cfg.copy(showSparkline = it))
             }
             RowDivider()
@@ -679,6 +705,39 @@ fun UpdateCategory(
             }
         }
         Hint("کریپتو و سهام آمریکا: ۱۰ تا ۳۰ ثانیه • بورس تهران: ۶۰ ثانیه (داده‌ی TSETMC با تأخیر می‌آید)")
+
+        // ── بازه‌ی ساعتی تازه‌سازی — صرفه‌جویی در مصرف اینترنت ──
+        SectionHeader(
+            "زمان‌بندی به‌روزرسانی",
+            "فقط در این ساعت‌ها از اینترنت تازه می‌شود — بیرون از بازه آخرین قیمت می‌ماند تا بسته‌ی نت زود تمام نشود"
+        )
+        RowsCard {
+            SwitchRow(
+                title = "فقط در بازه‌ی مشخص تازه شود",
+                desc = "مثلاً فقط ۹ صبح تا ۸ شب رفرش کند",
+                checked = cfg.refreshWindowEnabled,
+                onChange = { onChange(cfg.copy(refreshWindowEnabled = it)) }
+            )
+            if (cfg.refreshWindowEnabled) {
+                RowDivider()
+                InnerRow {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        TimePickButton("از ساعت", cfg.refreshFromMinute, Modifier.weight(1f)) {
+                            onChange(cfg.copy(refreshFromMinute = it))
+                        }
+                        TimePickButton("تا ساعت", cfg.refreshToMinute, Modifier.weight(1f)) {
+                            onChange(cfg.copy(refreshToMinute = it))
+                        }
+                    }
+                    Text(
+                        if (cfg.refreshFromMinute == cfg.refreshToMinute) "دو ساعت برابر یعنی شبانه‌روزی (بدون محدودیت)"
+                        else "بازه می‌تواند شب‌گذر هم باشد — مثلاً ۲۲ شب تا ۷ صبح",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -874,5 +933,36 @@ fun BackupCategory(
         }
 
         Hint("بکاپ فقط تنظیمات برنامه است و هیچ اطلاعات شخصی یا رمزی داخلش نیست.")
+    }
+}
+
+// ───────────── ابزار انتخاب ساعت ─────────────
+
+/** انتخاب ساعت با دیالوگ استاندارد اندروید — برای بازه‌های زمانی تنظیمات */
+@Composable
+private fun TimePickButton(
+    label: String,
+    minuteOfDay: Int,
+    modifier: Modifier = Modifier,
+    onChange: (Int) -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(label, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        OutlinedButton(
+            onClick = {
+                TimePickerDialog(
+                    context,
+                    { _, h, m -> onChange(h * 60 + m) },
+                    minuteOfDay / 60,
+                    minuteOfDay % 60,
+                    true
+                ).show()
+            },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Text("%02d:%02d".format(minuteOfDay / 60, minuteOfDay % 60))
+        }
     }
 }

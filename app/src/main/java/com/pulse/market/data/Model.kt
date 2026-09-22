@@ -177,7 +177,13 @@ data class WidgetConfig(
     /** مرتب‌سازی نمادها — دستی یا خودکار */
     val sortMode: SymbolSort = SymbolSort.MANUAL,
     /** وضعیت باز/بسته بودن بورس تهران کنار ساعت ویجت */
-    val showMarketStatus: Boolean = true
+    val showMarketStatus: Boolean = true,
+    /** زمان‌بندی به‌روزرسانی — فقط در این بازه‌ی ساعتی اینترنت مصرف می‌شود */
+    val refreshWindowEnabled: Boolean = false,
+    /** دقیقه از شروع روز (۰ تا ۱۴۳۹) */
+    val refreshFromMinute: Int = 0,
+    /** با from برابر = شبانه‌روزی (بدون محدودیت) */
+    val refreshToMinute: Int = 0
 ) {
     /** منابع فعال (با پشتیبانی از فرمت قدیمی تک‌منبعی) */
     val activeSourceIds: List<String>

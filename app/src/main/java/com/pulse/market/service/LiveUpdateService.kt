@@ -51,7 +51,7 @@ class LiveUpdateService : Service() {
                 stopSelf()
                 return
             }
-            runCatching { StockWidgetProvider.refreshAll(this, force = true) }
+            runCatching { StockWidgetProvider.refreshAll(this, force = true, respectSchedule = true) }
             val sec = ConfigStore.minLiveInterval(this)
             updateNotification("قیمت‌ها هر $sec ثانیه تازه می‌شوند")
             delay(sec * 1000L)

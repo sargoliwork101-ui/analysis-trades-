@@ -18,7 +18,7 @@ class LiveUpdateWorker(context: Context, params: WorkerParameters) :
 
     override suspend fun doWork(): Result {
         return runCatching {
-            StockWidgetProvider.refreshAll(applicationContext, force = true)
+            StockWidgetProvider.refreshAll(applicationContext, force = true, respectSchedule = true)
             Result.success()
         }.getOrElse { Result.retry() }
     }

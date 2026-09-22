@@ -113,20 +113,29 @@ open class StockWidgetProvider : AppWidgetProvider() {
         /**
          * به‌روزرسانی همه‌ی ویجت‌ها — هر کدام با پیکربندی و نمادهای خودش؛
          * نمادهای مشترک فقط یک بار از شبکه گرفته می‌شوند.
+         *
+         * respectSchedule: درخواست‌های زمان‌بندی‌شده (سرویس زنده/Worker) به بازه‌ی ساعتی
+         * هر ویجت احترام می‌گذارند تا بیرون از آن ساعت‌ها اینترنت مصرف نشود؛
+         * رفرش دستیِ کاربر (دکمه‌ی روی ویجت) همیشه انجام می‌شود.
          */
-        suspend fun refreshAll(context: Context, force: Boolean = false) {
+        suspend fun refreshAll(context: Context, force: Boolean = false, respectSchedule: Boolean = false) {
             val ids = WidgetRenderer.allWidgetIds(context)
             if (ids.isEmpty()) return
 
             val cfgs = ids.map { it to ConfigStore.current(context, it) }
-            val wantedList = cfgs.map { (_, cfg) -> QuoteRepo.wantedFor(context, cfg) }
+            // بیرون از بازه‌ی ساعتی کاربر؟ آن ویجت این نوبت چیزی از شبکه نمی‌خواهد
+            val wantedList = cfgs.map { (_, cfg) ->
+                if (respectSchedule && !inRefreshWindow(cfg)) emptyList()
+                else QuoteRepo.wantedFor(context, cfg)
+            }
 
             val cached = QuoteRepo.loadCachedMap(context)
             val minInterval = cfgs.minOf { it.second.intervalSec }.coerceIn(5, 3600)
             val stale =
                 System.currentTimeMillis() - QuoteRepo.lastUpdated(context) > minInterval * 1000L
             val missing = wantedList.flatten().any { QuoteRepo.key(it.first, it.second.code) !in cached }
-            val needNetwork = force || cached.isEmpty() || stale || missing
+            val needNetwork =
+                (force || cached.isEmpty() || stale || missing) && wantedList.flatten().isNotEmpty()
 
             val quoteMap = if (needNetwork) QuoteRepo.refreshMany(context, wantedList) else cached
 
@@ -179,6 +188,20 @@ open class StockWidgetProvider : AppWidgetProvider() {
                 quotes.sortedByDescending { kotlin.math.abs(it.changePct ?: 0.0) }
 
             SymbolSort.ALPHABET -> quotes.sortedBy { it.label }
+        }
+
+        /**
+         * آیا «الان» در بازه‌ی ساعتی تازه‌سازی این ویجت است؟
+         * بازه‌ی شب‌گذر (مثل ۲۲ تا ۷) هم پشتیبانی می‌شود؛ from=to یعنی شبانه‌روزی.
+         */
+        private fun inRefreshWindow(cfg: WidgetConfig): Boolean {
+            if (!cfg.refreshWindowEnabled) return true
+            val from = cfg.refreshFromMinute.coerceIn(0, 1439)
+            val to = cfg.refreshToMinute.coerceIn(0, 1439)
+            if (from == to) return true
+            val cal = java.util.Calendar.getInstance()
+            val minute = cal.get(java.util.Calendar.HOUR_OF_DAY) * 60 + cal.get(java.util.Calendar.MINUTE)
+            return if (from < to) minute in from..to else (minute >= from || minute <= to)
         }
 
         /** سرویس زنده فقط وقتی لازم است که هیچ ویجتی liveService داشته باشد */
