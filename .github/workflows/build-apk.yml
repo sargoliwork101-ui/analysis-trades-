@@ -117,12 +117,19 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - name: Create GitHub Release (Optional on tag or main)
+      # آپلود APK به ریلیز — با gh CLI و پرصدا (اگر شکست بخورد ران قرمز می‌شود).
+      # قبلاً softprops بود که امروز دو بار بدون خطا، asset را آپلود نکرد؛
+      # --clobber هم باعث می‌شود اجرای دوباره‌ی تگ، فایل قبلی را تمیز جایگزین کند.
+      - name: Upload APK to GitHub Release (tag builds)
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: build-output/*.apk
-          name: Release ${{ github.ref_name }}
-          draft: false
-          prerelease: false
-          generate_release_notes: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          echo ">> release: $TAG"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --generate-notes --title "Release $TAG"
+          gh release upload "$TAG" build-output/*.apk --clobber --repo "$GITHUB_REPOSITORY"
+          echo ">> assets:"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[] | "\(.name) \(.size) bytes"'

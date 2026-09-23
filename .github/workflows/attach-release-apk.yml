@@ -1,0 +1,60 @@
+name: Attach Release APK
+
+# ابزار تعمیر/پیوست: APKِ ساخته‌شده در یک رانِ دیگر را به ریلیز موجود آپلود می‌کند،
+# بدون بیلد دوباره. با push تگِ «attach-{artifactId}-{releaseTag}» فعال می‌شود؛
+# مثال: attach-10741826367-v1.11  ←  آرتیفکت ۱۰۷۴۱۸۲۶۳۶۷ → ریلیز v1.11
+# (ساخته شد چون softprops امروز دو بار بی‌صدا asset را آپلود نکرد و از سندباکس
+#  هم دانلود آرتیفکت بلاک بود؛ این مسیر فقط از خودِ رانر می‌گذرد.)
+
+on:
+  push:
+    tags:
+      - 'attach-*'
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  attach:
+    name: Attach APK to release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Parse attach tag
+        run: |
+          REF="${GITHUB_REF_NAME#attach-}"
+          AID="${REF%%-*}"
+          TAG="${REF#*-}"
+          if [ -z "$AID" ] || [ -z "$TAG" ] || [ "$TAG" = "$REF" ]; then
+            echo "::error::الگوی تگ درست نیست: ${GITHUB_REF_NAME} — باید attach-{artifactId}-{releaseTag} باشد"
+            exit 1
+          fi
+          echo "AID=$AID" >> "$GITHUB_ENV"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "artifact id: $AID -> release: $TAG"
+
+      - name: Download artifact and upload to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$REPO/actions/artifacts/$AID/zip" > apk.zip
+          ls -la apk.zip
+          rm -rf dl && mkdir dl && unzip -q apk.zip -d dl
+          APK=$(find dl -name 'PulseMarket-*.apk' | head -n1)
+          if [ -z "$APK" ]; then
+            echo "::error::داخل آرتیفکت فایل PulseMarket-*.apk پیدا نشد"
+            find dl -type f
+            exit 1
+          fi
+          echo "apk: $APK"
+          sha256sum "$APK"
+          if ! gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "::error::ریلیز $TAG پیدا نشد — اول ریلیز را بساز"
+            exit 1
+          fi
+          gh release upload "$TAG" "$APK" --clobber --repo "$REPO"
+          echo "--- assets of $TAG ---"
+          gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[] | "\(.name) \(.size) bytes"'
