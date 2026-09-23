@@ -378,9 +378,21 @@ fun SettingsScreen(
                         },
                         onRemoveSymbol = { index ->
                             val list = cfg.symbols.toMutableList()
-                            if (index in list.indices) {
+                            val removed = list.getOrNull(index)
+                            if (removed != null) {
                                 list.removeAt(index)
                                 persist(cfg.copy(symbols = list))
+                                // حذف از ویجت = حذف از فهرست «نمادهای دلخواه بورس من» هم؛
+                                // تا کادر پایین همان نماد را نشان ندهد و با خالی شدن، کل کادر برود
+                                if (removed.sourceId == "tse_tsetmc" &&
+                                    tseCustomSymbols.any { it.code == removed.code }
+                                ) {
+                                    scope.launch {
+                                        val updated = tseCustomSymbols.filterNot { it.code == removed.code }
+                                        ConfigStore.saveTseSymbolsAsync(context, updated)
+                                        tseCustomSymbols = updated
+                                    }
+                                }
                             }
                         },
                         onMoveSymbol = { from, to ->

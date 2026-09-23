@@ -83,7 +83,9 @@ fun AddAlertDialog(
         mutableStateOf(existing?.threshold?.let { Format.price(it, false).replace(",", "") } ?: "")
     }
 
-    var scheduleEnabled by remember { mutableStateOf(existing?.scheduleEnabled ?: true) }
+    // پیش‌فرضِ هشدار تازه: همیشه فعال — چونِ محدودیت ساعت بورس برای کریپتو/آمریکا/طلا
+    // یعنی هشدارِ شب‌ها و جمعه‌ها بی‌صدا از کار می‌افتاد؛ کاربر خودش اگر خواست محدود کند
+    var scheduleEnabled by remember { mutableStateOf(existing?.scheduleEnabled ?: false) }
     var fromMinute by remember { mutableStateOf(existing?.fromMinute ?: 9 * 60) }
     var toMinute by remember { mutableStateOf(existing?.toMinute ?: 17 * 60) }
     var days by remember { mutableStateOf(existing?.days ?: setOf(0, 1, 2, 3, 4)) }
