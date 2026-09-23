@@ -16,6 +16,7 @@ import com.pulse.market.data.WidgetTheme
 import com.pulse.market.ui.MainActivity
 import com.pulse.market.ui.Sparkline
 import com.pulse.market.ui.Format
+import com.pulse.market.ui.QuoteText
 
 /** ساخت ظاهر ویجت — کاملاً داینامیک با اندازه‌ی ویجت، اندازه‌ی فونت و مقادیر انتخابی هر ویجت */
 object WidgetRenderer {
@@ -272,12 +273,15 @@ object WidgetRenderer {
         )
 
         // واحد هر نماد: در ویجت پهن جلوی عدد قیمت، در ویجت باریک زیر عدد — نه زیر نام نماد
+        // ── قیمت و واحد — از ماژول مرجع QuoteText؛ واحدِ هر منبعی همین‌جا می‌نشیند ──
+        val unit = QuoteText.unit(q)
         val priceText = Format.price(q.price, cfg.persianDigits, cfg.compactNumbers)
-        val unit = q.unit.trim()
         val inlineUnit = unitInline && unit.isNotEmpty() && q.price != null
         row.setTextViewText(
             R.id.row_price,
-            if (inlineUnit) text("$priceText $unit", cfg) else priceText
+            if (inlineUnit)
+                text(QuoteText.priceWithUnit(q, cfg.persianDigits, cfg.compactNumbers), cfg)
+            else priceText
         )
         row.setTextColor(R.id.row_price, if (q.price != null) pal.text else pal.sub)
         if (!inlineUnit && unit.isNotEmpty() && q.price != null) {

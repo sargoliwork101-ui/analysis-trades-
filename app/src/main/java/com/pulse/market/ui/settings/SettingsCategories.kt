@@ -50,6 +50,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pulse.market.data.AlertRule
+import com.pulse.market.data.MarketKind
 import com.pulse.market.data.MarketStatus
 import com.pulse.market.data.MAX_SYMBOLS
 import com.pulse.market.data.SourceDef
@@ -57,6 +58,7 @@ import com.pulse.market.data.SymbolDef
 import com.pulse.market.data.SymbolSort
 import com.pulse.market.data.WidgetConfig
 import com.pulse.market.data.WidgetTheme
+import com.pulse.market.data.marketKind
 import com.pulse.market.ui.Format
 import java.util.Locale
 
@@ -317,7 +319,7 @@ fun SymbolsCategory(
 
         // ── نمادهای آماده‌ی هر منبع ──
         selectedSources.forEach { src ->
-            val available = if (src.id == "tse_tsetmc") {
+            val available = if (src.marketKind == MarketKind.TSE) {
                 (src.symbols + tseCustomSymbols).distinctBy { it.code }
             } else {
                 src.symbols
@@ -815,6 +817,7 @@ fun UpdateCategory(
 @Composable
 fun AlertsCategory(
     cfg: WidgetConfig,
+    sources: List<SourceDef> = emptyList(),
     snoozeUntil: Long = 0L,
     onSnooze: (Int) -> Unit = {},
     onCancelSnooze: () -> Unit = {},
@@ -877,8 +880,11 @@ fun AlertsCategory(
             InfoCard("هنوز هشداری ثبت نشده. مثلاً: «وقتی بیت‌کوین از ۱۰۰٬۰۰۰ گذشت به من خبر بده».")
         } else {
             cfg.alerts.forEach { rule ->
+                // واحدِ نمادِ هشدار از تعریف منبع — تا شرط هشدار مثل ویجت، همراه واحد دیده شود
+                val ruleUnit = sources.firstOrNull { it.id == rule.sourceId }?.unit.orEmpty()
                 AlertRuleCard(
                     rule = rule,
+                    unit = ruleUnit,
                     persian = cfg.persianDigits,
                     onToggle = { on -> onToggleAlert(rule, on) },
                     onEdit = { onEditAlert(rule) },
@@ -902,10 +908,11 @@ fun AlertsCategory(
     }
 }
 
-/** کارت یک قانون هشدار */
+/** کارت یک قانون هشدار — شرط با واحدِ نماد (ریال/تومان/$) نشان داده می‌شود */
 @Composable
 private fun AlertRuleCard(
     rule: AlertRule,
+    unit: String,
     persian: Boolean,
     onToggle: (Boolean) -> Unit,
     onEdit: () -> Unit,
@@ -935,7 +942,7 @@ private fun AlertRuleCard(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    AlertRule.conditionText(rule.condition, rule.threshold, "", persian),
+                    AlertRule.conditionText(rule.condition, rule.threshold, unit, persian),
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.secondary,
                     modifier = Modifier.padding(top = 2.dp)

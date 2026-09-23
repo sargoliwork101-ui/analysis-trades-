@@ -58,12 +58,14 @@ object MarketStatus {
         return minute in fromMinute..toMinute
     }
 
-    /** بازارِ هر منبع — null یعنی بازار مشخصی ندارد (منبع دلخواه کاربر) */
-    fun forSource(sourceId: String): State? = when (sourceId) {
-        "tse_tsetmc", "tse_index" -> State("tse", "بورس", tseOpen())
-        "crypto_coingecko" -> State("crypto", "کریپتو", open = true, openText = "باز ۲۴/۷")
-        "us_yahoo" -> State("us", "آمریکا", usOpen())
-        "fx_rates", "gold_rates", "web_tgju" -> State("goldfx", "طلا و ارز", goldFxOpen())
+    /** بازارِ هر منبع — از ماژول مرجع MarketKind؛ منبع دلخواه بازار ندارد */
+    fun forSource(sourceId: String): State? = when (marketKindOf(sourceId)) {
+        MarketKind.TSE -> State(MarketKind.TSE.key, MarketKind.TSE.label, tseOpen())
+        MarketKind.CRYPTO -> State(
+            MarketKind.CRYPTO.key, MarketKind.CRYPTO.label, open = true, openText = "باز ۲۴/۷"
+        )
+        MarketKind.US -> State(MarketKind.US.key, MarketKind.US.label, usOpen())
+        MarketKind.GOLD_FX -> State(MarketKind.GOLD_FX.key, MarketKind.GOLD_FX.label, goldFxOpen())
         else -> null
     }
 

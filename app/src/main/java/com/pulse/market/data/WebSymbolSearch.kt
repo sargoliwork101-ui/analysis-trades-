@@ -32,22 +32,23 @@ object WebSymbolSearch {
     /**
      * جستجو در منبع — null یعنی این منبع جستجوی آنلاین ندارد
      * (یا شبکه شکست خورد) و باید از فهرست محلی استفاده شود.
+     * بازارِ منبع از ماژول مرجع MarketKind پرسیده می‌شود — نه با id رشته‌ای.
      */
     suspend fun search(sourceId: String, query: String): List<SymbolDef>? =
         withContext(Dispatchers.IO) {
             val q = query.trim()
             if (q.isEmpty()) return@withContext null
             runCatching {
-                when (sourceId) {
-                    "crypto_coingecko" -> coingecko(q)
-                    "us_yahoo" -> yahoo(q)
+                when (marketKindOf(sourceId)) {
+                    MarketKind.CRYPTO -> coingecko(sourceId, q)
+                    MarketKind.US -> yahoo(sourceId, q)
                     else -> null
                 }
             }.getOrNull()
         }
 
     /** CoinGecko: api.coingecko.com/api/v3/search?query=… → coins[] {id, name, symbol} */
-    private fun coingecko(q: String): List<SymbolDef> {
+    private fun coingecko(sourceId: String, q: String): List<SymbolDef> {
         val body = get("https://api.coingecko.com/api/v3/search?query=" + enc(q))
         val arr = JSONObject(body).optJSONArray("coins") ?: return emptyList()
         val out = mutableListOf<SymbolDef>()
@@ -55,13 +56,13 @@ object WebSymbolSearch {
             val o = arr.optJSONObject(i) ?: continue
             val id = o.optString("id").trim()
             if (id.isEmpty()) continue
-            out += SymbolDef(id, o.optString("name").ifBlank { id }, "crypto_coingecko")
+            out += SymbolDef(id, o.optString("name").ifBlank { id }, sourceId)
         }
         return out.take(15)
     }
 
     /** Yahoo: query1.finance.yahoo.com/v1/finance/search?q=… → quotes[] {symbol, shortname, quoteType} */
-    private fun yahoo(q: String): List<SymbolDef> {
+    private fun yahoo(sourceId: String, q: String): List<SymbolDef> {
         val body = get(
             "https://query1.finance.yahoo.com/v1/finance/search?q=" + enc(q) +
                     "&quotesCount=15&newsCount=0"
@@ -75,7 +76,7 @@ object WebSymbolSearch {
             val symbol = o.optString("symbol").trim()
             if (symbol.isEmpty()) continue
             if (o.optString("quoteType") !in allowed) continue
-            out += SymbolDef(symbol, o.optString("shortname").ifBlank { symbol }, "us_yahoo")
+            out += SymbolDef(symbol, o.optString("shortname").ifBlank { symbol }, sourceId)
         }
         return out.take(15)
     }

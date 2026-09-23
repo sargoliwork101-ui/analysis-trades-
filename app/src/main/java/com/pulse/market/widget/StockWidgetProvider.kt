@@ -178,7 +178,7 @@ open class StockWidgetProvider : AppWidgetProvider() {
             renderOne(context, widgetId, cfg, quotes)
         }
 
-        private fun renderOne(
+        private suspend fun renderOne(
             context: Context,
             widgetId: Int,
             cfg: WidgetConfig,
@@ -190,15 +190,23 @@ open class StockWidgetProvider : AppWidgetProvider() {
                     SourceCatalog.byId(sourceIds.first())?.title?.substringBefore(" —") ?: "منبع دلخواه"
                 else -> "نبض بازار"
             }
+            // واحدِ خالی (مثلاً داده‌ی قدیمیِ کش) از تعریف منبع پر می‌شود —
+            // تا واحدِ نماد هیچ‌وقت به خاطر داده‌ی کهنه از ویجت نیفتد
+            val healed = quotes.map { q ->
+                if (q.unit.isBlank() && q.sourceId.isNotBlank()) {
+                    val srcUnit = ConfigStore.resolveSource(context, q.sourceId)?.unit.orEmpty()
+                    if (srcUnit.isNotEmpty()) q.copy(unit = srcUnit) else q
+                } else q
+            }
             // زمانِ «همین ویجت»: تازه‌ترین داده‌ی نمادهای خودش — نه سراسری؛
             // تا ویجتِ دستی/متوقف، ساعت و چراغِ سبزِ ویجتِ زنده‌ی کناری را نشان ندهد
-            val ownLatest = quotes.maxOfOrNull { it.ts } ?: 0L
+            val ownLatest = healed.maxOfOrNull { it.ts } ?: 0L
             val updatedAt = ownLatest.takeIf { it > 0 } ?: QuoteRepo.lastUpdated(context)
             WidgetRenderer.render(
                 context = context,
                 widgetId = widgetId,
                 cfg = cfg,
-                quotes = QuoteRepo.withLocalSpark(context, sortQuotes(quotes, cfg.sortMode)),
+                quotes = QuoteRepo.withLocalSpark(context, sortQuotes(healed, cfg.sortMode)),
                 live = cfg.liveService,
                 updatedAt = updatedAt,
                 sourceTitle = sourceTitle

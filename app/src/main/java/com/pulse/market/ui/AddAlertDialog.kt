@@ -96,6 +96,12 @@ fun AddAlertDialog(
     val canSave = (if (manualMode) manualCode.isNotBlank() else symbolCode.isNotBlank()) &&
             (threshold.replace(",", "").toDoubleOrNull() != null)
 
+    // واحدِ نمادِ انتخاب‌شده — کنار عددِ حد هشدار نشان داده می‌شود (مثل خود ویجت)
+    val selectedUnit = (
+            sources.firstOrNull { it.id == symbolSourceId }
+                ?: sources.firstOrNull()
+            )?.unit.orEmpty()
+
     DialogShell(
         icon = Icons.Default.NotificationsActive,
         tint = Color(0xFFF43F5E),
@@ -184,7 +190,9 @@ fun AddAlertDialog(
                             label = {
                                 Text(
                                     when (condition) {
-                                        AlertCondition.ABOVE, AlertCondition.BELOW -> "عدد قیمت (مثلاً 6420)"
+                                        AlertCondition.ABOVE, AlertCondition.BELOW ->
+                                            if (selectedUnit.isNotEmpty()) "عدد قیمت به $selectedUnit (مثلاً 6420)"
+                                            else "عدد قیمت (مثلاً 6420)"
                                         else -> "درصد (مثلاً 5)"
                                     }
                                 )

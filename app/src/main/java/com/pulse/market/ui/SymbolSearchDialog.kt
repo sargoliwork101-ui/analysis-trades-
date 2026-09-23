@@ -53,10 +53,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.pulse.market.data.MarketKind
 import com.pulse.market.data.SourceDef
 import com.pulse.market.data.SymbolDef
 import com.pulse.market.data.TseService
 import com.pulse.market.data.WebSymbolSearch
+import com.pulse.market.data.marketKind
 import com.pulse.market.ui.settings.DialogShell
 import com.pulse.market.ui.settings.RowDivider
 import com.pulse.market.ui.settings.RowsCard
@@ -100,14 +102,16 @@ fun SymbolSearchDialog(
 
     // منبع پیش‌فرض: بورس (اگر فعال باشد)، وگرنه اولین منبع ویجت
     var activeSource by remember {
-        mutableStateOf(sources.firstOrNull { it.id == "tse_tsetmc" } ?: sources.firstOrNull())
+        mutableStateOf(
+            sources.firstOrNull { it.marketKind == MarketKind.TSE } ?: sources.firstOrNull()
+        )
     }
     var query by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("") }
     var hits by remember { mutableStateOf<List<SearchHit>>(emptyList()) }
 
-    val isTse = activeSource?.id == "tse_tsetmc"
+    val isTse = activeSource?.marketKind == MarketKind.TSE
 
     // جستجوی خودکار با تغییر منبع یا عبارت — با مکث کوتاه تا تایپ تمام شود
     LaunchedEffect(activeSource?.id, query) {
@@ -116,14 +120,14 @@ fun SymbolSearchDialog(
         delay(350)
         loading = true
         val result = runCatching {
-            if (src.id == "tse_tsetmc") tseHits(q, tseCustomSymbols)
+            if (src.marketKind == MarketKind.TSE) tseHits(q, tseCustomSymbols)
             else generalHits(src, q)
         }.getOrDefault(emptyList())
         hits = result
         loading = false
         status = when {
             result.isNotEmpty() || q.isBlank() -> ""
-            src.id == "tse_tsetmc" ->
+            src.marketKind == MarketKind.TSE ->
                 "چیزی با «$q» پیدا نشد — می‌توانی لینک صفحه‌ی TSETMC را بچسبانی و دوباره جستجو کنی"
 
             else -> "در فهرست این منبع چیزی با «$q» نبود — می‌توانی همین را به‌عنوان کد دلخواه اضافه کنی"
@@ -261,7 +265,7 @@ private suspend fun tseHits(q: String, custom: List<SymbolDef>): List<SearchHit>
             title = inst.symbol,
             subtitle = inst.name,
             priceLine = if (inst.closePrice != null && inst.closePrice > 0) {
-                "قیمت: ${Format.price(inst.closePrice)} ریال" +
+                "قیمت: ${QuoteText.priceWithUnit(inst.closePrice, "ریال")}" +
                         (inst.volume?.let { " • حجم ${Format.volume(it)}" } ?: "")
             } else "",
             altCode = inst.insCode,
