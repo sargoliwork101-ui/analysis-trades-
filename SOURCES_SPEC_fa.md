@@ -47,6 +47,7 @@ SourceDef (تعریف منبع: آدرس + مسیرها + نمادها)
 | `kind` | enum | `JSON_REST` \| `HTML_CSS` \| `TSE_TSETMC` |
 | `urlTemplate` | string | آدرس هر نماد؛ جای `{symbol}` با کدِ URL-encoded نماد عوض می‌شود |
 | `batchTemplate` | string? | آدرس گروهی؛ جای `{symbols}` با کدها (جدا با `,` و URL-encoded) عوض می‌شود |
+| `urlFallbacks` | string[] | آدرس‌های پشتیبان (v1.10+) — اگر اصلی شکست خورد، این‌ها به‌ترتیب امتحان می‌شوند؛ `{symbol}`/`{symbols}` جایگزین می‌شود |
 | `pricePath` | string? | مسیر قیمت در JSON (زیربخش ۴) |
 | `changePath` | string? | مسیر «تغییر» — معنایش با `changeMode` تعیین می‌شود |
 | `changeMode` | enum | `PERCENT` \| `ABSOLUTE` \| `PREV_CLOSE` \| `NONE` |
@@ -106,6 +107,7 @@ SourceDef (تعریف منبع: آدرس + مسیرها + نمادها)
     { "code": "btc", "label": "بیت‌کوین", "sourceId": "my_source" }
   ],
   "headers": { },
+  "urlFallbacks": ["https://mirror.example.com/price/{symbol}"],
   "builtIn": false
 }
 ```

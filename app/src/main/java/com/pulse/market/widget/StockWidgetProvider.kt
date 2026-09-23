@@ -10,6 +10,7 @@ import com.pulse.market.data.ConfigStore
 import com.pulse.market.data.Quote
 import com.pulse.market.data.QuoteRepo
 import com.pulse.market.data.SourceCatalog
+import com.pulse.market.data.SymbolDef
 import com.pulse.market.data.SymbolSort
 import com.pulse.market.data.WidgetConfig
 import com.pulse.market.service.LiveUpdateService
@@ -134,7 +135,26 @@ open class StockWidgetProvider : AppWidgetProvider() {
             val wantedAll = cfgs.map { (_, cfg) -> QuoteRepo.wantedFor(context, cfg) }
             val wantedNet = cfgs.mapIndexed { i, (_, cfg) ->
                 val skip = respectSchedule && (!cfg.liveService || !inRefreshWindow(cfg))
-                if (skip) emptyList() else wantedAll[i]
+                when {
+                    skip -> emptyList()
+                    else -> {
+                        // نمادهای هشدارهای فعال هم از شبکه خوانده می‌شوند — حتی اگر در
+                        // ویجت نمایش داده نشده باشند؛ تا هشدار همیشه با داده‌ی تازه
+                        // بررسی شود و بعد از مدتی بی‌صدا از کار نیفتد
+                        val alertSyms = cfg.alerts.filter { it.enabled }.mapNotNull { rule ->
+                            val sid = rule.sourceId.ifBlank { cfg.sourceId }
+                            if (sid.isBlank() ||
+                                ConfigStore.resolveSource(context, sid) == null
+                            ) null
+                            else sid to SymbolDef(
+                                rule.symbolCode,
+                                rule.symbolLabel.ifBlank { rule.symbolCode },
+                                sid
+                            )
+                        }
+                        (wantedAll[i] + alertSyms).distinctBy { it.first to it.second.code }
+                    }
+                }
             }
 
             val cached = QuoteRepo.loadCachedMap(context)
@@ -236,9 +256,30 @@ open class StockWidgetProvider : AppWidgetProvider() {
             return if (from < to) minute in from..to else (minute >= from || minute <= to)
         }
 
-        /** سرویس زنده فقط وقتی لازم است که هیچ ویجتی liveService داشته باشد */
+        /**
+         * آیا ویجتِ واقعیِ زنده‌ای روی صفحه هست؟
+         * تنظیمِ «مؤثرِ» هر ویجت واقعی حساب می‌شود (ویجتی که تنظیمات ذخیره‌شده ندارد = الگو)؛
+         * ولی خودِ الگو به‌تنهایی حساب نمی‌شود — وگرنه با حذف/دستی‌کردن همه‌ی ویجت‌ها
+         * هم سرویس زنده و Worker برای همیشه روشن می‌ماندند و باتری می‌سوزاندند.
+         */
+        suspend fun anyLiveWidget(context: Context): Boolean {
+            val ids = WidgetRenderer.allWidgetIds(context)
+            return ids.isNotEmpty() && ids.any { ConfigStore.current(context, it).liveService }
+        }
+
+        /** کمینه‌ی فاصله‌ی تازه‌سازی بین ویجت‌های واقعیِ زنده — الگو به‌تنهایی وارد نمی‌شود */
+        suspend fun liveInterval(context: Context): Int {
+            val ids = WidgetRenderer.allWidgetIds(context)
+            return ids.map { ConfigStore.current(context, it) }
+                .filter { it.liveService }
+                .minOfOrNull { it.intervalSec }
+                ?.coerceIn(5, 3600)
+                ?: 15
+        }
+
+        /** سرویس زنده فقط وقتی لازم است که ویجتِ واقعیِ زنده‌ای روی صفحه باشد */
         suspend fun syncLiveService(context: Context) {
-            if (ConfigStore.anyLive(context)) {
+            if (anyLiveWidget(context)) {
                 LiveUpdateService.start(context)
                 LiveUpdateWorker.schedule(context)
             } else {
