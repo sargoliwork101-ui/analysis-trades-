@@ -48,6 +48,8 @@
             android:id="@+id/txt_time"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:maxLines="1"
+            android:ellipsize="end"
             android:text="--:--"
             android:textColor="#8B9AB1"
             android:textSize="10sp" />

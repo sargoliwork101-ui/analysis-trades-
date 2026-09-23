@@ -14,18 +14,17 @@ import kotlinx.serialization.json.Json
  * گرفتن قیمت‌ها به‌صورت موازی + کش مشترک بین ویجت‌ها:
  * هر نماد فقط یک بار از شبکه گرفته می‌شود، حتی اگر چند ویجت آن را نشان دهند.
  *
- * «تاریخچه‌ی قیمت» هم اینجا نگه داشته می‌شود: با هر به‌روزرسانی سالم، یک نقطه به
- * سری هر نماد اضافه می‌شود تا نمودار مینیاتوری (sparkline) حتی برای منابعی مثل
- * بورس تهران که سری آماده نمی‌دهند، تدریجاً شکل بگیرد.
+ * «تاریخچه‌ی قیمت» هم اینجا روی گوشی ذخیره می‌شود: با هر به‌روزرسانی سالم یک نقطه
+ * به سری هر نماد اضافه می‌شود تا نمودار مینیاتوری (sparkline) برای همه‌ی منابع —
+ * حتی بورس تهران که سری آماده نمی‌دهد — شکل بگیرد. تاریخچه به‌ازای هر «نماد»
+ * نگه داشته می‌شود (نه هر ویجت) تا ویجت‌هایی که نماد یکسان دارند داده را مشترک
+ * استفاده کنند و حافظه تلف نشود؛ تعداد نقاطِ «نمایش» را هر ویجت خودش تعیین می‌کند.
  */
 object QuoteRepo {
 
     private const val PREF = "pulse_cache"
     private const val KEY_QUOTES = "quotes"
     private const val KEY_HISTORY = "price_history"
-
-    /** بیشترین نقاط تاریخچه‌ی هر نماد برای نمودار */
-    private const val HISTORY_MAX = 48
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val historySerializer =
@@ -71,7 +70,11 @@ object QuoteRepo {
         }.getOrDefault(emptyMap<String, List<Double>>()).toMutableMap()
     }
 
-    /** با هر مقدار سالم یک نقطه به سری نماد اضافه می‌شود؛ تکرارِ قیمت قبلی دوباره ثبت نمی‌شود */
+    /**
+     * با هر موفقیتِ خواندن، یک نقطه به سری نماد اضافه می‌شود — حتی اگر قیمت تغییر
+     * نکرده باشد؛ این‌طور نمودار برای بورس تهران و روزهای بسته‌ی بازار هم به‌درستی
+     * و بدون وابستگی به «تغییر قیمت» به‌تدریج شکل می‌گیرد.
+     */
     private fun appendHistory(context: Context, fresh: List<Quote>) {
         val good = fresh.filter { it.price != null }
         if (good.isEmpty()) return
@@ -79,10 +82,8 @@ object QuoteRepo {
         good.forEach { q ->
             val k = key(q.sourceId, q.code)
             val series = (hist[k] ?: emptyList()).toMutableList()
-            if (series.lastOrNull() != q.price) {
-                series += q.price!!
-                hist[k] = series.takeLast(HISTORY_MAX)
-            }
+            series += q.price!!
+            hist[k] = series.takeLast(SPARK_HISTORY_MAX)
         }
         prefs(context).edit()
             .putString(KEY_HISTORY, json.encodeToString(historySerializer, hist))

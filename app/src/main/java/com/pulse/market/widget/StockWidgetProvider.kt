@@ -117,33 +117,43 @@ open class StockWidgetProvider : AppWidgetProvider() {
          * respectSchedule: درخواست‌های زمان‌بندی‌شده (سرویس زنده/Worker) به بازه‌ی ساعتی
          * هر ویجت احترام می‌گذارند تا بیرون از آن ساعت‌ها اینترنت مصرف نشود؛
          * رفرش دستیِ کاربر (دکمه‌ی روی ویجت) همیشه انجام می‌شود.
+         *
+         * نکته‌ی مهم: «نمایش» هرگز متوقف نمی‌شود — ویجتی که این نوبت شبکه نمی‌خواهد
+         * (بیرون از بازه‌ی ساعتی، بدون اینترنت، یا حالت دستی) آخرین داده‌ی سالم خودش را
+         * نشان می‌دهد و فقط چراغ‌هایش قرمز می‌شوند؛ صفحه هرگز خالی نمی‌شود.
          */
         suspend fun refreshAll(context: Context, force: Boolean = false, respectSchedule: Boolean = false) {
             val ids = WidgetRenderer.allWidgetIds(context)
             if (ids.isEmpty()) return
 
             val cfgs = ids.map { it to ConfigStore.current(context, it) }
+
+            // نمادهای هر ویجت همیشه برای «نمایش» محاسبه می‌شوند؛
+            // فقط «گرفتن از شبکه» به بازه‌ی ساعتی احترام می‌گذارد
+            val wantedAll = cfgs.map { (_, cfg) -> QuoteRepo.wantedFor(context, cfg) }
             // بیرون از بازه‌ی ساعتی کاربر؟ آن ویجت این نوبت چیزی از شبکه نمی‌خواهد
-            val wantedList = cfgs.map { (_, cfg) ->
-                if (respectSchedule && !inRefreshWindow(cfg)) emptyList()
-                else QuoteRepo.wantedFor(context, cfg)
+            val wantedNet = cfgs.mapIndexed { i, (_, cfg) ->
+                if (respectSchedule && !inRefreshWindow(cfg)) emptyList() else wantedAll[i]
             }
 
             val cached = QuoteRepo.loadCachedMap(context)
             val minInterval = cfgs.minOf { it.second.intervalSec }.coerceIn(5, 3600)
             val stale =
                 System.currentTimeMillis() - QuoteRepo.lastUpdated(context) > minInterval * 1000L
-            val missing = wantedList.flatten().any { QuoteRepo.key(it.first, it.second.code) !in cached }
+            val missing = wantedNet.flatten().any { QuoteRepo.key(it.first, it.second.code) !in cached }
             val needNetwork =
-                (force || cached.isEmpty() || stale || missing) && wantedList.flatten().isNotEmpty()
+                (force || cached.isEmpty() || stale || missing) && wantedNet.flatten().isNotEmpty()
 
-            val quoteMap = if (needNetwork) QuoteRepo.refreshMany(context, wantedList) else cached
+            val quoteMap = if (needNetwork) QuoteRepo.refreshMany(context, wantedNet) else cached
 
             cfgs.forEachIndexed { i, (id, cfg) ->
-                val quotes = wantedList[i].mapNotNull { quoteMap[QuoteRepo.key(it.first, it.second.code)] }
+                val quotes = wantedAll[i].mapNotNull { quoteMap[QuoteRepo.key(it.first, it.second.code)] }
                 renderOne(context, id, cfg, quotes)
-                // هشدارهای هر ویجت روی داده‌ی خودش
-                runCatching { AlertEngine.evaluate(context, cfg, quotes) }
+                // هشدارها فقط با داده‌ی همین نوبتِ شبکه بررسی می‌شوند؛
+                // روی داده‌ی قدیمیِ نگه‌داشته‌شده (آفلاین/توقف تازه‌سازی) هشدار نمی‌رود
+                if (wantedNet[i].isNotEmpty()) {
+                    runCatching { AlertEngine.evaluate(context, cfg, quotes) }
+                }
             }
         }
 

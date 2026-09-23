@@ -134,7 +134,7 @@ object Fetcher {
         val change = readChange(json, source, sym, rawPrice)
         val spark = JsonPath.readDoubleList(json, source.sparkPath?.replace("{symbol}", sym.code))
             .map { it * source.scale }
-            .let { if (it.size >= 3) it.takeLast(48) else emptyList() }
+            .let { if (it.size >= 3) it.takeLast(SPARK_HISTORY_MAX) else emptyList() }
         val scaled = rawPrice?.let { it * source.scale }
         return Quote(
             code = sym.code, sourceId = source.id,

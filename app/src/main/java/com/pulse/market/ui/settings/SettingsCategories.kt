@@ -408,17 +408,48 @@ fun ValuesCategory(
             RowDivider()
             SwitchRow(
                 "نمودار مینیاتوری",
-                "روند هر نماد کنار قیمت — برای بورس تهران هم با هر به‌روزرسانی به‌تدریج شکل می‌گیرد",
+                "روند قیمت کنار هر نماد — برای همه‌ی منابع حتی بورس تهران، از داده‌های ذخیره‌شده روی همین گوشی",
                 cfg.showSparkline
             ) {
                 onChange(cfg.copy(showSparkline = it))
+            }
+            if (cfg.showSparkline) {
+                RowDivider()
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("تعداد نقاط نمودار", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface)
+                        Text(
+                            "${Format.toPersianDigits("${cfg.sparkPoints}")} نقطه",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Slider(
+                        value = cfg.sparkPoints.coerceIn(6, 60).toFloat(),
+                        onValueChange = { onChange(cfg.copy(sparkPoints = it.toInt().coerceIn(6, 60))) },
+                        valueRange = 6f..60f
+                    )
+                    Hint(
+                        "داده‌های نمودار روی گوشی ذخیره می‌شوند و هر ویجت تعداد نقاط دلخواه خودش را " +
+                                "از انتهای سری نشان می‌دهد — چند به‌روزرسانی اول طول می‌کشد تا نمودار شکل بگیرد."
+                    )
+                }
             }
             RowDivider()
             SwitchRow("ساعت بالای ویجت", null, cfg.showTime) {
                 onChange(cfg.copy(showTime = it))
             }
             RowDivider()
-            SwitchRow("وضعیت بازار تهران", "کنار ساعت: باز/بسته بودن جلسه‌ی بورس", cfg.showMarketStatus) {
+            SwitchRow(
+                "وضعیت بازارها",
+                "کنار ساعت: باز/بسته بودن بازارهای همین ویجت — بورس، کریپتو، آمریکا، طلا و ارز",
+                cfg.showMarketStatus
+            ) {
                 onChange(cfg.copy(showMarketStatus = it))
             }
             RowDivider()
@@ -705,6 +736,7 @@ fun UpdateCategory(
             }
         }
         Hint("کریپتو و سهام آمریکا: ۱۰ تا ۳۰ ثانیه • بورس تهران: ۶۰ ثانیه (داده‌ی TSETMC با تأخیر می‌آید)")
+        Hint("بدون اینترنت یا بیرون از بازه‌ی بالا ویجت خالی نمی‌شود: آخرین قیمت‌ها روی صفحه می‌ماند و فقط چراغ کنار نمادها قرمز می‌شود.")
 
         // ── بازه‌ی ساعتی تازه‌سازی — صرفه‌جویی در مصرف اینترنت ──
         SectionHeader(
