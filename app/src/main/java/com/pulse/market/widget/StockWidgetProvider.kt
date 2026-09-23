@@ -129,15 +129,19 @@ open class StockWidgetProvider : AppWidgetProvider() {
             val cfgs = ids.map { it to ConfigStore.current(context, it) }
 
             // نمادهای هر ویجت همیشه برای «نمایش» محاسبه می‌شوند؛
-            // فقط «گرفتن از شبکه» به بازه‌ی ساعتی احترام می‌گذارد
+            // فقط «گرفتن از شبکه» به تنظیمات هر ویجت احترام می‌گذارد:
+            // بیرون از بازه‌ی ساعتی یا ویجتِ «دستی» (به‌روزرسانی خودکار خاموش) این نوبت شبکه نمی‌خواهد
             val wantedAll = cfgs.map { (_, cfg) -> QuoteRepo.wantedFor(context, cfg) }
-            // بیرون از بازه‌ی ساعتی کاربر؟ آن ویجت این نوبت چیزی از شبکه نمی‌خواهد
             val wantedNet = cfgs.mapIndexed { i, (_, cfg) ->
-                if (respectSchedule && !inRefreshWindow(cfg)) emptyList() else wantedAll[i]
+                val skip = respectSchedule && (!cfg.liveService || !inRefreshWindow(cfg))
+                if (skip) emptyList() else wantedAll[i]
             }
 
             val cached = QuoteRepo.loadCachedMap(context)
-            val minInterval = cfgs.minOf { it.second.intervalSec }.coerceIn(5, 3600)
+            // فاصله‌ی تازگی فقط از ویجت‌هایی که واقعاً شبکه می‌خواهند
+            val minInterval = (cfgs.filterIndexed { i, _ -> wantedNet[i].isNotEmpty() }
+                .minOfOrNull { it.second.intervalSec } ?: cfgs.minOf { it.second.intervalSec })
+                .coerceIn(5, 3600)
             val stale =
                 System.currentTimeMillis() - QuoteRepo.lastUpdated(context) > minInterval * 1000L
             val missing = wantedNet.flatten().any { QuoteRepo.key(it.first, it.second.code) !in cached }
@@ -150,9 +154,17 @@ open class StockWidgetProvider : AppWidgetProvider() {
                 val quotes = wantedAll[i].mapNotNull { quoteMap[QuoteRepo.key(it.first, it.second.code)] }
                 renderOne(context, id, cfg, quotes)
                 // هشدارها فقط با داده‌ی همین نوبتِ شبکه بررسی می‌شوند؛
-                // روی داده‌ی قدیمیِ نگه‌داشته‌شده (آفلاین/توقف تازه‌سازی) هشدار نمی‌رود
+                // نمادِ هشدار لازم نیست حتماً در ویجت نمایش داده شود — از داده‌ی
+                // تازه‌ی کش (تا ۱۵ دقیقه) بررسی می‌شود تا هشداری بی‌صدا از کار نیفتد
                 if (wantedNet[i].isNotEmpty()) {
-                    runCatching { AlertEngine.evaluate(context, cfg, quotes) }
+                    val alertQuotes = cfg.alerts.filter { it.enabled }.mapNotNull { rule ->
+                        (quoteMap[QuoteRepo.key(rule.sourceId, rule.symbolCode)]
+                            ?: quoteMap.entries.firstOrNull {
+                                it.key.endsWith("|${rule.symbolCode}")
+                            }?.value)
+                            ?.takeIf { System.currentTimeMillis() - it.ts <= 15 * 60_000L }
+                    }
+                    runCatching { AlertEngine.evaluate(context, cfg, quotes + alertQuotes) }
                 }
             }
         }
@@ -178,8 +190,10 @@ open class StockWidgetProvider : AppWidgetProvider() {
                     SourceCatalog.byId(sourceIds.first())?.title?.substringBefore(" —") ?: "منبع دلخواه"
                 else -> "نبض بازار"
             }
-            val updatedAt =
-                QuoteRepo.lastUpdated(context).takeIf { it > 0 } ?: System.currentTimeMillis()
+            // زمانِ «همین ویجت»: تازه‌ترین داده‌ی نمادهای خودش — نه سراسری؛
+            // تا ویجتِ دستی/متوقف، ساعت و چراغِ سبزِ ویجتِ زنده‌ی کناری را نشان ندهد
+            val ownLatest = quotes.maxOfOrNull { it.ts } ?: 0L
+            val updatedAt = ownLatest.takeIf { it > 0 } ?: QuoteRepo.lastUpdated(context)
             WidgetRenderer.render(
                 context = context,
                 widgetId = widgetId,

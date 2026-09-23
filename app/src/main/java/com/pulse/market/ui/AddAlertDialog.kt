@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.sp
 import com.pulse.market.data.AlertCondition
 import com.pulse.market.data.AlertRule
 import com.pulse.market.data.SourceDef
+import com.pulse.market.data.SymbolDef
 import com.pulse.market.ui.settings.DialogActionsRow
 import com.pulse.market.ui.settings.DialogShell
 import com.pulse.market.ui.settings.InnerRow
@@ -48,25 +49,31 @@ import com.pulse.market.ui.settings.SwitchRow
 fun AddAlertDialog(
     sources: List<SourceDef>,
     existing: AlertRule?,
+    widgetSymbols: List<SymbolDef> = emptyList(),
     onDismiss: () -> Unit,
     onSave: (AlertRule) -> Unit
 ) {
-    val manualMode = sources.all { it.symbols.isEmpty() }
+    // نمادهای قابل هشدار برای هر منبع: اول نمادهایی که کاربر واقعاً در ویجت دارد
+    // (حتی جستجوشده‌ها مثل صندوق‌ها)، بعد نمادهای آماده‌ی خود منبع — بدون تکرار.
+    // این‌طور هشدار روی «همه‌ی» نمادهای دیده‌شده ممکن است، نه فقط لیست ثابت منبع.
+    val symbolsPerSource: List<Pair<SourceDef, List<SymbolDef>>> = sources.map { src ->
+        val mine = widgetSymbols.filter { it.sourceId == src.id }
+        val rest = src.symbols.filter { s -> mine.none { it.code == s.code } }
+            .map { it.copy(sourceId = src.id) }
+        src to (mine + rest)
+    }
+    val firstSymbol = symbolsPerSource.firstNotNullOfOrNull { (_, list) -> list.firstOrNull() }
+
+    val manualMode = symbolsPerSource.all { it.second.isEmpty() }
 
     var symbolCode by remember {
-        mutableStateOf(existing?.symbolCode ?: sources.firstOrNull()?.symbols?.firstOrNull()?.code ?: "")
+        mutableStateOf(existing?.symbolCode ?: firstSymbol?.code ?: "")
     }
     var symbolLabel by remember {
-        mutableStateOf(
-            existing?.symbolLabel
-                ?: sources.firstOrNull()?.symbols?.firstOrNull()?.label
-                ?: ""
-        )
+        mutableStateOf(existing?.symbolLabel ?: firstSymbol?.label ?: "")
     }
     var symbolSourceId by remember {
-        mutableStateOf(
-            existing?.sourceId ?: sources.firstOrNull()?.id ?: ""
-        )
+        mutableStateOf(existing?.sourceId ?: firstSymbol?.sourceId ?: sources.firstOrNull()?.id ?: "")
     }
     var manualCode by remember { mutableStateOf(if (manualMode) existing?.symbolCode ?: "" else "") }
     var manualLabel by remember { mutableStateOf(if (manualMode) existing?.symbolLabel ?: "" else "") }
@@ -122,15 +129,15 @@ fun AddAlertDialog(
                         }
                     } else {
                         InnerRow {
-                            sources.forEach { src ->
-                                if (src.symbols.isNotEmpty()) {
+                            symbolsPerSource.forEach { (src, syms) ->
+                                if (syms.isNotEmpty()) {
                                     Text(
                                         src.title.substringBefore(" —"),
                                         fontSize = 11.sp,
                                         color = MaterialTheme.colorScheme.secondary
                                     )
                                     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        src.symbols.forEach { sym ->
+                                        syms.forEach { sym ->
                                             val selected = symbolCode == sym.code && symbolSourceId == src.id
                                             FilterChip(
                                                 selected = selected,

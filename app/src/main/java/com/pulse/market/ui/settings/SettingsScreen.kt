@@ -225,6 +225,9 @@ fun SettingsScreen(
                         customSources = ConfigStore.currentCustomSources(context)
                         tseCustomSymbols = ConfigStore.currentTseSymbols(context)
                         StockWidgetProvider.requestUpdate(context)
+                        // سرویس زنده/Worker هم مطابق تنظیمات بازیابی‌شده همگام شود —
+                        // وگرنه تا اولین تغییرِ دستی، به‌روزرسانی پس‌زمینه راه نمی‌افتد
+                        StockWidgetProvider.syncLiveService(context)
                     }
                 }
                 busy = false
@@ -631,6 +634,7 @@ fun SettingsScreen(
         AddAlertDialog(
             sources = selectedSources,
             existing = editingAlert,
+            widgetSymbols = cfg.symbols,
             onDismiss = { alertDialogOpen = false; editingAlert = null },
             onSave = { rule ->
                 val list = cfg.alerts.filterNot { it.id == rule.id } + rule

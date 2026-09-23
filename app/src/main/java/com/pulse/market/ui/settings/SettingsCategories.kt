@@ -1,6 +1,7 @@
 package com.pulse.market.ui.settings
 
 import android.app.TimePickerDialog
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -42,10 +43,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pulse.market.data.AlertRule
+import com.pulse.market.data.MarketStatus
 import com.pulse.market.data.MAX_SYMBOLS
 import com.pulse.market.data.SourceDef
 import com.pulse.market.data.SymbolDef
@@ -610,7 +615,7 @@ private fun WidgetPreviewCard(cfg: WidgetConfig) {
                 .padding(14.dp)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                // سرصفحه
+                // سرصفحه — همان چیزی که ویجت واقعی نشان می‌دهد: ساعت + وضعیت بازارها
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         Modifier
@@ -625,11 +630,17 @@ private fun WidgetPreviewCard(cfg: WidgetConfig) {
                         fontSize = (12f * scale).sp
                     )
                     Spacer(Modifier.weight(1f))
-                    if (cfg.showTime) {
+                    val headerBits = buildList {
+                        if (cfg.showTime) add(txt("به‌روز ۱۴:۳۲", persian))
+                        if (cfg.showMarketStatus)
+                            add(txt(MarketStatus.headerFor(cfg.activeSourceIds, short = true), persian))
+                    }
+                    if (headerBits.isNotEmpty()) {
                         Text(
-                            txt("به‌روز ۱۴:۳۲", persian),
+                            headerBits.joinToString(" • "),
                             color = pal.sub,
-                            fontSize = (9.5f * scale).sp
+                            fontSize = (9.5f * scale).sp,
+                            maxLines = 1
                         )
                     }
                 }
@@ -683,6 +694,14 @@ private fun PreviewRow(
                 )
             }
         }
+        // نمودار مینیاتوری — در پیش‌نمایش هم دیده شود تا کاربر بداند چه چیزی فعال است
+        if (cfg.showSparkline) {
+            Spacer(Modifier.width(8.dp))
+            PreviewSpark(
+                up = change > 0,
+                modifier = Modifier.size(width = 36.dp, height = 16.dp)
+            )
+        }
         Column(horizontalAlignment = Alignment.End) {
             Text(
                 Format.price(price, cfg.persianDigits, cfg.compactNumbers),
@@ -699,6 +718,27 @@ private fun PreviewRow(
                 )
             }
         }
+    }
+}
+
+/** نمودار مینیاتوری پیش‌نمایش — خط ساده‌ی صعودی/نزولی هم‌رنگ بج تغییر */
+@Composable
+private fun PreviewSpark(up: Boolean, modifier: Modifier = Modifier) {
+    val color = if (up) Color(0xFF22C55E) else Color(0xFFF43F5E)
+    Canvas(modifier = modifier) {
+        // الگوی نمونه: صعودی/نزولی — مثل ویجت واقعی رنگش با جهت تغییر می‌شود
+        val fractions = listOf(0.78f, 0.60f, 0.68f, 0.48f, 0.55f, 0.32f)
+            .map { if (up) 1f - it else it }
+        val path = Path()
+        fractions.forEachIndexed { i, f ->
+            val x = size.width * i / (fractions.size - 1)
+            val y = size.height * f
+            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        drawPath(
+            path, color = color,
+            style = Stroke(width = 2.2f, cap = StrokeCap.Round)
+        )
     }
 }
 

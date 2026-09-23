@@ -154,14 +154,16 @@ object QuoteRepo {
         val cached = loadCachedMap(context)
         val fresh = fetched.associateBy { key(it.sourceId, it.code) }
 
-        // نقشه‌ی نمایش: تازه اگر آمده؛ وگرنه آخرین مقدار سالم + علامت stale (چراغ قرمز)
+        // نقشه‌ی نمایش: تازه اگر آمده؛ وگرنه آخرین مقدار سالم + علامت stale (چراغ قرمز).
+        // ts همان «آخرین داده‌ی سالم» می‌ماند (نه زمانِ تلاشِ ناموفق) تا ساعتِ هر ویجت
+        // و چراغ‌هایش وضعیت واقعی همان ویجت را نشان دهند.
         val out = mutableMapOf<String, Quote>()
         (cached.keys + fresh.keys).forEach { k ->
             val f = fresh[k]
             val c = cached[k]
             val quote = when {
                 f != null && f.price != null -> f
-                c != null && c.price != null -> c.copy(stale = true, ts = f?.ts ?: c.ts)
+                c != null && c.price != null -> c.copy(stale = true)
                 f != null -> f
                 else -> c
             }
