@@ -9,6 +9,7 @@ import android.util.TypedValue
 import android.view.View
 import android.widget.RemoteViews
 import com.pulse.market.R
+import com.pulse.market.data.InternalGuard
 import com.pulse.market.data.Quote
 import com.pulse.market.data.MarketStatus
 import com.pulse.market.data.WidgetConfig
@@ -390,22 +391,35 @@ object WidgetRenderer {
 
     // ── PendingIntent ها ──
 
+    /**
+     * PendingIntent دکمه‌ی رفرش — با «توکن داخلی» امضا می‌شود.
+     * رسیور ویجت exported است (لانچر باید APPWIDGET_UPDATE بفرستد)، پس هر برنامه‌ی
+     * دیگری هم می‌توانست این اکشن را بفرستد و رفرش/تغییر حالت زنده را تحمیل کند؛
+     * توکن فقط در حافظه‌ی خصوصی ماست و روی PendingIntent (IMMUTABLE) قفل می‌شود.
+     */
     private fun refreshIntent(context: Context, widgetId: Int): PendingIntent {
-        val intent = Intent(context, StockWidgetProvider::class.java).apply {
-            action = StockWidgetProvider.ACTION_REFRESH
-            putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId)
-        }
+        val intent = InternalGuard.sign(
+            context,
+            Intent(context, StockWidgetProvider::class.java).apply {
+                action = StockWidgetProvider.ACTION_REFRESH
+                putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId)
+            }
+        )
         return PendingIntent.getBroadcast(
             context, 1000 + widgetId, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
     }
 
+    /** PendingIntent کلید زنده/دستی روی سرصفحه — مثل رفرش، توکن‌دار */
     private fun toggleLiveIntent(context: Context, widgetId: Int): PendingIntent {
-        val intent = Intent(context, StockWidgetProvider::class.java).apply {
-            action = StockWidgetProvider.ACTION_TOGGLE_LIVE
-            putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId)
-        }
+        val intent = InternalGuard.sign(
+            context,
+            Intent(context, StockWidgetProvider::class.java).apply {
+                action = StockWidgetProvider.ACTION_TOGGLE_LIVE
+                putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId)
+            }
+        )
         return PendingIntent.getBroadcast(
             context, 2000 + widgetId, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE

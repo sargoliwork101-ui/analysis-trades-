@@ -106,6 +106,12 @@ fun AddSourceDialog(
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri)
                         )
                         Hint("مثلاً: https://api.example.com/price/{symbol}")
+                        if (url.trim().startsWith("http://")) {
+                            Hint(
+                                "⚠️ آدرس http رمزنگاری نشده است؛ هر کسی در مسیر شبکه می‌تواند " +
+                                        "مقدار قیمت را عوض کند. اگر سایت https دارد، حتماً https بگذار."
+                            )
+                        }
                     }
                 }
             }
@@ -235,7 +241,12 @@ fun AddSourceDialog(
                             minLines = 3,
                             shape = RoundedCornerShape(12.dp)
                         )
-                        Hint("مثل:\nAAPL:اپل\nTSLA:تسلا\nنام نداری؟ فقط کد بنویس — کد، نام هم هست.")
+                        Hint(
+                            "مثل:\nAAPL:اپل\nTSLA:تسلا\nنام نداری؟ فقط کد بنویس — کد، نام هم هست.\n" +
+                                    "واحد مخصوص یک نماد؟ با @ بنویس: ons:انس طلا@$\n" +
+                                    "(کدی که خودش دو نقطه دارد — مثل OANDA:XAUUSD — را در منبع آماده‌ی " +
+                                    "«بازارهای جهانی» پیدا می‌کنی.)"
+                        )
                     }
                 }
             }
@@ -247,15 +258,22 @@ fun AddSourceDialog(
             onCancel = onDismiss,
             confirmEnabled = canSave,
             onConfirm = {
+                // هر خط: «کد» یا «کد:نام» یا «کد:نام@واحد» یا «کد@واحد».
+                // جداکننده‌ی @ عمداً جدا از : است تا کدهایی که خودشان دو نقطه دارند
+                // (مثل OANDA:XAUUSD) خراب نشوند.
                 val syms = symbolsText.lines()
                     .map { it.trim() }
                     .filter { it.isNotEmpty() }
                     .map { line ->
-                        val parts = line.split(":", limit = 2)
+                        val at = line.lastIndexOf('@')
+                        val unitPart = if (at >= 0) line.substring(at + 1).trim() else ""
+                        val core = if (at >= 0) line.substring(0, at).trim() else line
+                        val parts = core.split(":", limit = 2)
                         val code = parts[0].trim()
                         val label = parts.getOrNull(1)?.trim().takeUnless { it.isNullOrEmpty() } ?: code
-                        SymbolDef(code, label)
+                        SymbolDef(code, label, unit = unitPart)
                     }
+                    .filter { it.code.isNotEmpty() }
                 onSave(
                     SourceDef(
                         id = "custom_" + System.currentTimeMillis(),

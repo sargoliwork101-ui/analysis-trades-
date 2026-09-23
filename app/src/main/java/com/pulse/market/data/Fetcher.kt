@@ -4,14 +4,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
 import org.jsoup.Jsoup
 import java.net.URLEncoder
-import java.util.concurrent.TimeUnit
 
 /**
  * موتور گرفتن داده از سایت‌ها.
@@ -21,33 +20,30 @@ import java.util.concurrent.TimeUnit
  *  - JSON تکی: هر نماد یک درخواست (منابع دلخواه بدون آدرس گروهی)
  *  - HTML: خواندن مقدار از صفحه با سلکتور CSS
  *  - TSE: بورس تهران — جستجوی نماد + قیمت پایانی (دو مرحله‌ای)
+ *
+ * همه‌ی درخواست‌ها از [Http] می‌روند: یک کلاینت مشترک، فقط http/https و سقف
+ * حجم پاسخ (جلوگیری از OOM با پاسخ غول‌آسا).
+ *
+ * واحد و ضریب «هر نماد» بر «منبع» مقدم است ([SymbolDef.unit] / [SymbolDef.scale])؛
+ * این‌طور یک منبع می‌تواند هم انس طلای دلاری داشته باشد هم سکه‌ی تومانی.
  */
 object Fetcher {
 
-    private const val UA =
-        "Mozilla/5.0 (Linux; Android 13; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36"
+    /** حداکثر درخواست هم‌زمان — جلوی سیل درخواست‌ها با چند ویجت/چند نماد را می‌گیرد */
+    private const val MAX_PARALLEL = 4
 
-    private val client: OkHttpClient by lazy {
-        OkHttpClient.Builder()
-            .connectTimeout(12, TimeUnit.SECONDS)
-            .readTimeout(15, TimeUnit.SECONDS)
-            .callTimeout(25, TimeUnit.SECONDS)
-            .retryOnConnectionFailure(true)
-            .build()
-    }
+    private val gate = Semaphore(MAX_PARALLEL)
 
     /** گرفتن قیمت همه‌ی نمادهای انتخاب‌شده‌ی یک منبع */
     suspend fun fetchAll(source: SourceDef, symbols: List<SymbolDef>): List<Quote> {
         if (symbols.isEmpty()) return emptyList()
         return withContext(Dispatchers.IO) {
             when {
-                source.kind == FetchKind.TSE_TSETMC ->
-                    coroutineScope { symbols.map { s -> async { fetchTse(source, s) } }.awaitAll() }
+                source.kind == FetchKind.TSE_TSETMC -> parallel(symbols) { s -> fetchTse(source, s) }
 
                 source.batchTemplate != null -> fetchBatch(source, symbols)
 
-                else ->
-                    coroutineScope { symbols.map { s -> async { fetchOne(source, s) } }.awaitAll() }
+                else -> parallel(symbols) { s -> fetchOne(source, s) }
             }
         }
     }
@@ -55,6 +51,14 @@ object Fetcher {
     /** گرفتن قیمت یک نماد (برای دکمه‌ی «تست داده» و منابع دلخواه) */
     suspend fun fetch(source: SourceDef, symbol: SymbolDef): Quote =
         withContext(Dispatchers.IO) { fetchOne(source, symbol) }
+
+    /** اجرای موازی با سقف هم‌زمانی ([MAX_PARALLEL]) */
+    private suspend fun parallel(
+        symbols: List<SymbolDef>,
+        block: suspend (SymbolDef) -> Quote
+    ): List<Quote> = coroutineScope {
+        symbols.map { s -> async { gate.withPermit { block(s) } } }.awaitAll()
+    }
 
     // ───────────────────── انواع خواندن ─────────────────────
 
@@ -79,7 +83,7 @@ object Fetcher {
             symbols.map { quoteFromJson(source, it, json) }
         } catch (_: Throwable) {
             // اگر درخواست گروهی شکست خورد، تک‌تک امتحان کن
-            coroutineScope { symbols.map { s -> async { fetchOne(source, s) } }.awaitAll() }
+            parallel(symbols) { s -> fetchOne(source, s) }
         }
     }
 
@@ -94,7 +98,7 @@ object Fetcher {
                 price = price,
                 changePct = inst.changePct,
                 volume = inst.volume,
-                unit = source.unit,
+                unit = unitOf(source, sym),
                 error = if (price == null) "قیمت پیدا نشد" else null,
                 ts = started
             )
@@ -117,9 +121,10 @@ object Fetcher {
                     ?: error("سلکتور در صفحه پیدا نشد")
             }
             val raw = if (source.cssAttr.isNullOrBlank()) el.text() else el.attr(source.cssAttr)
-            val scaled = Num.parse(raw)?.let { it * source.scale }
+            val scaled = Num.parse(raw)?.let { it * scaleOf(source, sym) }
             Quote(
-                code = sym.code, sourceId = source.id, label = sym.label, price = scaled, unit = source.unit,
+                code = sym.code, sourceId = source.id, label = sym.label, price = scaled,
+                unit = unitOf(source, sym),
                 error = if (scaled == null) "«$raw» عدد نبود" else null,
                 ts = started
             )
@@ -132,19 +137,20 @@ object Fetcher {
 
     private fun quoteFromJson(source: SourceDef, sym: SymbolDef, json: Any): Quote {
         val started = System.currentTimeMillis()
+        val scale = scaleOf(source, sym)
         val rawPrice = JsonPath.readDouble(json, source.pricePath?.replace("{symbol}", sym.code))
-        val change = readChange(json, source, sym, rawPrice)
+        val change = readChange(json, source, sym, rawPrice, scale)
         val spark = JsonPath.readDoubleList(json, source.sparkPath?.replace("{symbol}", sym.code))
-            .map { it * source.scale }
+            .map { it * scale }
             .let { if (it.size >= 3) it.takeLast(SPARK_HISTORY_MAX) else emptyList() }
-        val scaled = rawPrice?.let { it * source.scale }
+        val scaled = rawPrice?.let { it * scale }
         return Quote(
             code = sym.code, sourceId = source.id,
             label = sym.label,
             price = scaled,
             changePct = change,
             volume = readVolume(json, source, sym),
-            unit = source.unit,
+            unit = unitOf(source, sym),
             error = if (scaled == null) "قیمت در پاسخ پیدا نشد" else null,
             ts = started,
             spark = spark
@@ -154,31 +160,48 @@ object Fetcher {
     /** حجم معاملات/حجم ۲۴ ساعت — عدد یا آرایه‌ی میله‌ها (که جمع زده می‌شود) */
     private fun readVolume(json: Any, source: SourceDef, sym: SymbolDef): Double? {
         val path = source.volumePath?.replace("{symbol}", sym.code) ?: return null
-        JsonPath.readDouble(json, path)?.let { return it * source.scale }
+        val scale = scaleOf(source, sym)
+        JsonPath.readDouble(json, path)?.let { return it * scale }
         val list = JsonPath.readDoubleList(json, path)
-        return if (list.isEmpty()) null else list.sum() * source.scale
+        return if (list.isEmpty()) null else list.sum() * scale
     }
 
     /** تبدیل عدد «تغییر» سایت به درصد، بر اساس حالت انتخاب‌شده */
-    private fun readChange(json: Any, source: SourceDef, sym: SymbolDef, rawPrice: Double?): Double? {
+    private fun readChange(
+        json: Any,
+        source: SourceDef,
+        sym: SymbolDef,
+        rawPrice: Double?,
+        scale: Double
+    ): Double? {
         if (source.changeMode == ChangeMode.NONE) return null
         val raw = JsonPath.readDouble(json, source.changePath?.replace("{symbol}", sym.code)) ?: return null
         return when (source.changeMode) {
             ChangeMode.PERCENT -> raw
             ChangeMode.ABSOLUTE -> {
                 val price = rawPrice ?: return null
-                val base = (price / source.scale) - raw
+                val base = (price / scale) - raw
                 if (base == 0.0) null else (raw / base) * 100.0
             }
 
             ChangeMode.PREV_CLOSE -> {
                 val price = rawPrice ?: return null
-                if (raw == 0.0) null else ((price / source.scale - raw) / raw) * 100.0
+                if (raw == 0.0) null else ((price / scale - raw) / raw) * 100.0
             }
 
             ChangeMode.NONE -> null
         }
     }
+
+    // ───────────────────── واحد و ضریب هر نماد ─────────────────────
+
+    /** واحد این نماد — اول واحد خودِ نماد، بعد واحد منبع */
+    fun unitOf(source: SourceDef, sym: SymbolDef): String =
+        sym.unit.trim().ifBlank { source.unit }
+
+    /** ضریب این نماد — اول ضریب خودِ نماد، بعد ضریب منبع */
+    fun scaleOf(source: SourceDef, sym: SymbolDef): Double =
+        sym.scale ?: source.scale
 
     // ───────────────────── ابزارهای HTTP ─────────────────────
 
@@ -190,39 +213,26 @@ object Fetcher {
     /**
      * اولین آدرسی که جواب داد برمی‌گردد — آدرس اصلی و بعد پشتیبان‌ها؛
      * هر آدرس مستقل امتحان می‌شود تا محدودیت/فیلترِ یک سرور، داده را قطع نکند
-     * (مثلاً GitHub در بعضی شبکه‌ها در دسترس نیست ولی آینه‌ی jsDelivr هست).
+     * (مثلاً TradingView در بعضی شبکه‌ها در دسترس نیست ولی TGJU هست).
      */
     private fun getAny(urls: List<String>, source: SourceDef): String {
         var last: Throwable? = null
         for (u in urls) {
             try {
-                return get(u, source)
+                return Http.getTextBlocking(
+                    url = u,
+                    accept = if (source.kind == FetchKind.HTML_CSS)
+                        "text/html,application/xhtml+xml,*/*"
+                    else "application/json, text/plain, */*",
+                    headers = source.headers,
+                    maxBytes = if (source.kind == FetchKind.HTML_CSS)
+                        Http.MAX_HTML_BYTES else Http.MAX_JSON_BYTES
+                )
             } catch (t: Throwable) {
                 last = t
             }
         }
         throw last ?: error("آدرسی برای خواندن تعریف نشده بود")
-    }
-
-    private fun get(url: String, source: SourceDef): String {
-        val request = Request.Builder()
-            .url(url)
-            .header("User-Agent", UA)
-            .header("Accept-Language", "fa,en;q=0.8")
-            .header(
-                "Accept",
-                if (source.kind == FetchKind.HTML_CSS) "text/html,application/xhtml+xml,*/*"
-                else "application/json, text/plain, */*"
-            )
-            .apply { source.headers.forEach { (k, v) -> header(k, v) } }
-            .build()
-        return client.newCall(request).execute().use { resp ->
-            val text = resp.body?.string().orEmpty()
-            if (!resp.isSuccessful) {
-                error("HTTP ${resp.code}" + if (text.isNotBlank()) " — ${text.trim().take(60)}" else "")
-            }
-            text
-        }
     }
 
     private fun parseJson(body: String): Any =
@@ -240,7 +250,7 @@ object Fetcher {
         code = sym.code, sourceId = source.id,
         label = sym.label,
         error = t.message?.take(80) ?: "خطای شبکه",
-        unit = source.unit,
+        unit = unitOf(source, sym),
         ts = started
     )
 }

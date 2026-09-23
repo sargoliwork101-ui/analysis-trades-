@@ -46,6 +46,12 @@ object AlertEngine {
         val minuteOfDay = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
         val dayIndex = persianDayIndex(cal.get(Calendar.DAY_OF_WEEK))
 
+        // همه‌ی «قیمت آخرین‌بار دیده‌شده» و «آخرین نوتیف» در یک تراکنش نوشته می‌شوند؛
+        // قبلاً هر قانون تا دو بار روی دیسک می‌نوشت (با ۱۰ هشدار = ۲۰ نوشتن در هر رفرش).
+        val store = prefs(context)
+        val editor = store.edit()
+        var dirty = false
+
         for (rule in rules) {
             val quote = quotes.firstOrNull {
                 it.code.equals(rule.symbolCode, ignoreCase = true) &&
@@ -63,7 +69,9 @@ object AlertEngine {
 
             val keyPrice = "last_price_${rule.id}"
             val keyNotified = "last_notified_${rule.id}"
-            val previous = prefs(context).getString(keyPrice, null)?.toDoubleOrNull()
+            // مقدارِ ذخیره‌شده‌ی قبلی — نه مقدارِ این نوبت (همان کلید در همین حلقه
+            // دوباره خوانده نمی‌شود، پس تراکنش باز هم درست کار می‌کند)
+            val previous = store.getString(keyPrice, null)?.toDoubleOrNull()
 
             // ۱) آیا شرط برقرار است؟  ۲) اگر «فقط لحظه‌ی عبور» است، قبلاً برقرار نبوده باشد  ۳) کول‌داون رد شده باشد
             var shouldNotify = triggered
@@ -71,16 +79,20 @@ object AlertEngine {
                 shouldNotify = !isTriggered(rule, previous, quote.changePct)
             }
             if (shouldNotify) {
-                val lastNotified = prefs(context).getLong(keyNotified, 0L)
+                val lastNotified = store.getLong(keyNotified, 0L)
                 shouldNotify = now - lastNotified >= rule.cooldownMin.coerceAtLeast(1) * 60_000L
             }
 
             if (shouldNotify) {
                 notify(context, cfg, rule, quote)
-                prefs(context).edit().putLong(keyNotified, now).apply()
+                editor.putLong(keyNotified, now)
+                dirty = true
             }
-            prefs(context).edit().putString(keyPrice, price.toString()).apply()
+            editor.putString(keyPrice, price.toString())
+            dirty = true
         }
+
+        if (dirty) runCatching { editor.apply() }
     }
 
     private fun isTriggered(rule: AlertRule, price: Double, changePct: Double?): Boolean = when (rule.condition) {

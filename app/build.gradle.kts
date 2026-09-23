@@ -13,8 +13,8 @@ android {
         applicationId = "com.pulse.market"
         minSdk = 26          // اندروید ۸ به بالا
         targetSdk = 34
-        versionCode = 14
-        versionName = "1.13"
+        versionCode = 15
+        versionName = "1.14"
     }
 
     /**
@@ -73,6 +73,14 @@ android {
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
+
+    /**
+     * تست‌های واحد روی JVM (بدون شبیه‌ساز) — برای منطق خالص مثل مسیرهای JSON،
+     * پاک‌سازی اعداد و مقایسه‌ی نسخه‌ی آپدیت.
+     */
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 dependencies {
@@ -100,4 +108,8 @@ dependencies {
 
     // به‌روزرسانی پس‌زمینه
     implementation("androidx.work:work-runtime-ktx:2.9.1")
+
+    // تست‌های واحد روی JVM (اجرای `./gradlew test` — بدون نیاز به گوشی/شبیه‌ساز)
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }

@@ -24,6 +24,9 @@ enum class MarketKind(val key: String, val label: String) {
     /** طلا و ارز — بازار آزاد ایران */
     GOLD_FX("goldfx", "طلا و ارز"),
 
+    /** بازارهای جهانی (انس طلا، نقره، نفت، شاخص دلار) — ۲۴/۵ */
+    GLOBAL("global", "جهانی"),
+
     /** منبع دلخواه کاربر — بازار مشخصی ندارد */
     CUSTOM("custom", "منبع دلخواه")
 }
@@ -37,6 +40,7 @@ fun marketKindOf(sourceId: String): MarketKind? = when (sourceId) {
     "tse_tsetmc", "tse_index" -> MarketKind.TSE
     "crypto_coingecko" -> MarketKind.CRYPTO
     "tgju" -> MarketKind.GOLD_FX
+    "tradingview" -> MarketKind.GLOBAL
     else -> null
 }
 

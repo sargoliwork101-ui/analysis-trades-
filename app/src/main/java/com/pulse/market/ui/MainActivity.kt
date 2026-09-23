@@ -12,7 +12,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
-import com.pulse.market.data.WidgetConfig
 import com.pulse.market.ui.settings.SettingsScreen
 import com.pulse.market.widget.StockWidgetProvider
 
@@ -46,7 +45,7 @@ class MainActivity : ComponentActivity() {
                         SettingsScreen(
                             widgetId = widgetIdState.value,
                             isAddFlow = intent?.action == AppWidgetManager.ACTION_APPWIDGET_CONFIGURE,
-                            onApply = { cfg -> finishConfigure(cfg) }
+                            onApply = { finishConfigure() }
                         )
                     }
                 }
@@ -65,8 +64,12 @@ class MainActivity : ComponentActivity() {
         widgetIdState.value = intent?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, 0) ?: 0
     }
 
-    /** ذخیره‌ی تنظیمات + پایان جریان افزودن ویجت */
-    private fun finishConfigure(cfg: WidgetConfig) {
+    /**
+     * پایان جریان افزودن ویجت.
+     * خودِ تنظیمات پیش از این در SettingsScreen ذخیره شده (save + NonCancellable)،
+     * اینجا فقط به لانچر «موفق» اعلام می‌کنیم و ویجت‌ها را دوباره رندر می‌کنیم.
+     */
+    private fun finishConfigure() {
         StockWidgetProvider.requestUpdate(this)
         closeAsConfigure()
     }

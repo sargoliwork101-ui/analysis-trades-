@@ -8,7 +8,7 @@ import java.util.TimeZone
  *
  * تا نسخه‌ی ۱٫۴ سرصفحه‌ی ویجت همیشه وضعیت «بورس تهران» را نشان می‌داد؛
  * از این پس وضعیت هر بازاری که در همین ویجت فعال است نمایش داده می‌شود:
- * بورس تهران، کریپتو، سهام آمریکا و طلا و ارز — هر کدام باز یا بسته.
+ * بورس تهران، کریپتو، سهام آمریکا، طلا و ارز و بازارهای جهانی — هر کدام باز یا بسته.
  *
  * ساعت‌ها تقریبی و بدون احتساب تعطیلات رسمی‌اند؛ برای کریپتو بازار
  * همیشه باز است.
@@ -50,6 +50,22 @@ object MarketStatus {
         fromMinute = 9 * 60, toMinute = 21 * 60
     )
 
+    /**
+     * بازارهای جهانی (انس طلا، نقره، نفت، فارکس): یکشنبه ۱۸:۰۰ نیویورک باز می‌شود و
+     * جمعه ۱۷:۰۰ نیویورک بسته می‌شود — وسط هفته ۲۴ ساعته باز است.
+     * (تعطیلات رسمی آمریکا حساب نشده؛ تقریبی است.)
+     */
+    private fun globalOpen(): Boolean {
+        val cal = Calendar.getInstance(TimeZone.getTimeZone("America/New_York"))
+        val minute = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
+        return when (cal.get(Calendar.DAY_OF_WEEK)) {
+            Calendar.SATURDAY -> false
+            Calendar.SUNDAY -> minute >= 18 * 60
+            Calendar.FRIDAY -> minute < 17 * 60
+            else -> true
+        }
+    }
+
     /** آیا «الان» در روز کاری و بازه‌ی ساعتیِ این بازار هستیم؟ */
     private fun openIn(zone: String, workDays: Set<Int>, fromMinute: Int, toMinute: Int): Boolean {
         val cal = Calendar.getInstance(TimeZone.getTimeZone(zone))
@@ -66,6 +82,7 @@ object MarketStatus {
         )
         MarketKind.US -> State(MarketKind.US.key, MarketKind.US.label, usOpen())
         MarketKind.GOLD_FX -> State(MarketKind.GOLD_FX.key, MarketKind.GOLD_FX.label, goldFxOpen())
+        MarketKind.GLOBAL -> State(MarketKind.GLOBAL.key, MarketKind.GLOBAL.label, globalOpen())
         else -> null
     }
 

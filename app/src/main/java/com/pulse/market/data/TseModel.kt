@@ -2,12 +2,10 @@ package com.pulse.market.data
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URLEncoder
-import java.util.concurrent.TimeUnit
 import java.util.regex.Pattern
 
 /**
@@ -85,16 +83,13 @@ data class ParsedTseInput(
  */
 object TseService {
 
-    private const val UA =
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-
-    private val client: OkHttpClient by lazy {
-        OkHttpClient.Builder()
-            .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(10, TimeUnit.SECONDS)
-            .retryOnConnectionFailure(true)
-            .build()
-    }
+    /**
+     * خواندن یک آدرس TSETMC — از کلاینت مشترک [Http] (استخر اتصال/سقف حجم/فقط https).
+     * null یعنی پاسخ نگرفتیم یا نامعتبر بود؛ همه‌ی صداکننده‌ها همین را هندل می‌کنند.
+     */
+    private fun getBody(url: String): String? = runCatching {
+        Http.execute(Request.Builder().url(url).header("User-Agent", Http.UA_DESKTOP).build())
+    }.getOrNull()
 
     /**
      * کاتالوگ جامع داخلی نمادهای پرمعامله و بسیار محبوب بورس تهران
@@ -207,19 +202,9 @@ object TseService {
         val encoded = URLEncoder.encode(query, "UTF-8")
         val url = "https://cdn.tsetmc.com/api/Instrument/GetInstrumentSearch/$encoded"
 
-        val req = Request.Builder()
-            .url(url)
-            .header("User-Agent", UA)
-            .header("Accept", "application/json, text/plain, */*")
-            .build()
-
-        return client.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) return emptyList()
-            val body = resp.body?.string().orEmpty()
-            if (body.isBlank()) return emptyList()
-
-            parseSearchResponse(body)
-        }
+        val body = getBody(url) ?: return emptyList()
+        if (body.isBlank()) return emptyList()
+        return parseSearchResponse(body)
     }
 
     /**
@@ -228,7 +213,6 @@ object TseService {
     fun fetchByInsCode(insCode: String): TseInstrument? {
         // ابتدا اطلاعات بسته/آخرین قیمت را می‌خوانیم
         val priceUrl = "https://cdn.tsetmc.com/api/ClosingPrice/GetClosingPriceInfo/$insCode"
-        val priceReq = Request.Builder().url(priceUrl).header("User-Agent", UA).build()
 
         var closePrice: Double? = null
         var lastPrice: Double? = null
@@ -236,19 +220,16 @@ object TseService {
         var volume: Double? = null
 
         runCatching {
-            client.newCall(priceReq).execute().use { resp ->
-                if (resp.isSuccessful) {
-                    val json = JSONObject(resp.body?.string().orEmpty())
-                    val info = json.optJSONObject("closingPriceInfo")
-                    if (info != null) {
-                        closePrice = info.optDouble("pClosing", 0.0).takeIf { it > 0 }
-                        lastPrice = info.optDouble("pDrCotVal", 0.0).takeIf { it > 0 }
-                        volume = info.optDouble("qTotTran5J", 0.0).takeIf { it > 0 }
-                        val yesterday = info.optDouble("priceYesterday", 0.0)
-                        if (yesterday > 0 && closePrice != null) {
-                            changePct = ((closePrice!! - yesterday) / yesterday) * 100.0
-                        }
-                    }
+            val body = getBody(priceUrl) ?: return@runCatching
+            val json = JSONObject(body)
+            val info = json.optJSONObject("closingPriceInfo")
+            if (info != null) {
+                closePrice = info.optDouble("pClosing", 0.0).takeIf { it > 0 }
+                lastPrice = info.optDouble("pDrCotVal", 0.0).takeIf { it > 0 }
+                volume = info.optDouble("qTotTran5J", 0.0).takeIf { it > 0 }
+                val yesterday = info.optDouble("priceYesterday", 0.0)
+                if (yesterday > 0 && closePrice != null) {
+                    changePct = ((closePrice!! - yesterday) / yesterday) * 100.0
                 }
             }
         }
@@ -266,20 +247,16 @@ object TseService {
 
         // دریافت نام از InstrumentInfo
         val infoUrl = "https://cdn.tsetmc.com/api/Instrument/GetInstrumentInfo/$insCode"
-        val infoReq = Request.Builder().url(infoUrl).header("User-Agent", UA).build()
         var symbol = insCode
         var name = "نماد بورس ($insCode)"
 
         runCatching {
-            client.newCall(infoReq).execute().use { resp ->
-                if (resp.isSuccessful) {
-                    val json = JSONObject(resp.body?.string().orEmpty())
-                    val info = json.optJSONObject("instrumentInfo")
-                    if (info != null) {
-                        symbol = info.optString("lVal18AFC").ifBlank { insCode }
-                        name = info.optString("lVal30").ifBlank { symbol }
-                    }
-                }
+            val body = getBody(infoUrl) ?: return@runCatching
+            val json = JSONObject(body)
+            val info = json.optJSONObject("instrumentInfo")
+            if (info != null) {
+                symbol = info.optString("lVal18AFC").ifBlank { insCode }
+                name = info.optString("lVal30").ifBlank { symbol }
             }
         }
 
@@ -349,29 +326,23 @@ object TseService {
 
     private fun fetchClosing(insCode: String): Closing {
         return try {
-            val req = Request.Builder()
-                .url("https://cdn.tsetmc.com/api/ClosingPrice/GetClosingPriceInfo/$insCode")
-                .header("User-Agent", UA)
-                .header("Accept", "application/json, text/plain, */*")
-                .build()
-            client.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return@use Closing(null, null, null, null)
-                val root = runCatching { JSONObject(resp.body?.string().orEmpty()) }.getOrNull()
-                    ?: return@use Closing(null, null, null, null)
-                val info = root.optJSONObject("closingPriceInfo") ?: root
-                val close = info.optDouble("pClosing", 0.0).takeIf { it > 0 }
-                val last = info.optDouble("pDrCotVal", 0.0).takeIf { it > 0 }
-                val volume = info.optDouble("qTotTran5J", 0.0).takeIf { it > 0 }
-                val yesterday = info.optDouble("priceYesterday", 0.0)
-                val change = info.optDouble("priceChange", 0.0)
-                val price = close ?: last
-                val pct = when {
-                    price != null && yesterday > 0 -> ((price - yesterday) / yesterday) * 100.0
-                    change != 0.0 && yesterday > 0 -> (change / yesterday) * 100.0
-                    else -> null
-                }
-                Closing(close, last, pct, volume)
+            val body = getBody("https://cdn.tsetmc.com/api/ClosingPrice/GetClosingPriceInfo/$insCode")
+                ?: return Closing(null, null, null, null)
+            val root = runCatching { JSONObject(body) }.getOrNull()
+                ?: return Closing(null, null, null, null)
+            val info = root.optJSONObject("closingPriceInfo") ?: root
+            val close = info.optDouble("pClosing", 0.0).takeIf { it > 0 }
+            val last = info.optDouble("pDrCotVal", 0.0).takeIf { it > 0 }
+            val volume = info.optDouble("qTotTran5J", 0.0).takeIf { it > 0 }
+            val yesterday = info.optDouble("priceYesterday", 0.0)
+            val change = info.optDouble("priceChange", 0.0)
+            val price = close ?: last
+            val pct = when {
+                price != null && yesterday > 0 -> ((price - yesterday) / yesterday) * 100.0
+                change != 0.0 && yesterday > 0 -> (change / yesterday) * 100.0
+                else -> null
             }
+            Closing(close, last, pct, volume)
         } catch (_: Throwable) {
             Closing(null, null, null, null)
         }
