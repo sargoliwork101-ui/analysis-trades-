@@ -43,7 +43,16 @@ object ConfigStore {
      * تنظیمات هر ویجت همیشه واقعاً ذخیره بماند.
      */
     private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private var pendingSave: Job? = null
+
+    /**
+     * ذخیره‌ی معوق هر ویجت — «کلید = شماره‌ی ویجت».
+     *
+     * چرا نقشه و نه یک متغیر تنها: قبلاً فقط یک Job نگه داشته می‌شد؛ اگر کاربر
+     * در فاصله‌ی کمتر از ۲۰۰ میلی‌ثانیه دو ویجت مختلف را تغییر می‌داد (یا الگو و
+     * یک ویجت را هم‌زمان)، Job اولی cancel می‌شد و تنظیمات آن **گم می‌شد**.
+     * حالا فقط ذخیره‌ی همان ویجت جایگزین می‌شود.
+     */
+    private val pendingSaves = java.util.concurrent.ConcurrentHashMap<Int, Job>()
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
@@ -101,19 +110,34 @@ object ConfigStore {
     /**
      * ذخیره‌ی خودکار و فوری تنظیمات (با debounce کوتاه برای اسلایدرها).
      * حتی اگر صفحه بلافاصله بسته شود، ذخیره انجام می‌شود.
+     *
+     * debounce «هر ویجت جداست» — تغییر هم‌زمان دو ویجت، هیچ‌کدام را گم نمی‌کند.
      */
     fun saveDebounced(context: Context, cfg: WidgetConfig, widgetId: Int = 0, delayMs: Long = 200) {
-        pendingSave?.cancel()
-        pendingSave = ioScope.launch {
-            if (delayMs > 0) delay(delayMs)
-            save(context, cfg, widgetId)
-        }
+        enqueueSave(context, cfg, widgetId, delayMs)
     }
 
     /** ذخیره‌ی فوری بدون debounce — برای دکمه‌ی ذخیره */
     fun saveNow(context: Context, cfg: WidgetConfig, widgetId: Int = 0) {
-        pendingSave?.cancel()
-        pendingSave = ioScope.launch { save(context, cfg, widgetId) }
+        enqueueSave(context, cfg, widgetId, 0)
+    }
+
+    private fun enqueueSave(context: Context, cfg: WidgetConfig, widgetId: Int, delayMs: Long) {
+        // فقط نوبتِ همان ویجت جایگزین می‌شود؛ نوبت ویجت‌های دیگر دست‌نخورده می‌ماند
+        pendingSaves.remove(widgetId)?.cancel()
+        var job: Job? = null
+        job = ioScope.launch {
+            try {
+                if (delayMs > 0) delay(delayMs)
+                save(context, cfg, widgetId)
+            } finally {
+                // فقط اگر همان نوبتِ خودمان هنوز در نقشه است حذف می‌شود؛ وگرنه
+                // ممکن است نوبتِ تازه‌تری را از نقشه پاک کنیم و بعداً منقضی نشود
+                val mine = job
+                if (mine != null) pendingSaves.remove(widgetId, mine)
+            }
+        }
+        pendingSaves[widgetId] = job
     }
 
     /** پاک کردن تنظیمات ویجتِ حذف‌شده از صفحه */
@@ -146,10 +170,23 @@ object ConfigStore {
     suspend fun currentCustomSources(context: Context): List<SourceDef> = customSourcesFlow(context).first()
 
     suspend fun saveCustomSources(context: Context, list: List<SourceDef>) {
+        val safe = sanitizeCustom(list)
         context.dataStore.edit {
-            it[KEY_CUSTOM_SOURCES] = json.encodeToString(ListSerializer(SourceDef.serializer()), list)
+            it[KEY_CUSTOM_SOURCES] = json.encodeToString(ListSerializer(SourceDef.serializer()), safe)
         }
     }
+
+    /**
+     * پاک‌سازی منابع دلخواه پیش از ذخیره — دو چیز را تضمین می‌کند:
+     * ۱) `builtIn = false` بماند؛ وگرنه فایل بکاپِ دست‌کاری‌شده می‌تواند منبعی
+     *    بسازد که در UI دکمه‌ی حذف نداشته باشد.
+     * ۲) هیچ منبع دلخواهی id منبع آماده‌ی داخلی را نگیرد (مثل «tgju» یا «tradingview»)؛
+     *    وگرنه در فهرست دو منبع هم‌نام دیده می‌شود و سردرگمی می‌سازد.
+     */
+    private fun sanitizeCustom(list: List<SourceDef>): List<SourceDef> =
+        list.filter { it.id.isNotBlank() && SourceCatalog.byId(it.id) == null }
+            .map { it.copy(builtIn = false) }
+            .distinctBy { it.id }
 
     /** ذخیره‌ی منابع دلخواه بدون نیاز به زنده ماندن صفحه */
     fun saveCustomSourcesAsync(context: Context, list: List<SourceDef>) {
@@ -206,10 +243,11 @@ object ConfigStore {
      */
     suspend fun importAll(context: Context, text: String): Int {
         val dump = json.decodeFromString(BackupDump.serializer(), text.trim())
+        val safeSources = sanitizeCustom(dump.customSources)
         context.dataStore.edit { prefs ->
             prefs[KEY_WIDGETS] = json.encodeToString(WidgetsFile.serializer(), dump.widgets)
             prefs[KEY_CUSTOM_SOURCES] =
-                json.encodeToString(ListSerializer(SourceDef.serializer()), dump.customSources)
+                json.encodeToString(ListSerializer(SourceDef.serializer()), safeSources)
             prefs[KEY_TSE_SYMBOLS] =
                 json.encodeToString(ListSerializer(SymbolDef.serializer()), dump.tseSymbols)
         }

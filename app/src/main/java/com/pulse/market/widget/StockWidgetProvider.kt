@@ -5,8 +5,10 @@ import android.appwidget.AppWidgetProvider
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import com.pulse.market.data.AlertEngine
 import com.pulse.market.data.ConfigStore
+import com.pulse.market.data.InternalGuard
 import com.pulse.market.data.Quote
 import com.pulse.market.data.QuoteRepo
 import com.pulse.market.data.SymbolDef
@@ -56,6 +58,14 @@ open class StockWidgetProvider : AppWidgetProvider() {
 
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
+        // اکشن‌های سفارشیِ ما فقط با «توکن داخلی» اجرا می‌شوند؛ رسیور باید exported
+        // بماند تا لانچر بتواند APPWIDGET_UPDATE بفرستد، پس بدون این نگهبان هر برنامه‌ی
+        // دیگری روی گوشی می‌توانست رفرش اجباری یا روشن/خاموش کردن حالت زنده را تحمیل کند.
+        val isInternalAction = intent.action == ACTION_REFRESH || intent.action == ACTION_TOGGLE_LIVE
+        if (isInternalAction && !InternalGuard.isTrusted(context, intent)) {
+            Log.w(TAG, "اکشن داخلی بدون توکن معتبر رد شد: ${intent.action}")
+            return
+        }
         when (intent.action) {
             ACTION_REFRESH -> {
                 val pending = goAsync()
@@ -105,6 +115,8 @@ open class StockWidgetProvider : AppWidgetProvider() {
     }
 
     companion object {
+
+        private const val TAG = "PulseMarketWidget"
 
         const val ACTION_REFRESH = "com.pulse.market.ACTION_REFRESH"
         const val ACTION_TOGGLE_LIVE = "com.pulse.market.ACTION_TOGGLE_LIVE"

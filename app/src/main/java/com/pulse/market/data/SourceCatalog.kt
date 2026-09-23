@@ -7,8 +7,11 @@ import com.pulse.market.data.FetchKind.TSE_TSETMC
  * لیست منابع آماده‌ی داخل اپ.
  * کاربر از این لیست انتخاب می‌کند یا خودش یک «منبع دلخواه» با آدرس و مسیر JSON می‌سازد.
  *
- * فقط منابعی می‌مانند که واقعاً کار می‌کنند (v1.12): کریپتو (CoinGecko)، بورس تهران
- * (TSETMC + شاخص کل) و طلا و ارز (TGJU). Yahoo و آینه‌ی Navasan حذف شدند.
+ * فقط منابعی می‌مانند که واقعاً کار می‌کنند: کریپتو (CoinGecko)، بورس تهران
+ * (TSETMC + شاخص کل)، طلا و ارز (TGJU) و بازارهای جهانی (TradingView).
+ *
+ * واحد و ضریب هر نماد می‌تواند از منبع جدا باشد ([SymbolDef.unit]/[SymbolDef.scale]) —
+ * مثلاً در منبع TGJU، «سکه امامی» تومانی است ولی «انس طلا» دلاری.
  */
 object SourceCatalog {
 
@@ -78,12 +81,15 @@ object SourceCatalog {
         // ─────────────────────── طلا و ارز — TGJU ───────────────────────
         // API رسمیِ خودِ tgju.org — همان که سایت برای به‌روزرسانی لحظه‌ای صدا می‌زند؛
         // همه‌ی نمادها با یک درخواست. مقادیر «ریال» است؛ با ضریب ۰٫۱ تومان می‌شود.
-        // هر کلیدِ این API می‌تواند نماد باشد (مثل price_gbp یا silver) — کد را در
+        // هر کلیدِ این API می‌تواند نماد باشد (مثل price_gbp یا ons) — کد را در
         // «افزودن نماد» به‌صورت دلخواه بنویس.
+        //
+        // «انس طلا (جهانی)» و «انس نقره (جهانی)» دلاری‌اند (نه ریالی)، پس ضریب و
+        // واحد مخصوص خودشان را دارند — همیشه همین الگو را برای نمادهای دلاری به‌کار ببر.
         SourceDef(
             id = "tgju",
             title = "طلا و ارز — TGJU",
-            subtitle = "دلار آزاد، طلا و سکه (تومان) • داده‌های tgju.org",
+            subtitle = "دلار آزاد، طلا و سکه (تومان) + انس جهانی (دلار) • داده‌های tgju.org",
             kind = JSON_REST,
             urlTemplate = "https://call1.tgju.org/ajax.json",
             // همه‌ی نمادها با یک درخواست — مسیرِ هر نماد با {symbol} جدا می‌شود
@@ -97,13 +103,47 @@ object SourceCatalog {
             symbols = listOf(
                 SymbolDef("price_dollar_rl", "دلار آمریکا (آزاد)"),
                 SymbolDef("price_eur", "یورو"),
+                SymbolDef("price_gbp", "پوند انگلیس"),
                 SymbolDef("geram18", "طلای ۱۸ عیار (گرم)"),
                 SymbolDef("geram24", "طلای ۲۴ عیار (گرم)"),
                 SymbolDef("mesghal", "مثقال طلا"),
                 SymbolDef("sekee", "سکه امامی"),
                 SymbolDef("sekeb", "سکه بهار آزادی"),
                 SymbolDef("nim", "نیم‌سکه"),
-                SymbolDef("rob", "ربع‌سکه")
+                SymbolDef("rob", "ربع‌سکه"),
+                // ── دلاری‌ها: ضریب ۱ و واحد $ (نه تومان) ──
+                SymbolDef("ons", "انس طلا (جهانی)", unit = "$", scale = 1.0),
+                SymbolDef("silver", "انس نقره (جهانی)", unit = "$", scale = 1.0),
+                SymbolDef("tether_gold_xaut", "طلای توکنیزه XAU", unit = "$", scale = 1.0)
+            )
+        ),
+
+        // ─────────────────── بازارهای جهانی — TradingView ───────────────────
+        // اسکنر رسمی TradingView: هر نماد یک درخواست سبک JSON و پاسخ فوری.
+        // برای «طلا و نقره‌ی جهانی، نفت، شاخص دلار و کریپتو به دلار».
+        //
+        // اگر شبکه‌ات TradingView را فیلتر کرده باشد (مثل بعضی اینترنت‌های ایران)،
+        // این منبع جواب نمی‌دهد؛ به‌جایش از «طلا و ارز — TGJU» و نماد
+        // «انس طلا (جهانی)» استفاده کن — همان قیمت انس جهانی، بدون فیلترشکن.
+        SourceDef(
+            id = "tradingview",
+            title = "بازارهای جهانی — TradingView",
+            subtitle = "انس طلا، نقره، نفت، شاخص دلار و کریپتو (به دلار)",
+            kind = JSON_REST,
+            urlTemplate = "https://scanner.tradingview.com/symbol" +
+                    "?symbol={symbol}&fields=close,change,change_abs,volume&no_404=true",
+            pricePath = "close",
+            changePath = "change",
+            changeMode = ChangeMode.PERCENT,
+            unit = "$",
+            symbols = listOf(
+                SymbolDef("OANDA:XAUUSD", "طلا — انس جهانی", unit = "$"),
+                SymbolDef("TVC:SILVER", "نقره — انس جهانی", unit = "$"),
+                SymbolDef("TVC:DXY", "شاخص دلار آمریکا", unit = "امتیاز"),
+                SymbolDef("TVC:USOIL", "نفت WTI", unit = "$"),
+                SymbolDef("TVC:UKOIL", "نفت برنت", unit = "$"),
+                SymbolDef("BITSTAMP:BTCUSD", "بیت‌کوین (TradingView)", unit = "$"),
+                SymbolDef("BITSTAMP:ETHUSD", "اتریوم (TradingView)", unit = "$")
             )
         )
     )

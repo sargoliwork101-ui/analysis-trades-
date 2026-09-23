@@ -2,20 +2,33 @@ package com.pulse.market.data
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import org.json.JSONObject
-import java.util.concurrent.TimeUnit
 
 /**
  * بررسی آپدیت برنامه از «آخرین Release» گیت‌هاب.
  *
  * جریان نصب آپدیت: نسخه‌ی جدید روی همین نصب نصب می‌شود (Windows-style update) —
  * نیازی به پاک کردن برنامه نیست، تنظیمات هم سر جایش می‌ماند.
+ *
+ * ── سخت‌گیری‌های امنیتی (نسخه‌ی ۱٫۱۴) ──
+ * ۱) فایل نصبی فقط از **ریلیزهای همین مخزن** قبول می‌شود: آدرس باید با
+ *    `https://github.com/<repo>/releases/download/` شروع شود. قبلاً «اولین فایل
+ *    با پسوند apk» برداشته می‌شد؛ اگر روزی asset دیگری اضافه شود یا پاسخ API
+ *    دست‌کاری شود، ممکن بود آدرس بی‌ربط به کاربر داده شود.
+ * ۲) نام فایل باید الگوی خودمان را داشته باشد (`PulseMarket-v*.apk`) — همان
+ *    چیزی که CI می‌سازد و ورک‌فلوی بیلد هم امضایش را بررسی می‌کند.
+ * ۳) اگر GitHub برای فایل «digest» (sha256) بدهد، به کاربر نشان داده می‌شود تا
+ *    خودش هم بتواند فایل دانلودشده را تطبیق دهد.
+ * ۴) درخواست از کلاینت مشترک [Http] با سقف حجم می‌رود.
  */
 object AppUpdater {
 
     private const val REPO = "sargoliwork101-ui/analysis-trades-"
+
+    /** همه‌ی آدرس‌های قابل قبول برای فایل نصبی، ریلیزهای همین مخزن‌اند */
+    private const val RELEASE_DOWNLOAD_PREFIX = "https://github.com/$REPO/releases/download/"
+
+    private val APK_NAME = Regex("""^PulseMarket-v[\d.]+\.apk$""", RegexOption.IGNORE_CASE)
 
     /** اطلاعات آخرین نسخه‌ی منتشرشده */
     data class LatestRelease(
@@ -23,13 +36,10 @@ object AppUpdater {
         val version: List<Int>,
         val apkUrl: String?,
         val notes: String,
-        val publishedAt: String
+        val publishedAt: String,
+        /** اثر انگشت SHA-256 فایل نصبی (اگر GitHub داده باشد) */
+        val apkSha256: String? = null
     )
-
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(12, TimeUnit.SECONDS)
-        .build()
 
     /**
      * خواندن آخرین ریلیز:
@@ -38,38 +48,56 @@ object AppUpdater {
      */
     suspend fun fetchLatest(): LatestRelease? = withContext(Dispatchers.IO) {
         runCatching {
-            val req = Request.Builder()
-                .url("https://api.github.com/repos/$REPO/releases/latest")
-                .header("Accept", "application/vnd.github+json")
-                .build()
-            client.newCall(req).execute().use { resp ->
-                if (resp.code == 404) {
-                    return@use LatestRelease("", emptyList(), null, "", "")
-                }
-                if (!resp.isSuccessful) error("HTTP ${resp.code}")
-                val body = resp.body?.string().orEmpty()
-                val obj = JSONObject(body)
-                val tag = obj.optString("tag_name")
-                val assets = obj.optJSONArray("assets")
-                var apk: String? = null
-                if (assets != null) {
-                    for (i in 0 until assets.length()) {
-                        val url = assets.getJSONObject(i).optString("browser_download_url")
-                        if (url.endsWith(".apk")) {
-                            apk = url
-                            break
-                        }
-                    }
-                }
-                LatestRelease(
-                    tag = tag,
-                    version = parseVersion(tag),
-                    apkUrl = apk,
-                    notes = obj.optString("body").take(600),
-                    publishedAt = obj.optString("published_at")
+            val body = try {
+                Http.getText(
+                    url = "https://api.github.com/repos/$REPO/releases/latest",
+                    userAgent = Http.UA_DESKTOP,
+                    accept = "application/vnd.github+json"
                 )
+            } catch (e: Http.HttpException) {
+                // ۴۰۴ یعنی هنوز ریلیزی منتشر نشده — خطای شبکه نیست
+                if (e.code == 404) return@runCatching LatestRelease("", emptyList(), null, "", "")
+                throw e
             }
+
+            val obj = JSONObject(body)
+            val tag = obj.optString("tag_name")
+            val apk = pickApk(obj.optJSONArray("assets"))
+            LatestRelease(
+                tag = tag,
+                version = parseVersion(tag),
+                apkUrl = apk?.first,
+                notes = obj.optString("body").take(600),
+                publishedAt = obj.optString("published_at"),
+                apkSha256 = apk?.second
+            )
         }.getOrNull()
+    }
+
+    /**
+     * انتخاب فایل نصبی بین asset های ریلیز — با سخت‌گیری کامل.
+     * خروجی: (آدرس، sha256) یا null اگر asset معتبری نبود.
+     */
+    private fun pickApk(assets: org.json.JSONArray?): Pair<String, String?>? {
+        if (assets == null) return null
+        val candidates = mutableListOf<Triple<String, String, String?>>() // name, url, sha
+        for (i in 0 until assets.length()) {
+            val a = assets.optJSONObject(i) ?: continue
+            val name = a.optString("name")
+            val url = a.optString("browser_download_url")
+            val sha = a.optString("digest").takeIf { it.startsWith("sha256:") }
+                ?.substringAfter("sha256:")?.takeIf { it.isNotBlank() }
+            candidates += Triple(name, url, sha)
+        }
+        // ۱) فایل خودِ ما با نام استاندارد  ۲) هر فایل apk داخل همان ریلیز
+        val exact = candidates.firstOrNull {
+            it.second.startsWith(RELEASE_DOWNLOAD_PREFIX) && APK_NAME.matches(it.first)
+        }
+        val anyApk = candidates.firstOrNull {
+            it.second.startsWith(RELEASE_DOWNLOAD_PREFIX) && it.first.endsWith(".apk", ignoreCase = true)
+        }
+        val chosen = exact ?: anyApk ?: return null
+        return chosen.second to chosen.third
     }
 
     /** آیا نسخه‌ی سمت چپ جدیدتر از نسخه‌ی فعلی است؟ */

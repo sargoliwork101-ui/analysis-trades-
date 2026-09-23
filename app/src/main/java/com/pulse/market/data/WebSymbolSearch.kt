@@ -2,31 +2,20 @@ package com.pulse.market.data
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import org.json.JSONObject
 import java.net.URLEncoder
-import java.util.concurrent.TimeUnit
 
 /**
  * جستجوی آنلاین نماد برای منبعی که API جستجو دارد: کریپتو (CoinGecko).
  *
- * بقیه‌ی منابع (طلا و ارز TGJU، منابع دلخواه و…) فهرست محلی دارند و در همان
- * جستجو می‌شوند؛ این شیء برایشان null برمی‌گرداند تا UI به فهرست محلی برگردد.
+ * بقیه‌ی منابع (طلا و ارز TGJU، بازارهای جهانی TradingView، منابع دلخواه و…)
+ * فهرست محلی دارند و در همان جستجو می‌شوند؛ این شیء برایشان null برمی‌گرداند تا
+ * UI به فهرست محلی برگردد.
  * هر خطا هم null می‌شود — جستجوی محلی هیچ‌وقت به خاطر شبکه از کار نمی‌افتد.
+ *
+ * همه‌ی درخواست‌ها از [Http] می‌روند (کلاینت مشترک + سقف حجم پاسخ).
  */
 object WebSymbolSearch {
-
-    private const val UA =
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-
-    private val client: OkHttpClient by lazy {
-        OkHttpClient.Builder()
-            .connectTimeout(8, TimeUnit.SECONDS)
-            .readTimeout(10, TimeUnit.SECONDS)
-            .retryOnConnectionFailure(true)
-            .build()
-    }
 
     /**
      * جستجو در منبع — null یعنی این منبع جستجوی آنلاین ندارد
@@ -46,8 +35,11 @@ object WebSymbolSearch {
         }
 
     /** CoinGecko: api.coingecko.com/api/v3/search?query=… → coins[] {id, name, symbol} */
-    private fun coingecko(sourceId: String, q: String): List<SymbolDef> {
-        val body = get("https://api.coingecko.com/api/v3/search?query=" + enc(q))
+    private suspend fun coingecko(sourceId: String, q: String): List<SymbolDef> {
+        val body = Http.getText(
+            url = "https://api.coingecko.com/api/v3/search?query=" + enc(q),
+            userAgent = Http.UA_DESKTOP
+        )
         val arr = JSONObject(body).optJSONArray("coins") ?: return emptyList()
         val out = mutableListOf<SymbolDef>()
         for (i in 0 until arr.length()) {
@@ -58,14 +50,6 @@ object WebSymbolSearch {
         }
         return out.take(15)
     }
-
-    private fun get(url: String): String =
-        client.newCall(
-            Request.Builder().url(url).header("User-Agent", UA).build()
-        ).execute().use { resp ->
-            if (!resp.isSuccessful) error("HTTP ${resp.code}")
-            resp.body?.string().orEmpty()
-        }
 
     private fun enc(s: String): String =
         URLEncoder.encode(s, "UTF-8").replace("+", "%20")

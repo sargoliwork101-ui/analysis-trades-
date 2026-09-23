@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -35,6 +36,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.SettingsBackupRestore
 import androidx.compose.material.icons.filled.ShowChart
+import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -97,6 +99,7 @@ enum class SettingsSection(val title: String) {
     LOOK("ظاهر و فونت"),
     UPDATE("به‌روزرسانی"),
     ALERTS("هشدارها"),
+    PUMPS("پامپ‌های کریپتو"),
     BACKUP("بکاپ و بازگردانی"),
     ABOUT("درباره")
 }
@@ -477,6 +480,24 @@ fun SettingsScreen(
                         onTestNotification = { AlertEngine.notifyTest(context) }
                     )
 
+                    SettingsSection.PUMPS -> PumpsCategory(
+                        cfg = cfg,
+                        onChange = { new -> persist(new) },
+                        onAddSymbol = { sym ->
+                            // منبع کوین (کریپتو) اگر روشن نبود، خودکار روشن می‌شود؛
+                            // وگرنه نماد اضافه می‌شد ولی هیچ‌وقت داده نمی‌گرفت
+                            val ids = if (sym.sourceId.isBlank() || sym.sourceId in cfg.activeSourceIds)
+                                cfg.activeSourceIds
+                            else cfg.activeSourceIds + sym.sourceId
+                            val list = cfg.symbols.toMutableList()
+                            if (list.size >= MAX_SYMBOLS) list.removeAt(list.size - 1)
+                            if (list.none { it.code == sym.code && it.sourceId == sym.sourceId }) {
+                                list.add(sym)
+                            }
+                            persist(cfg.copy(sourceIds = ids, sourceId = ids.first(), symbols = list))
+                        }
+                    )
+
                     SettingsSection.ABOUT -> AboutCategory()
                 }
 
@@ -744,6 +765,15 @@ private fun LandingMenu(
                 title = SettingsSection.ALERTS.title,
                 summary = alertsSummary
             ) { onOpen(SettingsSection.ALERTS) }
+            if (cfg.showPumps) {
+                RowDivider()
+                NavMenuRow(
+                    icon = Icons.Default.TrendingUp,
+                    tint = Color(0xFFFB923C),
+                    title = SettingsSection.PUMPS.title,
+                    summary = "کوین‌های در حال رشد شارپ + آموزش پامپ"
+                ) { onOpen(SettingsSection.PUMPS) }
+            }
             RowDivider()
             NavMenuRow(
                 icon = Icons.Default.SettingsBackupRestore,
@@ -886,6 +916,23 @@ private fun AboutCategory() {
                             maxLines = 6
                         )
                     }
+                    // اثر انگشت فایل نصبی — برای اینکه کاربر بتواند بعد از دانلود
+                    // مطمئن شود همان فایلِ ریلیز رسمی را گرفته (متن قابل انتخاب/کپی است)
+                    latest!!.apkSha256?.let { sha ->
+                        SelectionContainer {
+                            Text(
+                                "اثر انگشت فایل (SHA-256):\n$sha",
+                                fontSize = 10.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    Text(
+                        "فایل از صفحه‌ی رسمی ریلیزهای همین مخزن دانلود می‌شود و اندروید هم " +
+                                "امضای نسخه‌ی نصب‌شده را بررسی می‌کند.",
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }

@@ -55,6 +55,11 @@ jobs:
           fi
           exit "$code"
 
+      # تست‌های واحد منطق خالص (JsonPath/Num/نسخه/امتیاز پامپ) — سریع و بدون شبیه‌ساز.
+      # خرابی‌شان یعنی احتمال شکستن داده‌خوانی؛ پس ران را قرمز می‌کنند.
+      - name: Run unit tests
+        run: ./gradlew test --no-daemon --stacktrace
+
       - name: Rename APK for Easy Download
         run: |
           VER=$(grep -o 'versionName = "[^"]*"' app/build.gradle.kts | cut -d'"' -f2)

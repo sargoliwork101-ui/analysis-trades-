@@ -19,16 +19,34 @@ import kotlinx.serialization.json.Json
  * حتی بورس تهران که سری آماده نمی‌دهد — شکل بگیرد. تاریخچه به‌ازای هر «نماد»
  * نگه داشته می‌شود (نه هر ویجت) تا ویجت‌هایی که نماد یکسان دارند داده را مشترک
  * استفاده کنند و حافظه تلف نشود؛ تعداد نقاطِ «نمایش» را هر ویجت خودش تعیین می‌کند.
+ *
+ * ── بهینه‌سازی کارایی (نسخه‌ی ۱٫۱۴) ──
+ * قبلاً برای هر رفرش، JSON کامل کش و JSON کامل تاریخچه چند بار از SharedPreferences
+ * خوانده و دوباره نوشته می‌شد (Open/Parse/Serialize روی رشته‌ی چند صد کیلوبایتی،
+ * در هر ۱۵ ثانیه). حالا:
+ *  • کش و تاریخچه یک‌بار در حافظه می‌مانند ([memQuotes]/[memHistory]) و فقط اگر
+ *    نبود از دیسک خوانده می‌شوند؛
+ *  • نوشتن روی دیسک فقط وقتی انجام می‌شود که داده‌ی تازه‌ای آمده باشد و هر دو کلید
+ *    در **یک** تراکنش نوشته می‌شوند (قبلاً دو نوشتن جدا بود).
  */
 object QuoteRepo {
 
     private const val PREF = "pulse_cache"
     private const val KEY_QUOTES = "quotes"
     private const val KEY_HISTORY = "price_history"
+    private const val KEY_TS = "ts"
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val historySerializer =
         MapSerializer(String.serializer(), ListSerializer(Double.serializer()))
+
+    /** کش در حافظه — منبع اصلی خواندن در طول عمر پروسه */
+    @Volatile
+    private var memQuotes: Map<String, Quote>? = null
+
+    /** تاریخچه‌ی قیمت در حافظه — نگاشت «منبع|نماد» به سری اعداد */
+    @Volatile
+    private var memHistory: Map<String, List<Double>>? = null
 
     private fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
@@ -38,36 +56,48 @@ object QuoteRepo {
 
     // ───────────── کش ─────────────
 
+    @Synchronized
     fun loadCachedMap(context: Context): Map<String, Quote> {
-        val raw = prefs(context).getString(KEY_QUOTES, null) ?: return emptyMap()
-        val list = runCatching {
+        memQuotes?.let { return it }
+        val raw = prefs(context).getString(KEY_QUOTES, null)
+        val list = if (raw == null) emptyList() else runCatching {
             json.decodeFromString(ListSerializer(Quote.serializer()), raw)
         }.getOrDefault(emptyList())
-        return list.associateBy { key(it.sourceId, it.code) }
+        val map = list.associateBy { key(it.sourceId, it.code) }
+        memQuotes = map
+        return map
     }
 
-    private fun mergeCached(context: Context, fresh: List<Quote>) {
+    /**
+     * نوشتن کش و تاریخچه در یک تراکنش.
+     * فقط داده‌ی سالم (با قیمت) وارد کش می‌شود تا با خطا، مقدار قبلی از بین نرود.
+     */
+    @Synchronized
+    private fun persist(context: Context, healthy: List<Quote>, history: Map<String, List<Double>>) {
         val merged = loadCachedMap(context).toMutableMap()
-        // فقط داده‌ی سالم (با قیمت) در کش نوشته می‌شود تا با خطا، مقدار قبلی از بین نرود
-        fresh.filter { it.price != null }.forEach { merged[key(it.sourceId, it.code)] = it }
+        healthy.forEach { merged[key(it.sourceId, it.code)] = it }
+        memQuotes = merged
+        memHistory = history
         prefs(context).edit()
-            .putString(
-                KEY_QUOTES,
-                json.encodeToString(ListSerializer(Quote.serializer()), merged.values.toList())
-            )
-            .putLong("ts", System.currentTimeMillis())
+            .putString(KEY_QUOTES, json.encodeToString(ListSerializer(Quote.serializer()), merged.values.toList()))
+            .putString(KEY_HISTORY, json.encodeToString(historySerializer, history))
+            .putLong(KEY_TS, System.currentTimeMillis())
             .apply()
     }
 
-    fun lastUpdated(context: Context): Long = prefs(context).getLong("ts", 0L)
+    fun lastUpdated(context: Context): Long = prefs(context).getLong(KEY_TS, 0L)
 
     // ───────────── تاریخچه‌ی قیمت برای نمودار مینیاتوری ─────────────
 
-    private fun loadHistory(context: Context): MutableMap<String, List<Double>> {
-        val raw = prefs(context).getString(KEY_HISTORY, null) ?: return mutableMapOf()
-        return runCatching {
+    @Synchronized
+    private fun loadHistory(context: Context): Map<String, List<Double>> {
+        memHistory?.let { return it }
+        val raw = prefs(context).getString(KEY_HISTORY, null)
+        val map = if (raw == null) emptyMap() else runCatching {
             json.decodeFromString(historySerializer, raw)
-        }.getOrDefault(emptyMap<String, List<Double>>()).toMutableMap()
+        }.getOrDefault(emptyMap())
+        memHistory = map
+        return map
     }
 
     /**
@@ -75,19 +105,17 @@ object QuoteRepo {
      * نکرده باشد؛ این‌طور نمودار برای بورس تهران و روزهای بسته‌ی بازار هم به‌درستی
      * و بدون وابستگی به «تغییر قیمت» به‌تدریج شکل می‌گیرد.
      */
-    private fun appendHistory(context: Context, fresh: List<Quote>) {
+    private fun appendHistory(context: Context, fresh: List<Quote>): Map<String, List<Double>> {
         val good = fresh.filter { it.price != null }
-        if (good.isEmpty()) return
-        val hist = loadHistory(context)
+        if (good.isEmpty()) return loadHistory(context)
+        val hist = loadHistory(context).toMutableMap()
         good.forEach { q ->
             val k = key(q.sourceId, q.code)
             val series = (hist[k] ?: emptyList()).toMutableList()
             series += q.price!!
             hist[k] = series.takeLast(SPARK_HISTORY_MAX)
         }
-        prefs(context).edit()
-            .putString(KEY_HISTORY, json.encodeToString(historySerializer, hist))
-            .apply()
+        return hist
     }
 
     /**
@@ -113,7 +141,7 @@ object QuoteRepo {
         return sourceIds.flatMap { sid ->
             val syms = cfg.symbolsOf(sid).ifEmpty {
                 ConfigStore.resolveSource(context, sid)
-                    ?.symbols?.take(maxOf(1, com.pulse.market.data.MAX_SYMBOLS / sourceIds.size))
+                    ?.symbols?.take(maxOf(1, MAX_SYMBOLS / sourceIds.size))
                     ?: emptyList()
             }
             syms.map { sid to it }
@@ -148,8 +176,7 @@ object QuoteRepo {
         // کش دائمی فقط با داده‌ی سالم تازه می‌شود (+ ثبت نقطه‌ی تاریخچه برای نمودار)
         val good = fetched.filter { it.price != null }
         if (good.isNotEmpty()) {
-            mergeCached(context, good)
-            appendHistory(context, good)
+            persist(context, good, appendHistory(context, good))
         }
         val cached = loadCachedMap(context)
         val fresh = fetched.associateBy { key(it.sourceId, it.code) }
