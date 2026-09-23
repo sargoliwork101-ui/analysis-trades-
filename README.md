@@ -36,6 +36,7 @@ An Android home-screen widget that shows **live market prices** — Tehran Stock
 ### Data sources
 - Built-ins: **TSE (TSETMC)**, CoinGecko, Yahoo Finance, TGJU (gold/forex), Navasan mirror.
 - **Custom sources** — any JSON API (dot-path, batch templates, scale/unit) or HTML page (CSS selector) — and TSE symbol search by name or TSETMC page link.
+- 📡 Porting the source-fetching layer to another app? See **[SOURCES_SPEC_fa.md](SOURCES_SPEC_fa.md)** (Persian) — full spec of the data model, JSON path language, TSETMC APIs, and caching strategy.
 
 ---
 
