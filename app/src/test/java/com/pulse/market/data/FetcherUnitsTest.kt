@@ -38,7 +38,7 @@ class FetcherUnitsTest {
         // قیمت خام TGJU برای انس: 4310.94 → باید همان 4310.94 دلار بماند
         val raw = 4310.94
         assertEquals(4310.94, raw * Fetcher.scaleOf(tgju, ons), 1e-6)
-        // و سکه امامی با ضریب ۰٫۱ تومانی می‌شود
-        assertEquals(235510.0, 2355100000.0 * Fetcher.scaleOf(tgju, sekke), 1e-3)
+        // و سکه امامی: عدد ریالی TGJU (۲۳۵٬۵۱۰٬۰۰۰) با ضریب ۰٫۱ تومانی می‌شود
+        assertEquals(23_551_000.0, 235_510_000.0 * Fetcher.scaleOf(tgju, sekke), 1e-3)
     }
 }

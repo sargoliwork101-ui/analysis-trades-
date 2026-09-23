@@ -209,11 +209,16 @@ fun SymbolSearchDialog(
         // ─── افزودن نماد با کد دلخواه (منابع غیر بورس) ───
         // وقتی عبارتی تایپ شده و همین کد دقیقاً در نتایج نیست
         val q = query.trim()
-        if (!isTse && activeSource != null && q.isNotEmpty() &&
+        val src = activeSource
+        if (!isTse && src != null && q.isNotEmpty() &&
             hits.none { it.sym.code.equals(q, ignoreCase = true) }
         ) {
             ManualAddRow(code = q) {
-                onAddSymbol(SymbolDef(q, q, activeSource?.id.orEmpty()))
+                // اگر همین کد از قبل در فهرست نمادهای منبع باشد، تعریف کاملش (واحد و
+                // ضریب مخصوص نماد) برگردانده می‌شود تا مثلاً «انس طلا» دلاری ذخیره شود،
+                // نه با واحد و ضریب منبع (باگ ۱٫۱۳).
+                val known = src.symbols.firstOrNull { it.code.equals(q, ignoreCase = true) }
+                onAddSymbol(known?.copy(sourceId = src.id) ?: SymbolDef(q, q, src.id))
             }
         }
 

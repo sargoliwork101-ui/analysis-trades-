@@ -33,11 +33,16 @@ object Http {
     const val UA_DESKTOP =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
-    /** سقف پیش‌فرض حجم پاسخ JSON — بیشتر از این، یعنی پاسخ غیرمنتظره/مخرب */
-    const val MAX_JSON_BYTES = 3L * 1024 * 1024
+    /**
+     * سقف حجم پاسخ JSON.
+     * عمداً دست‌ودل‌باز است (۸ مگابایت): پاسخ TGJU یک فایل بزرگ چند صد کیلوبایتی
+     * است که همه‌ی نمادهای طلا/ارز را با هم می‌دهد، نباید قربانی سقف شود.
+     * ولی پاسخ غول‌آسا (مثلاً چند صد مگابایت از یک سرور خراب/مخرب) خوانده نمی‌شود.
+     */
+    const val MAX_JSON_BYTES = 8L * 1024 * 1024
 
-    /** سقف پیش‌فرض صفحه‌ی HTML */
-    const val MAX_HTML_BYTES = 5L * 1024 * 1024
+    /** سقف پیش‌فرض صفحه‌ی HTML — صفحات سنگین اسکرپ هم جا شوند */
+    const val MAX_HTML_BYTES = 8L * 1024 * 1024
 
     private val client: OkHttpClient by lazy {
         OkHttpClient.Builder()

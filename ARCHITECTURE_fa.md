@@ -20,7 +20,10 @@ com.pulse.market
 │   ├─ Model.kt              مدل‌ها: SourceDef / SymbolDef / Quote / WidgetConfig
 │   ├─ MarketKind.kt    ★    تنها مرجع «هر منبع مال کدام بازار است»
 │   ├─ SourceCatalog.kt      منابع آماده (تنها جا که id منابع «معنی» پیدا می‌کند)
+│   ├─ Http.kt          ★    تنها نقطه‌ی ورود شبکه (OkHttp مشترک، فقط http/https، سقف حجم)
+│   ├─ InternalGuard.kt      توکن خصوصی پیام‌های داخلی ویجت (ضد جعل از بیرون)
 │   ├─ Fetcher.kt            موتور گرفتن (JSON / HTML / TSE) — واحد را روی Quote می‌نشان‌د
+│   ├─ PumpScanner.kt        اسکن پامپ‌های کریپتو (CoinGecko) + امتیاز و سطح ریسک
 │   ├─ QuoteRepo.kt          کش + تاریخچه + قانون stale (داده‌ی سالم هرگز پاک نمی‌شود)
 │   ├─ ConfigStore.kt        تنظیمات هر ویجت + منابع/نمادهای دلخواه (DataStore)
 │   ├─ TseModel.kt           سرویس بورس تهران (جستجو/قیمت/لایه‌های fallback)
@@ -34,7 +37,7 @@ com.pulse.market
 │   ├─ Format.kt             فرمت پایه‌ی اعداد (لایه‌ی زیر QuoteText)
 │   ├─ SymbolSearchDialog.kt جستجوی نماد همه‌ی منابع
 │   ├─ AddSourceDialog.kt / AddAlertDialog.kt
-│   └─ settings/             صفحه‌ی تنظیمات (منو + بخش‌ها + قطعات مشترک)
+│   └─ settings/             صفحه‌ی تنظیمات (منو + بخش‌ها + قطعات مشترک + PumpsCategory)
 │
 ├─ widget/                   ← ویجت
 │   ├─ StockWidgetProvider.kt   زمان‌بندی/رفرش؛ تازگی و واحد را per-widget آماده می‌کند
@@ -50,7 +53,7 @@ com.pulse.market
 
 ---
 
-## چهار قانون طلایی
+## پنج قانون طلایی
 
 ### ۱) هیچ مقایسه‌ی رشته‌ایِ id منبع، بیرون از `SourceCatalog`/`MarketKind`
 ```kotlin
@@ -83,9 +86,17 @@ QuoteText.volume(q)                 // «۱۲٫۴ میلیون»
   خالی از تعریف منبع، تازگی per-widget، تاریخچه‌ی نمودار.
 - `WidgetRenderer` فقط می‌کشد — نه شبکه، نه تصمیم داده.
 
-### ۴) شبکه فقط از `QuoteRepo`/`Fetcher` — و داده‌ی سالم هرگز پاک نمی‌شود
+### ۴) شبکه فقط از `QuoteRepo`/`Fetcher` و از میان `Http` — و داده‌ی سالم هرگز پاک نمی‌شود
+- **هیچ کلاسی خودش `OkHttpClient` نمی‌سازد** (قانون ۱٫۱۴): همه از `Http.client`
+  استفاده می‌کنند و فقط اسکیم `http`/`https` با سقف حجم پاسخ (۸ مگابایت) پذیرفته می‌شود.
 - خطا = `stale` (چراغ قرمز) روی آخرین مقدار سالم؛ نه پاک‌کردن.
 - کش فقط با داده‌ی سالم merge می‌شود.
+
+### ۵) هر منطق خالصی که می‌شود، تست JVM دارد
+- `app/src/test/java/com/pulse/market/data/` — `JsonPath`، `Num`، `AppUpdater`،
+  `PumpScanner`، `Fetcher` (واحد/ضریب نماد).
+- CI پیش از ساخت APK دستور `./gradlew test` را اجرا می‌کند؛ پس تغییر منطق بدون
+  تست، ران را قرمز می‌کند.
 
 ---
 
@@ -94,7 +105,7 @@ QuoteText.volume(q)                 // «۱۲٫۴ میلیون»
 ```
 WidgetConfig (هر ویجت مستقل)
    → StockWidgetProvider.refreshAll        چه کسی شبکه می‌خواهد؟ (زنده/بازه‌ی ساعتی)
-   → QuoteRepo.refreshMany                 گرفتن + merge کش + تاریخچه
+   → QuoteRepo.refreshMany                 گرفتن (از میان Http) + merge کش + تاریخچه
    → renderOne (per-widget)                واحدِ خالی ← تعریف منبع؛ تازگی ← داده‌ی خودش
    → WidgetRenderer + QuoteText            متن‌ها از یک چرخه
 ```
@@ -105,3 +116,6 @@ WidgetConfig (هر ویجت مستقل)
 - [ ] متن نمایشی تازه؟ فقط از طریق `QuoteText` (اگر شکلی جدید لازم است، متدش را به آن اضافه کن)
 - [ ] تنظیم تازه؟ روی `WidgetConfig` — هر ویجت مستقل
 - [ ] منبع تازه؟ فقط `SourceCatalog` (یا منبع دلخواه کاربر) — بقیه‌ی برنامه خودش پیدایش می‌کند
+- [ ] شبکه‌ی تازه؟ فقط `Http` (بدون کلاینت جدید، بدون `body.string()` بی‌سقف)
+- [ ] منطق خالص تازه (پارس/امتیاز/نسخه)؟ تست JVM همراهش بنویس — CI اجرا می‌کند
+- [ ] واحد یا ضریب تازه برای یک نماد؟ روی `SymbolDef.unit` / `SymbolDef.scale` بگذار، نه سرِ منبع
