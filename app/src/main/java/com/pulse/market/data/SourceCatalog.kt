@@ -10,7 +10,10 @@ import com.pulse.market.data.FetchKind.TSE_TSETMC
  */
 object SourceCatalog {
 
-    private const val MIRROR = "https://raw.githubusercontent.com/HosseinOdd/Navasan-API/main/data"
+    // آینه‌های داده‌ی Navasan — jsDelivr در همه‌ی شبکه‌ها (از جمله ایران) در دسترس است؛
+    // raw.githubusercontent در بعضی شبکه‌ها فیلتر است و فقط به‌عنوان پشتیبان می‌آید
+    private const val MIRROR_JSDELIVR = "https://cdn.jsdelivr.net/gh/HosseinOdd/Navasan-API@main/data"
+    private const val MIRROR_GITHUB = "https://raw.githubusercontent.com/HosseinOdd/Navasan-API/main/data"
 
     val builtIn: List<SourceDef> = listOf(
 
@@ -81,8 +84,9 @@ object SourceCatalog {
             title = "ارز — دلار، یورو، …",
             subtitle = "نرخ ارز آزاد (تومان) • داده‌های Navasan",
             kind = JSON_REST,
-            urlTemplate = "$MIRROR/fiat.json",
-            batchTemplate = "$MIRROR/fiat.json",
+            urlTemplate = "$MIRROR_JSDELIVR/fiat.json",
+            batchTemplate = "$MIRROR_JSDELIVR/fiat.json",
+            urlFallbacks = listOf("$MIRROR_GITHUB/fiat.json"),
             pricePath = "{symbol}.value",
             changePath = "{symbol}.change_pct",
             changeMode = ChangeMode.PERCENT,
@@ -104,8 +108,9 @@ object SourceCatalog {
             title = "طلا و سکه",
             subtitle = "طلای ۱۸ عیار، مثقال، سکه (تومان) • داده‌های Navasan",
             kind = JSON_REST,
-            urlTemplate = "$MIRROR/gold.json",
-            batchTemplate = "$MIRROR/gold.json",
+            urlTemplate = "$MIRROR_JSDELIVR/gold.json",
+            batchTemplate = "$MIRROR_JSDELIVR/gold.json",
+            urlFallbacks = listOf("$MIRROR_GITHUB/gold.json"),
             pricePath = "{symbol}.value",
             changePath = "{symbol}.change_pct",
             changeMode = ChangeMode.PERCENT,
@@ -128,6 +133,11 @@ object SourceCatalog {
             kind = JSON_REST,
             urlTemplate = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}" +
                     "?interval=5m&range=1d&includePrePost=false",
+            // پشتیبان: هاست دوم یاهو — اگر اولی محدود/مسدود بود
+            urlFallbacks = listOf(
+                "https://query2.finance.yahoo.com/v8/finance/chart/{symbol}" +
+                        "?interval=5m&range=1d&includePrePost=false"
+            ),
             pricePath = "chart.result[0].meta.regularMarketPrice",
             changePath = "chart.result[0].meta.chartPreviousClose",
             changeMode = ChangeMode.PREV_CLOSE,

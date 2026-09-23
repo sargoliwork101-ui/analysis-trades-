@@ -255,12 +255,13 @@ error = (num == null) ? "«raw» عدد نبود" : (سلکتور پیدا نش�
 | changePath / حالت | `[0].indexChange \| indexB1LastAll[0].indexChange \| indexChange` / `ABSOLUTE` |
 | unit | واحد |
 
-### ۷.۴) ارز — Navasan (آینه‌ی GitHub)
+### ۷.۴) ارز — Navasan (آینه‌ی jsDelivr + پشتیبان GitHub)
 
 | مورد | مقدار |
 |---|---|
 | kind | `JSON_REST` |
-| تکی/گروهی | `https://raw.githubusercontent.com/HosseinOdd/Navasan-API/main/data/fiat.json` |
+| تکی/گروهی | `https://cdn.jsdelivr.net/gh/HosseinOdd/Navasan-API@main/data/fiat.json` |
+| urlFallbacks | `https://raw.githubusercontent.com/HosseinOdd/Navasan-API/main/data/fiat.json` |
 | pricePath | `{symbol}.value` |
 | changePath / حالت | `{symbol}.change_pct` / `PERCENT` |
 | unit | تومان |
@@ -286,6 +287,7 @@ error = (num == null) ? "«raw» عدد نبود" : (سلکتور پیدا نش�
 |---|---|
 | kind | `JSON_REST` |
 | آدرس | `https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=5m&range=1d&includePrePost=false` |
+| urlFallbacks | همان آدرس روی `query2.finance.yahoo.com` |
 | pricePath | `chart.result[0].meta.regularMarketPrice` |
 | changePath / حالت | `chart.result[0].meta.chartPreviousClose` / `PREV_CLOSE` |
 | sparkPath | `chart.result[0].indicators.quote[0].close` |

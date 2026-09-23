@@ -61,7 +61,7 @@ object Fetcher {
     private suspend fun fetchOne(source: SourceDef, sym: SymbolDef): Quote = when (source.kind) {
         FetchKind.TSE_TSETMC -> fetchTse(source, sym)
         FetchKind.JSON_REST -> try {
-            quoteFromJson(source, sym, parseJson(get(url(source, sym.code), source)))
+            quoteFromJson(source, sym, parseJson(getAny(singleUrls(source, sym.code), source)))
         } catch (t: Throwable) {
             errorQuote(source, sym, t)
         }
@@ -73,8 +73,9 @@ object Fetcher {
     private suspend fun fetchBatch(source: SourceDef, symbols: List<SymbolDef>): List<Quote> {
         return try {
             val joined = symbols.joinToString(",") { enc(it.code) }
-            val batchUrl = source.batchTemplate!!.replace("{symbols}", joined)
-            val json = parseJson(get(batchUrl, source))
+            val batchUrls = (listOfNotNull(source.batchTemplate) + source.urlFallbacks)
+                .map { it.replace("{symbols}", joined).replace("{symbol}", joined) }
+            val json = parseJson(getAny(batchUrls, source))
             symbols.map { quoteFromJson(source, it, json) }
         } catch (_: Throwable) {
             // اگر درخواست گروهی شکست خورد، تک‌تک امتحان کن
@@ -105,8 +106,9 @@ object Fetcher {
     private fun fetchHtml(source: SourceDef, sym: SymbolDef): Quote {
         val started = System.currentTimeMillis()
         return try {
-            val body = get(url(source, sym.code), source)
-            val doc = Jsoup.parse(body, url(source, sym.code))
+            val urls = singleUrls(source, sym.code)
+            val body = getAny(urls, source)
+            val doc = Jsoup.parse(body, urls.first())
             val selector = source.cssSelector
             val el = if (selector.isNullOrBlank()) {
                 error("سلکتور CSS برای منبع HTML تعریف نشده")
@@ -180,8 +182,27 @@ object Fetcher {
 
     // ───────────────────── ابزارهای HTTP ─────────────────────
 
-    private fun url(source: SourceDef, code: String): String =
-        source.urlTemplate.replace("{symbol}", enc(code))
+    /** آدرس‌های «یک نماد»: اصلی + پشتیبان‌ها — جای {symbol} در همه پر می‌شود */
+    private fun singleUrls(source: SourceDef, code: String): List<String> =
+        (listOf(source.urlTemplate) + source.urlFallbacks)
+            .map { it.replace("{symbol}", enc(code)) }
+
+    /**
+     * اولین آدرسی که جواب داد برمی‌گردد — آدرس اصلی و بعد پشتیبان‌ها؛
+     * هر آدرس مستقل امتحان می‌شود تا محدودیت/فیلترِ یک سرور، داده را قطع نکند
+     * (مثلاً GitHub در بعضی شبکه‌ها در دسترس نیست ولی آینه‌ی jsDelivr هست).
+     */
+    private fun getAny(urls: List<String>, source: SourceDef): String {
+        var last: Throwable? = null
+        for (u in urls) {
+            try {
+                return get(u, source)
+            } catch (t: Throwable) {
+                last = t
+            }
+        }
+        throw last ?: error("آدرسی برای خواندن تعریف نشده بود")
+    }
 
     private fun get(url: String, source: SourceDef): String {
         val request = Request.Builder()

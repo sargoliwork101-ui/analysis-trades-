@@ -62,6 +62,12 @@ data class SourceDef(
     val urlTemplate: String,
     /** الگوی درخواست گروهی همه‌ی نمادها با یک HTTP (برای جلوگیری از rate-limit) — جای {symbols} */
     val batchTemplate: String? = null,
+    /**
+     * آدرس‌های پشتیبان — اگر آدرس اصلی (تکی یا گروهی) شکست خورد، به‌ترتیب امتحان می‌شوند.
+     * برای رد شدن از فیلترینگ/محدودیت هر آینه (مثل GitHub که در بعضی شبکه‌ها در دسترس نیست
+     * و آینه‌ی jsDelivr که همیشه در دسترس است). جای {symbol}/{symbols} مثل آدرس اصلی پر می‌شود.
+     */
+    val urlFallbacks: List<String> = emptyList(),
     val pricePath: String? = null,
     val changePath: String? = null,
     val changeMode: ChangeMode = ChangeMode.PERCENT,

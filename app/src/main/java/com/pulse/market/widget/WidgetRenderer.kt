@@ -176,8 +176,7 @@ object WidgetRenderer {
                     R.id.rows,
                     buildRow(
                         context, q, cfg, pal, i, sparkVisible, sparkWdp, sparkHdp, subVisible,
-                        scale, blinkOn, dataStale,
-                        unitInline = sizeW >= 200
+                        scale, blinkOn, dataStale
                     )
                 )
             }
@@ -252,8 +251,7 @@ object WidgetRenderer {
         subVisible: Boolean,
         scale: Float,
         blinkOn: Boolean,
-        dataStale: Boolean,
-        unitInline: Boolean
+        dataStale: Boolean
     ): RemoteViews {
         val row = RemoteViews(context.packageName, R.layout.widget_row)
         applyRowChrome(row, pal, cfg, index, scale)
@@ -273,18 +271,14 @@ object WidgetRenderer {
         )
 
         // واحد هر نماد: در ویجت پهن جلوی عدد قیمت، در ویجت باریک زیر عدد — نه زیر نام نماد
-        // ── قیمت و واحد — از ماژول مرجع QuoteText؛ واحدِ هر منبعی همین‌جا می‌نشیند ──
+        // ── قیمت و واحد — واحد همیشه زیر عدد می‌نشیند، برای همه‌ی منابع و همه‌ی
+        // اندازه‌های ویجت یکسان؛ چسباندن واحد کنار عدد، قیمت‌های بلندِ تومانی را
+        // می‌فشرد و چیدمان را به‌هم می‌ریخت ──
         val unit = QuoteText.unit(q)
         val priceText = Format.price(q.price, cfg.persianDigits, cfg.compactNumbers)
-        val inlineUnit = unitInline && unit.isNotEmpty() && q.price != null
-        row.setTextViewText(
-            R.id.row_price,
-            if (inlineUnit)
-                text(QuoteText.priceWithUnit(q, cfg.persianDigits, cfg.compactNumbers), cfg)
-            else priceText
-        )
+        row.setTextViewText(R.id.row_price, priceText)
         row.setTextColor(R.id.row_price, if (q.price != null) pal.text else pal.sub)
-        if (!inlineUnit && unit.isNotEmpty() && q.price != null) {
+        if (unit.isNotEmpty() && q.price != null) {
             row.setTextViewText(R.id.row_unit, text(unit, cfg))
             row.setTextColor(R.id.row_unit, pal.sub)
             sp(row, R.id.row_unit, SZ_SUB, scale)
@@ -354,7 +348,7 @@ object WidgetRenderer {
         }
     }
 
-    /** خط دوم هر نماد: کد نماد + حجم معاملات — واحد دیگر اینجا نمی‌شیند، کنار عدد قیمت است */
+    /** خط دوم هر نماد: کد نماد + حجم معاملات — واحد زیر عدد قیمت می‌نشیند، اینجا نمی‌آید */
     private fun subLabel(q: Quote, cfg: WidgetConfig): String {
         // خطا فقط وقتی نشان داده می‌شود که مقداری برای نمایش نداشته باشیم؛
         // در حالت stale (آخرین مقدار سالم) عدد می‌ماند و فقط LED قرمز می‌شود

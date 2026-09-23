@@ -12,7 +12,7 @@ An Android home-screen widget that shows **live market prices** — Tehran Stock
 - **Per-widget independent settings** — every widget has its own sources, symbols, values and theme; each can be edited by tapping it.
 - **5 themes** — Dark, Light, Glass, Aurora, Neon — with zebra row separation.
 - **Dynamic sizing** — fonts and content adapt to the real widget size plus a user font-scale (×0.75–×1.5).
-- **Live values per symbol** — price **with its unit right next to it** (unit moves under the price on narrow widgets), change badge, volume, sparkline.
+- **Live values per symbol** — price with its unit right under it (identical on every widget size and source), change badge, volume, sparkline.
 - **Sparkline for every symbol, every widget size** — all-or-nothing: enabled for all sizes (small/medium/large) or none. Price history is stored locally on the phone, so even TSE symbols get a chart; the number of displayed points (6–60) is user-configurable.
 - **Offline & update-off resilience** — with no internet or auto-update disabled, the widget never goes blank: the last prices stay on screen, each row's **blinking LED** turns red/green (green = fresh, red = stale, gray = no data), and the bottom bar says what state it's in. The header shows the last-update time.
 - **Status of the widget's own markets** — next to the clock, open/closed for each market active in that widget: «بورس / کریپتو (۲۴/۷) / آمریکا / طلا و ارز». Toggleable.

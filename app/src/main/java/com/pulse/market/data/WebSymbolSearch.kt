@@ -63,9 +63,12 @@ object WebSymbolSearch {
 
     /** Yahoo: query1.finance.yahoo.com/v1/finance/search?q=… → quotes[] {symbol, shortname, quoteType} */
     private fun yahoo(sourceId: String, q: String): List<SymbolDef> {
-        val body = get(
-            "https://query1.finance.yahoo.com/v1/finance/search?q=" + enc(q) +
-                    "&quotesCount=15&newsCount=0"
+        val query = "v1/finance/search?q=" + enc(q) + "&quotesCount=15&newsCount=0"
+        val body = getAny(
+            listOf(
+                "https://query1.finance.yahoo.com/$query",
+                "https://query2.finance.yahoo.com/$query"   // پشتیبان اگر هاست اولی محدود بود
+            )
         )
         val arr = JSONObject(body).optJSONArray("quotes") ?: return emptyList()
         // فقط ابزارهای واقعی — گزینه‌های اختیار و پیچیده را نمایش نده
@@ -88,6 +91,19 @@ object WebSymbolSearch {
             if (!resp.isSuccessful) error("HTTP ${resp.code}")
             resp.body?.string().orEmpty()
         }
+
+    /** اولین آدرسی که جواب داد — پشتیبان‌ها بعد از آدرس اصلی امتحان می‌شوند */
+    private fun getAny(urls: List<String>): String {
+        var last: Throwable? = null
+        for (u in urls) {
+            try {
+                return get(u)
+            } catch (t: Throwable) {
+                last = t
+            }
+        }
+        throw last ?: error("آدرسی برای جستجو تعریف نشده بود")
+    }
 
     private fun enc(s: String): String =
         URLEncoder.encode(s, "UTF-8").replace("+", "%20")
