@@ -229,6 +229,7 @@ error = (num == null) ? "«raw» عدد نبود" : (سلکتور پیدا نش�
 | volumePath | `{symbol}.usd_24h_vol` |
 | unit | `$` |
 | نمادها | `bitcoin` بیت‌کوین، `ethereum` اتریوم، `tether` تتر، `binancecoin` بایننس‌کوین، `solana` سولانا، `ripple` ریپل، `dogecoin` دوج‌کوین، `toncoin` تون‌کوین |
+| جستجوی نماد | `GET https://api.coingecko.com/api/v3/search?query={q}` → `coins[] {id, name, symbol}` |
 
 پاسخ نمونه:
 
@@ -291,6 +292,7 @@ error = (num == null) ? "«raw» عدد نبود" : (سلکتور پیدا نش�
 | volumePath | `chart.result[0].indicators.quote[0].volume` (آرایه — جمع زده می‌شود) |
 | unit | `$` |
 | نمادها | `AAPL`, `TSLA`, `MSFT`, `NVDA`, `GOOGL`, `AMZN`, `META`, `BTC-USD` |
+| جستجوی نماد | `GET https://query1.finance.yahoo.com/v1/finance/search?q={q}&quotesCount=15&newsCount=0` → `quotes[] {symbol, shortname, quoteType}` — فقط `quoteType` های `EQUITY/ETF/CRYPTOCURRENCY/INDEX/CURRENCY` |
 
 ### ۷.۷) نمونه‌ی اسکرپ وب — TGJU
 

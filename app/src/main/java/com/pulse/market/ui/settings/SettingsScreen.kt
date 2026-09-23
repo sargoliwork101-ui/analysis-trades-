@@ -78,7 +78,7 @@ import com.pulse.market.data.WidgetTheme
 import com.pulse.market.ui.AddAlertDialog
 import com.pulse.market.ui.AddSourceDialog
 import com.pulse.market.ui.Format
-import com.pulse.market.ui.TseSearchDialog
+import com.pulse.market.ui.SymbolSearchDialog
 import com.pulse.market.widget.StockWidgetProvider
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
@@ -123,7 +123,7 @@ fun SettingsScreen(
     var section by remember { mutableStateOf<SettingsSection?>(null) }
 
     var showAddDialog by remember { mutableStateOf(false) }
-    var showTseSearchDialog by remember { mutableStateOf(false) }
+    var showSymbolSearchDialog by remember { mutableStateOf(false) }
     var alertDialogOpen by remember { mutableStateOf(false) }
     var editingAlert by remember { mutableStateOf<AlertRule?>(null) }
 
@@ -142,6 +142,15 @@ fun SettingsScreen(
 
     fun persistAlerts(list: List<AlertRule>) {
         persist(cfg.copy(alerts = list))
+    }
+
+    /** افزودن یک نماد به نمادهای همین ویجت — با سقف MAX_SYMBOLS (آخرین حذف می‌شود) */
+    fun addSymbol(newSym: SymbolDef) {
+        if (cfg.symbols.any { it.code == newSym.code && it.sourceId == newSym.sourceId }) return
+        val list = cfg.symbols.toMutableList()
+        if (list.size >= MAX_SYMBOLS) list.removeAt(list.size - 1)
+        list.add(newSym)
+        persist(cfg.copy(symbols = list))
     }
 
     LaunchedEffect(widgetId) {
@@ -393,7 +402,7 @@ fun SettingsScreen(
                                 }
                             }
                         },
-                        onOpenTseSearch = { showTseSearchDialog = true }
+                        onOpenSymbolSearch = { showSymbolSearchDialog = true }
                     )
 
                     SettingsSection.VALUES -> ValuesCategory(
@@ -578,25 +587,24 @@ fun SettingsScreen(
         )
     }
 
-    if (showTseSearchDialog) {
-        TseSearchDialog(
+    if (showSymbolSearchDialog) {
+        SymbolSearchDialog(
+            sources = selectedSources,
             selectedSymbols = cfg.symbols,
-            customSymbols = tseCustomSymbols,
-            onDismiss = { showTseSearchDialog = false },
+            tseCustomSymbols = tseCustomSymbols,
+            onDismiss = { showSymbolSearchDialog = false },
             onAddSymbol = { newSym ->
-                scope.launch {
-                    val updatedCustom = (tseCustomSymbols + newSym).distinctBy { it.code }
-                    ConfigStore.saveTseSymbolsAsync(context, updatedCustom)
-                    tseCustomSymbols = updatedCustom
-
-                    val currentList = cfg.symbols.toMutableList()
-                    if (!currentList.any { it.code == newSym.code && it.sourceId == newSym.sourceId }) {
-                        if (currentList.size >= MAX_SYMBOLS) {
-                            currentList.removeAt(currentList.size - 1)
-                        }
-                        currentList.add(newSym)
-                        persist(cfg.copy(symbols = currentList))
+                // فقط نمادهای بورس در فهرست «نمادهای دلخواه بورس من» ذخیره می‌شوند؛
+                // نمادهای بقیه‌ی منابع فقط به همین ویجت اضافه می‌شوند
+                if (newSym.sourceId == "tse_tsetmc") {
+                    scope.launch {
+                        val updatedCustom = (tseCustomSymbols + newSym).distinctBy { it.code }
+                        ConfigStore.saveTseSymbolsAsync(context, updatedCustom)
+                        tseCustomSymbols = updatedCustom
+                        addSymbol(newSym)
                     }
+                } else {
+                    addSymbol(newSym)
                 }
             },
             onRemoveSymbol = { sym ->
@@ -605,7 +613,7 @@ fun SettingsScreen(
                 }
                 persist(cfg.copy(symbols = list))
             },
-            onDeleteCustomSymbol = { sym ->
+            onDeleteTseCustomSymbol = { sym ->
                 scope.launch {
                     val updated = tseCustomSymbols.filterNot { it.code == sym.code }
                     ConfigStore.saveTseSymbolsAsync(context, updated)

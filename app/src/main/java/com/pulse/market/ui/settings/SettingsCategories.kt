@@ -26,7 +26,6 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
@@ -188,10 +187,8 @@ fun SymbolsCategory(
     onRemoveSymbol: (Int) -> Unit,
     onMoveSymbol: (Int, Int) -> Unit,
     onDeleteTseSymbol: (SymbolDef) -> Unit,
-    onOpenTseSearch: () -> Unit
+    onOpenSymbolSearch: () -> Unit
 ) {
-    val isTseSelected = selectedSources.any { it.id == "tse_tsetmc" }
-
     Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
 
         // ── نمادهای این ویجت — یک کارت، هر ردیف: ترتیب + حذف ──
@@ -266,20 +263,20 @@ fun SymbolsCategory(
             }
         }
 
-        // ── جستجوی بورس تهران ──
-        if (isTseSelected) {
-            SectionHeader("افزودن نماد بورس تهران")
-            Button(
-                onClick = onOpenTseSearch,
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
-            ) {
-                Icon(Icons.Default.Search, contentDescription = null)
-                Spacer(Modifier.width(6.dp))
-                Text("🔍 جستجو یا افزودن با لینک TSETMC", fontSize = 12.5.sp)
-            }
-            Hint("صندوق‌ها، اهرم، عیار، طلا، … یا لینک صفحه‌ی tsetmc.com را می‌توانی اضافه کنی.")
+        // ── جستجوی نماد — همه‌ی منابع ──
+        SectionHeader(
+            "جستجوی نماد",
+            "در همه‌ی منابع فعال همین ویجت — بورس، کریپتو، آمریکا، طلا و ارز و منابع دلخواه"
+        )
+        Button(
+            onClick = onOpenSymbolSearch,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(Icons.Default.Search, contentDescription = null)
+            Spacer(Modifier.width(6.dp))
+            Text("جستجو یا افزودن نماد", fontSize = 12.5.sp)
         }
+        Hint("بورس: نام/لینک TSETMC • کریپتو و آمریکا: جستجوی آنلاین • بقیه: فهرست منبع + کد دلخواه")
 
         // ── نمادهای دلخواه بورس من (قابل حذف) ──
         if (tseCustomSymbols.isNotEmpty()) {
