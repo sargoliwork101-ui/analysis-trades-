@@ -10,13 +10,13 @@ import android.view.View
 import android.widget.RemoteViews
 import com.pulse.market.R
 import com.pulse.market.data.Quote
+import com.pulse.market.data.MarketStatus
 import com.pulse.market.data.WidgetConfig
 import com.pulse.market.data.WidgetTheme
 import com.pulse.market.ui.MainActivity
 import com.pulse.market.ui.Sparkline
 import com.pulse.market.ui.Format
-import java.util.Calendar
-import java.util.TimeZone
+import com.pulse.market.ui.QuoteText
 
 /** ساخت ظاهر ویجت — کاملاً داینامیک با اندازه‌ی ویجت، اندازه‌ی فونت و مقادیر انتخابی هر ویجت */
 object WidgetRenderer {
@@ -78,7 +78,10 @@ object WidgetRenderer {
         quotes: List<Quote>,
         live: Boolean,
         updatedAt: Long,
-        sourceTitle: String = ""
+        sourceTitle: String = "",
+        /** متنِ حالت خالی وقتی علتِ خالی بودن معلوم است (مثل منبعِ حذف‌شده) —
+         *  خالی یعنی حالت پیش‌فرض «دکمه‌ی رفرش را بزن» */
+        emptyHint: String = ""
     ) {
         val views = RemoteViews(context.packageName, R.layout.widget_stock)
         val pal = palette(cfg.theme)
@@ -95,7 +98,11 @@ object WidgetRenderer {
 
         val rowCapacity = (((sizeH - 84f) / 50f) + 1f).toInt().coerceIn(1, 6)
         val maxRows = minOf(cfg.rows.coerceIn(1, 6), rowCapacity)
-        val sparkVisible = cfg.showSparkline && sizeW >= 170
+        // نمودار مینیاتوری: همه یا هیچ — یا برای همه‌ی نمادها و همه‌ی اندازه‌های ویجت
+        // (کوچک/متوسط/بزرگ) هست یا برای هیچ‌کدام؛ عرضش با پهنای ویجت تنظیم می‌شود
+        val sparkVisible = cfg.showSparkline
+        val sparkWdp = (sizeW * 0.16f).coerceIn(24f, 52f)
+        val sparkHdp = (sparkWdp * 0.46f).coerceIn(12f, 24f)
         val subVisible = sizeW >= 120
 
         // چشمک LED: با هر به‌روزرسانی، فاز روشن/کم‌نور عوض می‌شود (مثل چشمک زدن)
@@ -117,7 +124,7 @@ object WidgetRenderer {
         sp(views, R.id.txt_time, SZ_TIME, scale)
         sp(views, R.id.txt_status, SZ_STATUS, scale)
 
-        // ── سرصفحه: عنوان دلخواه/منبع + زمان آخرین به‌روزرسانی ──
+        // ── سرصفحه: عنوان دلخواه/منبع + زمان آخرین به‌روزرسانی + وضعیت بازارهای همین ویجت ──
         val title = cfg.title.ifBlank { sourceTitle.ifBlank { defaultTitle(cfg.sourceId) } }
         views.setTextViewText(R.id.txt_title, text(title, cfg))
         val updText = when {
@@ -125,11 +132,32 @@ object WidgetRenderer {
             sizeW < 200 -> "به‌روز ${Format.time(updatedAt)}"
             else -> "آخرین به‌روزرسانی ${Format.time(updatedAt)}"
         }
-        // وضعیت جلسه‌ی بورس تهران کنار ساعت — اگر کاربر خواسته و ویجت به‌اندازه‌ی کافی پهن است
-        val headerText =
-            if (cfg.showMarketStatus && sizeW >= 200) updText + " • " + tseMarketText() else updText
+        // وضعیت هر بازارِ فعالِ همین ویجت (بورس/کریپتو/آمریکا/طلا و ارز) — اگر کاربر خواسته
+        // و ویجت به‌اندازه‌ی کافی پهن است؛ در ویجت باریک‌تر شکل کوتاه (فقط نام + چراغ) نشان داده می‌شود
+        val marketText =
+            if (cfg.showMarketStatus && sizeW >= 170)
+                MarketStatus.headerFor(cfg.activeSourceIds, short = sizeW < 280)
+            else ""
+        // ساعت و وضعیت بازار مستقل از هم خاموش/روشن می‌شوند
+        val headerText = listOf(updText, marketText)
+            .filter { it.isNotEmpty() }
+            .joinToString(" • ")
         views.setTextViewText(R.id.txt_time, text(headerText, cfg))
-        views.setViewVisibility(R.id.txt_time, if (cfg.showTime) View.VISIBLE else View.GONE)
+        views.setViewVisibility(
+            R.id.txt_time,
+            if (cfg.showTime || marketText.isNotEmpty()) View.VISIBLE else View.GONE
+        )
+        // متن ساعت/وضعیت با چند بازار طولانی می‌شود — سقف عرض تا از سرصفحه بیرون نزند
+        runCatching {
+            val titleDp = (title.length * 5.8f * scale).coerceAtMost(150f)
+            val timeMaxDp = (sizeW - titleDp - 78f).coerceAtLeast(50f)
+            views.setInt(
+                R.id.txt_time, "setMaxWidth",
+                TypedValue.applyDimension(
+                    TypedValue.COMPLEX_UNIT_DIP, timeMaxDp, context.resources.displayMetrics
+                ).toInt()
+            )
+        }
 
         // ── ردیف‌ها به شکل کارت‌های جدا با پس‌زمینه‌ی متناوب ──
         views.removeAllViews(R.id.rows)
@@ -139,7 +167,10 @@ object WidgetRenderer {
             applyRowChrome(row, pal, cfg, 0, scale)
             row.setImageViewResource(R.id.row_led, R.drawable.led_gray)
             row.setTextViewText(R.id.row_label, text("منتظر داده…", cfg))
-            row.setTextViewText(R.id.row_sub, text("دکمه‌ی رفرش را بزن", cfg))
+            row.setTextViewText(
+                R.id.row_sub,
+                text(if (emptyHint.isNotBlank()) emptyHint else "دکمه‌ی رفرش را بزن", cfg)
+            )
             row.setTextViewText(R.id.row_price, "—")
             row.setViewVisibility(R.id.row_change, View.GONE)
             row.setViewVisibility(R.id.row_unit, View.GONE)
@@ -150,27 +181,31 @@ object WidgetRenderer {
                 views.addView(
                     R.id.rows,
                     buildRow(
-                        context, q, cfg, pal, i, sparkVisible, subVisible, scale,
-                        blinkOn, dataStale,
-                        unitInline = sizeW >= 200
+                        context, q, cfg, pal, i, sparkVisible, sparkWdp, sparkHdp, subVisible,
+                        scale, blinkOn, dataStale
                     )
                 )
             }
         }
 
-        // ── نوار وضعیت (قابل خاموش شدن) ──
+        // ── نوار وضعیت (قابل خاموش شدن) — «الان در چه وضعیتی هستیم؟» ──
         val errors = quotes.count { it.error != null && it.price == null }
+        // نمادهایی که این نوبت تازه نشدند ولی آخرین قیمت سالم‌شان روی ویجت مانده (چراغ قرمز)
+        val staleCount = quotes.count { it.stale && it.price != null }
         val activeAlerts = cfg.alerts.count { it.enabled }
         val alertInfo = if (activeAlerts > 0) " • 🔔 $activeAlerts هشدار" else ""
         // بازه‌ی ساعتی تازه‌سازی — کاربر بفهمد چرا گاهی فقط آخرین داده می‌ماند
         val windowInfo = if (cfg.refreshWindowEnabled && cfg.refreshFromMinute != cfg.refreshToMinute)
             " • ⏰ ${time2d(cfg.refreshFromMinute)}–${time2d(cfg.refreshToMinute)}" else ""
         val status = when {
-            errors == 0 && quotes.isNotEmpty() -> (if (live) "زنده" else "دستی") +
-                    " • هر ${cfg.intervalSec} ثانیه$alertInfo$windowInfo"
-
             quotes.isEmpty() -> "داده‌ای نیست — روی رفرش بزن"
-            else -> "$errors مورد خطا$alertInfo$windowInfo"
+            errors > 0 -> "$errors نماد بدون داده$alertInfo$windowInfo"
+            // بدون اینترنت یا توقف تازه‌سازی: داده پاک نمی‌شود، فقط چراغ‌ها قرمز می‌شوند
+            staleCount > 0 -> "آفلاین — آخرین قیمت‌ها نگه داشته شد$alertInfo$windowInfo"
+            dataStale -> (if (live) "داده‌ها قدیمی" else "به‌روزرسانی خاموش") +
+                    " — آخرین داده ${Format.time(updatedAt)}$alertInfo$windowInfo"
+            live -> "زنده • هر ${cfg.intervalSec} ثانیه$alertInfo$windowInfo"
+            else -> "دستی — آخرین داده‌ها روی ویجت مانده$alertInfo$windowInfo"
         }
         views.setTextViewText(
             R.id.txt_status,
@@ -217,11 +252,12 @@ object WidgetRenderer {
         pal: Palette,
         index: Int,
         sparkVisible: Boolean,
+        sparkWdp: Float,
+        sparkHdp: Float,
         subVisible: Boolean,
         scale: Float,
         blinkOn: Boolean,
-        dataStale: Boolean,
-        unitInline: Boolean
+        dataStale: Boolean
     ): RemoteViews {
         val row = RemoteViews(context.packageName, R.layout.widget_row)
         applyRowChrome(row, pal, cfg, index, scale)
@@ -241,15 +277,14 @@ object WidgetRenderer {
         )
 
         // واحد هر نماد: در ویجت پهن جلوی عدد قیمت، در ویجت باریک زیر عدد — نه زیر نام نماد
+        // ── قیمت و واحد — واحد همیشه زیر عدد می‌نشیند، برای همه‌ی منابع و همه‌ی
+        // اندازه‌های ویجت یکسان؛ چسباندن واحد کنار عدد، قیمت‌های بلندِ تومانی را
+        // می‌فشرد و چیدمان را به‌هم می‌ریخت ──
+        val unit = QuoteText.unit(q)
         val priceText = Format.price(q.price, cfg.persianDigits, cfg.compactNumbers)
-        val unit = q.unit.trim()
-        val inlineUnit = unitInline && unit.isNotEmpty() && q.price != null
-        row.setTextViewText(
-            R.id.row_price,
-            if (inlineUnit) text("$priceText $unit", cfg) else priceText
-        )
+        row.setTextViewText(R.id.row_price, priceText)
         row.setTextColor(R.id.row_price, if (q.price != null) pal.text else pal.sub)
-        if (!inlineUnit && unit.isNotEmpty() && q.price != null) {
+        if (unit.isNotEmpty() && q.price != null) {
             row.setTextViewText(R.id.row_unit, text(unit, cfg))
             row.setTextColor(R.id.row_unit, pal.sub)
             sp(row, R.id.row_unit, SZ_SUB, scale)
@@ -279,19 +314,21 @@ object WidgetRenderer {
             )
         }
 
-        if (sparkVisible && q.spark.size >= 3) {
+        // ── نمودار مینیاتوری: چند نقطه از انتهای سری (تعدادش را کاربر تعیین می‌کند) ──
+        val points = q.spark.takeLast(cfg.sparkPoints.coerceIn(6, 60))
+        if (sparkVisible && points.size >= 3) {
             val px = TypedValue.applyDimension(
-                TypedValue.COMPLEX_UNIT_DIP, 52f * scale, context.resources.displayMetrics
+                TypedValue.COMPLEX_UNIT_DIP, sparkWdp * scale, context.resources.displayMetrics
             ).toInt()
             val py = TypedValue.applyDimension(
-                TypedValue.COMPLEX_UNIT_DIP, 24f * scale, context.resources.displayMetrics
+                TypedValue.COMPLEX_UNIT_DIP, sparkHdp * scale, context.resources.displayMetrics
             ).toInt()
             val color = when {
                 (ch ?: 0.0) > 0.0001 -> COLOR_UP
                 (ch ?: 0.0) < -0.0001 -> COLOR_DOWN
                 else -> COLOR_FLAT
             }
-            val bmp = Sparkline.bitmap(q.spark, px, py, color)
+            val bmp = Sparkline.bitmap(points, px, py, color)
             if (bmp != null) {
                 row.setViewVisibility(R.id.row_spark, View.VISIBLE)
                 row.setImageViewBitmap(R.id.row_spark, bmp)
@@ -317,7 +354,7 @@ object WidgetRenderer {
         }
     }
 
-    /** خط دوم هر نماد: کد نماد + حجم معاملات — واحد دیگر اینجا نمی‌شیند، کنار عدد قیمت است */
+    /** خط دوم هر نماد: کد نماد + حجم معاملات — واحد زیر عدد قیمت می‌نشیند، اینجا نمی‌آید */
     private fun subLabel(q: Quote, cfg: WidgetConfig): String {
         // خطا فقط وقتی نشان داده می‌شود که مقداری برای نمایش نداشته باشیم؛
         // در حالت stale (آخرین مقدار سالم) عدد می‌ماند و فقط LED قرمز می‌شود
@@ -350,17 +387,6 @@ object WidgetRenderer {
 
     private fun defaultTitle(sourceId: String): String =
         com.pulse.market.data.SourceCatalog.byId(sourceId)?.title?.substringBefore(" —") ?: "نبض بازار"
-
-    /** وضعیت جلسه‌ی معاملاتی بورس تهران: شنبه تا چهارشنبه، ساعت ۹:۰۰ تا ۱۲:۳۰ به وقت ایران */
-    private fun tseMarketText(): String {
-        val cal = Calendar.getInstance(TimeZone.getTimeZone("Asia/Tehran"))
-        val day = cal.get(Calendar.DAY_OF_WEEK)
-        val workDay = day == Calendar.SATURDAY || day == Calendar.SUNDAY ||
-                day in Calendar.MONDAY..Calendar.WEDNESDAY
-        val minute = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
-        val open = workDay && minute in 9 * 60..12 * 60 + 30
-        return if (open) "بورس: باز 🟢" else "بورس: بسته 🔴"
-    }
 
     // ── PendingIntent ها ──
 

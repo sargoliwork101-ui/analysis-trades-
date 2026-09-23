@@ -32,6 +32,15 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
+      - name: Check the stable signing key exists
+        run: |
+          if [ ! -f app/ci-debug.keystore ]; then
+            echo "::error::app/ci-debug.keystore is missing — without it Gradle invents a new random"
+            echo "::error::debug key on every run and the APK will NOT install over the previous app."
+            exit 1
+          fi
+          echo "keystore sha256: $(sha256sum app/ci-debug.keystore | awk '{print $1}')"
+
       - name: Build Debug APK
         run: |
           set +e
@@ -52,20 +61,75 @@ jobs:
           mkdir -p build-output
           cp app/build/outputs/apk/debug/app-debug.apk "build-output/PulseMarket-v${VER}.apk"
           ls -la build-output/
+          sha256sum build-output/*.apk
+          echo "APK_NAME=PulseMarket-v${VER}.apk" >> "$GITHUB_ENV"
+
+      # هر بیلد باید با همان کلیدِ ثابت امضا شود؛ وگرنه اندروید نصب روی نسخه‌ی قبلی را رد می‌کند
+      # (INSTALL_FAILED_UPDATE_INCOMPATIBLE) و آپدیت درون‌برنامه‌ای هم کار نمی‌کند.
+      # اگر نتوانیم امضا را بخوانیم فقط هشدار می‌دهیم (آپلود APK انجام می‌شود)؛
+      # تنها وقتی بیلد را می‌شکنیم که مطمئن باشیم کلید، کلیدِ ثابتِ ما نیست.
+      - name: Verify APK is signed with the stable CI key
+        run: |
+          APK="build-output/$APK_NAME"
+          EXPECTED="d470d7af31125ef95c3a8f680e15189f7f15a3ea49e8580b28d415ffc13010d4"
+          echo "apk: $APK"; ls -la "$APK"
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          BT=$(ls -d "$SDK"/build-tools/* 2>/dev/null | sort -V | tail -n1 || true)
+          echo "sdk: $SDK"; echo "build-tools: $BT"
+          FOUND=""
+          if [ -n "$BT" ] && [ -x "$BT/apksigner" ]; then
+            echo "--- apksigner verify ---"
+            "$BT/apksigner" verify --print-certs "$APK" 2>&1 | sed 's/^/  /' || true
+            FOUND=$("$BT/apksigner" verify --print-certs "$APK" 2>&1 \
+              | awk -F': ' '/SHA-256 digest/ {print $NF; exit}' | tr -d ' \r' | tr 'A-F' 'a-f' || true)
+          else
+            echo "apksigner not found at '$BT/apksigner'"
+          fi
+          # جایگزین: خوندن گواهی امضای v1 از داخل APK با openssl (همیشه روی رانر هست)
+          if [ -z "$FOUND" ]; then
+            CERT=$(unzip -Z1 "$APK" 2>/dev/null | grep -E '^META-INF/.*\.(RSA|DSA|EC)$' | head -n1 || true)
+            echo "v1 cert entry: ${CERT:-<none>}"
+            if [ -n "$CERT" ]; then
+              unzip -p "$APK" "$CERT" > /tmp/sig.p7s 2>/dev/null || true
+              openssl pkcs7 -inform DER -in /tmp/sig.p7s -print_certs -out /tmp/sig.pem 2>/dev/null || true
+              FOUND=$(openssl x509 -in /tmp/sig.pem -noout -fingerprint -sha256 2>/dev/null \
+                | sed 's/.*=//; s/://g' | tr 'A-F' 'a-f' || true)
+            fi
+          fi
+          echo "signer  : ${FOUND:-<unknown>}"
+          echo "expected: $EXPECTED"
+          if [ -z "$FOUND" ]; then
+            echo "::warning::نتیجه‌ی بررسی امضا خوانده نشد (apksigner/build-tools در دسترس نبود) — APK آپلود می‌شود ولی امضا تأیید نشده است"
+          elif [ "$FOUND" = "$EXPECTED" ]; then
+            echo "::notice::✓ APK با کلیدِ ثابت امضا شده است — روی نسخه‌های قبلی نصب می‌شود ($FOUND)"
+          else
+            echo "::error::APK با کلیدِ ثابت امضا نشده! یافته‌شده=$FOUND انتظار=$EXPECTED — این APK روی برنامه‌ی نصب‌شده نصب نمی‌شود"
+            exit 1
+          fi
 
       - name: Upload APK to Artifacts (Actions tab)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: PulseMarket-Android-APK
-          path: build-output/PulseMarket-v1.0.apk
+          # نام فایل ثابت نیست: با هر بامپ نسخه عوض می‌شود، پس اینجا الگو می‌گذاریم
+          path: build-output/*.apk
+          if-no-files-found: error
           retention-days: 90
 
-      - name: Create GitHub Release (Optional on tag or main)
+      # آپلود APK به ریلیز — با gh CLI و پرصدا (اگر شکست بخورد ران قرمز می‌شود).
+      # قبلاً softprops بود که امروز دو بار بدون خطا، asset را آپلود نکرد؛
+      # --clobber هم باعث می‌شود اجرای دوباره‌ی تگ، فایل قبلی را تمیز جایگزین کند.
+      - name: Upload APK to GitHub Release (tag builds)
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: build-output/PulseMarket-v*.apk
-          name: Release ${{ github.ref_name }}
-          draft: false
-          prerelease: false
-          generate_release_notes: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          echo ">> release: $TAG"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --generate-notes --title "Release $TAG"
+          gh release upload "$TAG" build-output/*.apk --clobber --repo "$GITHUB_REPOSITORY"
+          echo ">> assets:"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[] | "\(.name) \(.size) bytes"'

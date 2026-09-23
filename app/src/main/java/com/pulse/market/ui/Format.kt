@@ -11,13 +11,14 @@ object Format {
     private val small = DecimalFormat("0.######")
     private val oneD = DecimalFormat("0.#")
 
-    /** قیمت را خوانا می‌کند: ۱٬۲۵۰٬۰۰۰ / ۹۸٬۴۵۰ / ۰٫۰۰۰۱۲۳ — با compact: 64.2K / ۹۸٫۴ هزار */
+    /** قیمت را خوانا می‌کند: ۱٬۲۵۰٬۰۰۰ / ۹۸٬۴۵۰ / ۰٫۰۰۰۱۲۳ — با compact: 64.2K / ۹۸٫۴ هزار
+     *  مقادیر اعشاریِ بالای هزار گرد نمی‌شوند (کریپتو: 64,210.55)؛ اعداد صحیح (بورس/طلا) همیشه بدون اعشار */
     fun price(value: Double?, persian: Boolean = false, compact: Boolean = false): String {
         if (value == null) return "—"
         if (compact && abs(value) >= 1000) return volume(value, persian)
         val a = abs(value)
         val text = when {
-            a >= 1000 -> grouped.format(value)
+            a >= 1000 -> if (value % 1.0 != 0.0) two.format(value) else grouped.format(value)
             a >= 1 -> two.format(value)
             else -> small.format(value)
         }

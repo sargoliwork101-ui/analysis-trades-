@@ -65,9 +65,6 @@ object ConfigStore {
         return WidgetsFile(template = migrate(legacy))
     }
 
-    private suspend fun snapshot(context: Context): WidgetsFile =
-        context.dataStore.data.map { loadFile(it) }.first()
-
     /** سازگاری با فرمت‌های قدیمی: تک‌منبعی ← چندمنبعی + نام‌گذاری منبع نمادها */
     private fun migrate(cfg: WidgetConfig): WidgetConfig {
         val ids = cfg.sourceIds.ifEmpty { listOf(cfg.sourceId) }
@@ -130,20 +127,6 @@ object ConfigStore {
                 )
             }
         }
-    }
-
-    /** آیا هیچ ویجتی (یا الگو) حالت زنده را می‌خواهد؟ */
-    suspend fun anyLive(context: Context): Boolean {
-        val f = snapshot(context)
-        return f.template.liveService || f.widgets.values.any { it.liveService }
-    }
-
-    /** کمینه‌ی فاصله‌ی به‌روزرسانی بین ویجت‌های زنده */
-    suspend fun minLiveInterval(context: Context): Int {
-        val f = snapshot(context)
-        val all = listOf(f.template) + f.widgets.values
-        val live = all.filter { it.liveService }.ifEmpty { all }
-        return live.minOf { it.intervalSec }.coerceIn(5, 3600)
     }
 
     // ───────────── منابع و نمادهای سفارشی (سراسری) ─────────────

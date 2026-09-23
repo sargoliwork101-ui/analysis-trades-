@@ -11,6 +11,9 @@ import kotlinx.serialization.encoding.Encoder
 /** بیشترین تعداد نماد هر ویجت */
 const val MAX_SYMBOLS = 6
 
+/** بیشترین نقاط تاریخچه‌ی ذخیره‌شده‌ی هر نماد روی گوشی — برای نمودار مینیاتوری */
+const val SPARK_HISTORY_MAX = 240
+
 /** نوع خواندن داده از منبع */
 @Serializable
 enum class FetchKind {
@@ -59,6 +62,12 @@ data class SourceDef(
     val urlTemplate: String,
     /** الگوی درخواست گروهی همه‌ی نمادها با یک HTTP (برای جلوگیری از rate-limit) — جای {symbols} */
     val batchTemplate: String? = null,
+    /**
+     * آدرس‌های پشتیبان — اگر آدرس اصلی (تکی یا گروهی) شکست خورد، به‌ترتیب امتحان می‌شوند.
+     * برای رد شدن از فیلترینگ/محدودیت هر آینه (مثل GitHub که در بعضی شبکه‌ها در دسترس نیست
+     * و آینه‌ی jsDelivr که همیشه در دسترس است). جای {symbol}/{symbols} مثل آدرس اصلی پر می‌شود.
+     */
+    val urlFallbacks: List<String> = emptyList(),
     val pricePath: String? = null,
     val changePath: String? = null,
     val changeMode: ChangeMode = ChangeMode.PERCENT,
@@ -148,6 +157,8 @@ data class WidgetConfig(
     val liveService: Boolean = true,
     val theme: WidgetTheme = WidgetTheme.DARK,
     val showSparkline: Boolean = true,
+    /** چند نقطه‌ی داده در نمودار مینیاتوری هر نماد نمایش داده شود (۶ تا ۶۰ نقطه از انتهای سری) */
+    val sparkPoints: Int = 20,
     val rows: Int = 3,
     val persianDigits: Boolean = false,
     val showNotification: Boolean = true,
@@ -176,7 +187,7 @@ data class WidgetConfig(
     val compactNumbers: Boolean = false,
     /** مرتب‌سازی نمادها — دستی یا خودکار */
     val sortMode: SymbolSort = SymbolSort.MANUAL,
-    /** وضعیت باز/بسته بودن بورس تهران کنار ساعت ویجت */
+    /** وضعیت باز/بسته بودن بازارهای همین ویجت (بورس، کریپتو، آمریکا، طلا و ارز) کنار ساعت */
     val showMarketStatus: Boolean = true,
     /** زمان‌بندی به‌روزرسانی — فقط در این بازه‌ی ساعتی اینترنت مصرف می‌شود */
     val refreshWindowEnabled: Boolean = false,

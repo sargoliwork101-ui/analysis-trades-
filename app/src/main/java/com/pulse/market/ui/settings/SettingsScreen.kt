@@ -69,16 +69,19 @@ import com.pulse.market.data.AlertRule
 import com.pulse.market.data.AppUpdater
 import com.pulse.market.data.ConfigStore
 import com.pulse.market.data.Fetcher
+import com.pulse.market.data.MarketKind
 import com.pulse.market.data.MAX_SYMBOLS
 import com.pulse.market.data.SourceCatalog
 import com.pulse.market.data.SourceDef
 import com.pulse.market.data.SymbolDef
 import com.pulse.market.data.WidgetConfig
 import com.pulse.market.data.WidgetTheme
+import com.pulse.market.data.marketKindOf
 import com.pulse.market.ui.AddAlertDialog
 import com.pulse.market.ui.AddSourceDialog
 import com.pulse.market.ui.Format
-import com.pulse.market.ui.TseSearchDialog
+import com.pulse.market.ui.QuoteText
+import com.pulse.market.ui.SymbolSearchDialog
 import com.pulse.market.widget.StockWidgetProvider
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
@@ -123,7 +126,7 @@ fun SettingsScreen(
     var section by remember { mutableStateOf<SettingsSection?>(null) }
 
     var showAddDialog by remember { mutableStateOf(false) }
-    var showTseSearchDialog by remember { mutableStateOf(false) }
+    var showSymbolSearchDialog by remember { mutableStateOf(false) }
     var alertDialogOpen by remember { mutableStateOf(false) }
     var editingAlert by remember { mutableStateOf<AlertRule?>(null) }
 
@@ -142,6 +145,15 @@ fun SettingsScreen(
 
     fun persistAlerts(list: List<AlertRule>) {
         persist(cfg.copy(alerts = list))
+    }
+
+    /** افزودن یک نماد به نمادهای همین ویجت — با سقف MAX_SYMBOLS (آخرین حذف می‌شود) */
+    fun addSymbol(newSym: SymbolDef) {
+        if (cfg.symbols.any { it.code == newSym.code && it.sourceId == newSym.sourceId }) return
+        val list = cfg.symbols.toMutableList()
+        if (list.size >= MAX_SYMBOLS) list.removeAt(list.size - 1)
+        list.add(newSym)
+        persist(cfg.copy(symbols = list))
     }
 
     LaunchedEffect(widgetId) {
@@ -216,6 +228,9 @@ fun SettingsScreen(
                         customSources = ConfigStore.currentCustomSources(context)
                         tseCustomSymbols = ConfigStore.currentTseSymbols(context)
                         StockWidgetProvider.requestUpdate(context)
+                        // سرویس زنده/Worker هم مطابق تنظیمات بازیابی‌شده همگام شود —
+                        // وگرنه تا اولین تغییرِ دستی، به‌روزرسانی پس‌زمینه راه نمی‌افتد
+                        StockWidgetProvider.syncLiveService(context)
                     }
                 }
                 busy = false
@@ -366,9 +381,21 @@ fun SettingsScreen(
                         },
                         onRemoveSymbol = { index ->
                             val list = cfg.symbols.toMutableList()
-                            if (index in list.indices) {
+                            val removed = list.getOrNull(index)
+                            if (removed != null) {
                                 list.removeAt(index)
                                 persist(cfg.copy(symbols = list))
+                                // حذف از ویجت = حذف از فهرست «نمادهای دلخواه بورس من» هم؛
+                                // تا کادر پایین همان نماد را نشان ندهد و با خالی شدن، کل کادر برود
+                                if (marketKindOf(removed.sourceId) == MarketKind.TSE &&
+                                    tseCustomSymbols.any { it.code == removed.code }
+                                ) {
+                                    scope.launch {
+                                        val updated = tseCustomSymbols.filterNot { it.code == removed.code }
+                                        ConfigStore.saveTseSymbolsAsync(context, updated)
+                                        tseCustomSymbols = updated
+                                    }
+                                }
                             }
                         },
                         onMoveSymbol = { from, to ->
@@ -386,14 +413,14 @@ fun SettingsScreen(
                                 tseCustomSymbols = updated
                                 // اگر در نمادهای این ویجت بود، از آنجا هم حذف می‌شود
                                 val list = cfg.symbols.filterNot {
-                                    it.code == sym.code && it.sourceId == "tse_tsetmc"
+                                    it.code == sym.code && marketKindOf(it.sourceId) == MarketKind.TSE
                                 }
                                 if (list.size != cfg.symbols.size) {
                                     persist(cfg.copy(symbols = list))
                                 }
                             }
                         },
-                        onOpenTseSearch = { showTseSearchDialog = true }
+                        onOpenSymbolSearch = { showSymbolSearchDialog = true }
                     )
 
                     SettingsSection.VALUES -> ValuesCategory(
@@ -427,6 +454,7 @@ fun SettingsScreen(
 
                     SettingsSection.ALERTS -> AlertsCategory(
                         cfg = cfg,
+                        sources = selectedSources,
                         snoozeUntil = snoozeUntil,
                         onSnooze = { m ->
                             AlertEngine.snooze(context, m)
@@ -494,11 +522,9 @@ fun SettingsScreen(
                                         val src = byId[sym.sourceId]
                                             ?: byId[cfg.activeSourceIds.firstOrNull().orEmpty()]
                                         val q = src?.let { Fetcher.fetch(it, sym) }
-                                        val vol = q?.volume?.let {
-                                            "  حجم ${Format.volume(it)}"
-                                        } ?: ""
+                                        val vol = q?.let { "  حجم ${QuoteText.volume(it)}" } ?: ""
                                         if (q?.price != null)
-                                            "${q.label}: ${Format.price(q.price)} ${q.unit}  ${Format.pct(q.changePct)}$vol"
+                                            "${q.label}: ${QuoteText.priceWithUnit(q)}  ${QuoteText.change(q)}$vol"
                                         else
                                             "${sym.label}: خطا — ${q?.error ?: "منبع پیدا نشد"}"
                                     }
@@ -578,25 +604,24 @@ fun SettingsScreen(
         )
     }
 
-    if (showTseSearchDialog) {
-        TseSearchDialog(
+    if (showSymbolSearchDialog) {
+        SymbolSearchDialog(
+            sources = selectedSources,
             selectedSymbols = cfg.symbols,
-            customSymbols = tseCustomSymbols,
-            onDismiss = { showTseSearchDialog = false },
+            tseCustomSymbols = tseCustomSymbols,
+            onDismiss = { showSymbolSearchDialog = false },
             onAddSymbol = { newSym ->
-                scope.launch {
-                    val updatedCustom = (tseCustomSymbols + newSym).distinctBy { it.code }
-                    ConfigStore.saveTseSymbolsAsync(context, updatedCustom)
-                    tseCustomSymbols = updatedCustom
-
-                    val currentList = cfg.symbols.toMutableList()
-                    if (!currentList.any { it.code == newSym.code && it.sourceId == newSym.sourceId }) {
-                        if (currentList.size >= MAX_SYMBOLS) {
-                            currentList.removeAt(currentList.size - 1)
-                        }
-                        currentList.add(newSym)
-                        persist(cfg.copy(symbols = currentList))
+                // فقط نمادهای بورس در فهرست «نمادهای دلخواه بورس من» ذخیره می‌شوند؛
+                // نمادهای بقیه‌ی منابع فقط به همین ویجت اضافه می‌شوند
+                if (marketKindOf(newSym.sourceId) == MarketKind.TSE) {
+                    scope.launch {
+                        val updatedCustom = (tseCustomSymbols + newSym).distinctBy { it.code }
+                        ConfigStore.saveTseSymbolsAsync(context, updatedCustom)
+                        tseCustomSymbols = updatedCustom
+                        addSymbol(newSym)
                     }
+                } else {
+                    addSymbol(newSym)
                 }
             },
             onRemoveSymbol = { sym ->
@@ -605,13 +630,13 @@ fun SettingsScreen(
                 }
                 persist(cfg.copy(symbols = list))
             },
-            onDeleteCustomSymbol = { sym ->
+            onDeleteTseCustomSymbol = { sym ->
                 scope.launch {
                     val updated = tseCustomSymbols.filterNot { it.code == sym.code }
                     ConfigStore.saveTseSymbolsAsync(context, updated)
                     tseCustomSymbols = updated
                     val list = cfg.symbols.filterNot {
-                        it.code == sym.code && it.sourceId == "tse_tsetmc"
+                        it.code == sym.code && marketKindOf(it.sourceId) == MarketKind.TSE
                     }
                     persist(cfg.copy(symbols = list))
                 }
@@ -623,6 +648,7 @@ fun SettingsScreen(
         AddAlertDialog(
             sources = selectedSources,
             existing = editingAlert,
+            widgetSymbols = cfg.symbols,
             onDismiss = { alertDialogOpen = false; editingAlert = null },
             onSave = { rule ->
                 val list = cfg.alerts.filterNot { it.id == rule.id } + rule

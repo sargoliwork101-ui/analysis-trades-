@@ -12,10 +12,8 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.pulse.market.R
-import com.pulse.market.data.ConfigStore
 import com.pulse.market.ui.MainActivity
 import com.pulse.market.widget.StockWidgetProvider
-import com.pulse.market.widget.WidgetRenderer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -46,13 +44,14 @@ class LiveUpdateService : Service() {
 
     private suspend fun loop() {
         while (currentCoroutineContext().isActive) {
-            // سرویس زنده فقط وقتی لازم است که هیچ ویجتی liveService داشته باشد
-            if (!ConfigStore.anyLive(this) || WidgetRenderer.allWidgetIds(this).isEmpty()) {
+            // سرویس زنده فقط وقتی می‌ماند که ویجتِ واقعیِ زنده‌ای روی صفحه باشد —
+            // الگوی پیش‌فرض به‌تنهایی نگهش نمی‌دارد (باتری)
+            if (!StockWidgetProvider.anyLiveWidget(this)) {
                 stopSelf()
                 return
             }
             runCatching { StockWidgetProvider.refreshAll(this, force = true, respectSchedule = true) }
-            val sec = ConfigStore.minLiveInterval(this)
+            val sec = StockWidgetProvider.liveInterval(this)
             updateNotification("قیمت‌ها هر $sec ثانیه تازه می‌شوند")
             delay(sec * 1000L)
         }

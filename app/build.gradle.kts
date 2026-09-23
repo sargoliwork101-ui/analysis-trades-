@@ -13,14 +13,50 @@ android {
         applicationId = "com.pulse.market"
         minSdk = 26          // اندروید ۸ به بالا
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.3"
+        versionCode = 14
+        versionName = "1.13"
+    }
+
+    /**
+     * کلیدِ ثابتِ امضا (app/ci-debug.keystore).
+     *
+     * چرا مهم است: اگر کلید تعریف نشود، گریدل روی هر ماشین/هر اجرای CI یک
+     * debug.keystore تصادفی می‌سازد؛ در نتیجه هر APK امضای متفاوتی می‌گیرد و
+     * اندروید نصبِ نسخه‌ی جدید روی نسخه‌ی نصب‌شده را رد می‌کند
+     * (INSTALL_FAILED_UPDATE_INCOMPATIBLE) — همان چیزی که آپدیت درون‌برنامه‌ای را
+     * هم از کار می‌انداخت. این یک کلید «دیباگ/سایدلود» است، نه کلید انتشار در
+     * گوگل‌پلی؛ پس مخفی نیست و در مخزن نگه داشته می‌شود تا همیشه یکی بماند.
+     */
+    val stableKeystore = file("ci-debug.keystore")
+
+    signingConfigs {
+        if (stableKeystore.exists()) {
+            create("stable") {
+                storeFile = stableKeystore
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+                storeType = "PKCS12"
+                // امضای v1 هم روشن باشد: هم سازگاری با اندرویدهای قدیمی‌تر،
+                // هم می‌شود امضای APK را بدون apksigner (با openssl) بررسی کرد.
+                enableV1Signing = true
+                enableV2Signing = true
+            }
+        }
     }
 
     buildTypes {
+        // کلید ثابت برای هر دو حالت؛ اگر فایل کلید نبود، به رفتار پیش‌فرض برمی‌گردیم
+        val stable = signingConfigs.findByName("stable")
+
+        debug {
+            signingConfig = stable ?: signingConfigs.getByName("debug")
+        }
+
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = stable ?: signingConfigs.getByName("debug")
         }
     }
 

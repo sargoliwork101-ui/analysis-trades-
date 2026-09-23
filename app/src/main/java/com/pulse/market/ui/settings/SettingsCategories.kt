@@ -1,6 +1,7 @@
 package com.pulse.market.ui.settings
 
 import android.app.TimePickerDialog
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -26,7 +27,6 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
@@ -43,16 +43,22 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pulse.market.data.AlertRule
+import com.pulse.market.data.MarketKind
+import com.pulse.market.data.MarketStatus
 import com.pulse.market.data.MAX_SYMBOLS
 import com.pulse.market.data.SourceDef
 import com.pulse.market.data.SymbolDef
 import com.pulse.market.data.SymbolSort
 import com.pulse.market.data.WidgetConfig
 import com.pulse.market.data.WidgetTheme
+import com.pulse.market.data.marketKind
 import com.pulse.market.ui.Format
 import java.util.Locale
 
@@ -96,6 +102,15 @@ fun SourcesCategory(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
         SectionHeader("منابع داده", "چند منبع را می‌توانی هم‌زمان روشن کنی — نمادهای همه در یک ویجت")
+        // منبعِ انتخاب‌شده‌ی قدیمی که دیگر وجود ندارد (مثل منابع حذف‌شده‌ی نسخه‌های
+        // قبل) — بدون این کاربر نمی‌فهمید چرا ویجتش خالی است
+        val missingIds = selectedIds.filter { id -> allSources.none { it.id == id } }
+        if (missingIds.isNotEmpty()) {
+            InfoCard(
+                "⚠️ ${Format.toPersianDigits(missingIds.size.toString())} منبعِ انتخاب‌شده‌ی این ویجت دیگر موجود نیست " +
+                        "(از نسخه‌های قدیمی) — نمادهایش نمایش داده نمی‌شوند؛ یک منبع جدید از پایین انتخاب کن."
+            )
+        }
         RowsCard {
             allSources.forEachIndexed { i, src ->
                 if (i > 0) RowDivider()
@@ -188,10 +203,8 @@ fun SymbolsCategory(
     onRemoveSymbol: (Int) -> Unit,
     onMoveSymbol: (Int, Int) -> Unit,
     onDeleteTseSymbol: (SymbolDef) -> Unit,
-    onOpenTseSearch: () -> Unit
+    onOpenSymbolSearch: () -> Unit
 ) {
-    val isTseSelected = selectedSources.any { it.id == "tse_tsetmc" }
-
     Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
 
         // ── نمادهای این ویجت — یک کارت، هر ردیف: ترتیب + حذف ──
@@ -266,20 +279,20 @@ fun SymbolsCategory(
             }
         }
 
-        // ── جستجوی بورس تهران ──
-        if (isTseSelected) {
-            SectionHeader("افزودن نماد بورس تهران")
-            Button(
-                onClick = onOpenTseSearch,
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
-            ) {
-                Icon(Icons.Default.Search, contentDescription = null)
-                Spacer(Modifier.width(6.dp))
-                Text("🔍 جستجو یا افزودن با لینک TSETMC", fontSize = 12.5.sp)
-            }
-            Hint("صندوق‌ها، اهرم، عیار، طلا، … یا لینک صفحه‌ی tsetmc.com را می‌توانی اضافه کنی.")
+        // ── جستجوی نماد — همه‌ی منابع ──
+        SectionHeader(
+            "جستجوی نماد",
+            "در همه‌ی منابع فعال همین ویجت — بورس، کریپتو، طلا و ارز و منابع دلخواه"
+        )
+        Button(
+            onClick = onOpenSymbolSearch,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(Icons.Default.Search, contentDescription = null)
+            Spacer(Modifier.width(6.dp))
+            Text("جستجو یا افزودن نماد", fontSize = 12.5.sp)
         }
+        Hint("بورس: نام/لینک TSETMC • کریپتو: جستجوی آنلاین • بقیه: فهرست منبع + کد دلخواه")
 
         // ── نمادهای دلخواه بورس من (قابل حذف) ──
         if (tseCustomSymbols.isNotEmpty()) {
@@ -315,7 +328,7 @@ fun SymbolsCategory(
 
         // ── نمادهای آماده‌ی هر منبع ──
         selectedSources.forEach { src ->
-            val available = if (src.id == "tse_tsetmc") {
+            val available = if (src.marketKind == MarketKind.TSE) {
                 (src.symbols + tseCustomSymbols).distinctBy { it.code }
             } else {
                 src.symbols
@@ -402,23 +415,54 @@ fun ValuesCategory(
                 onChange(cfg.copy(showChange = it))
             }
             RowDivider()
-            SwitchRow("کد نماد", "زیر نام نماد — واحد همیشه کنار عدد قیمت می‌نشیند", cfg.showCode) {
+            SwitchRow("کد نماد", "زیر نام نماد — واحد همیشه زیر عدد قیمت می‌نشیند", cfg.showCode) {
                 onChange(cfg.copy(showCode = it))
             }
             RowDivider()
             SwitchRow(
                 "نمودار مینیاتوری",
-                "روند هر نماد کنار قیمت — برای بورس تهران هم با هر به‌روزرسانی به‌تدریج شکل می‌گیرد",
+                "روند قیمت کنار هر نماد — برای همه‌ی منابع حتی بورس تهران، از داده‌های ذخیره‌شده روی همین گوشی",
                 cfg.showSparkline
             ) {
                 onChange(cfg.copy(showSparkline = it))
+            }
+            if (cfg.showSparkline) {
+                RowDivider()
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("تعداد نقاط نمودار", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface)
+                        Text(
+                            "${Format.toPersianDigits("${cfg.sparkPoints}")} نقطه",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Slider(
+                        value = cfg.sparkPoints.coerceIn(6, 60).toFloat(),
+                        onValueChange = { onChange(cfg.copy(sparkPoints = it.toInt().coerceIn(6, 60))) },
+                        valueRange = 6f..60f
+                    )
+                    Hint(
+                        "داده‌های نمودار روی گوشی ذخیره می‌شوند و هر ویجت تعداد نقاط دلخواه خودش را " +
+                                "از انتهای سری نشان می‌دهد — چند به‌روزرسانی اول طول می‌کشد تا نمودار شکل بگیرد."
+                    )
+                }
             }
             RowDivider()
             SwitchRow("ساعت بالای ویجت", null, cfg.showTime) {
                 onChange(cfg.copy(showTime = it))
             }
             RowDivider()
-            SwitchRow("وضعیت بازار تهران", "کنار ساعت: باز/بسته بودن جلسه‌ی بورس", cfg.showMarketStatus) {
+            SwitchRow(
+                "وضعیت بازارها",
+                "کنار ساعت: باز/بسته بودن بازارهای همین ویجت — بورس، کریپتو، طلا و ارز",
+                cfg.showMarketStatus
+            ) {
                 onChange(cfg.copy(showMarketStatus = it))
             }
             RowDivider()
@@ -582,7 +626,7 @@ private fun WidgetPreviewCard(cfg: WidgetConfig) {
                 .padding(14.dp)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                // سرصفحه
+                // سرصفحه — همان چیزی که ویجت واقعی نشان می‌دهد: ساعت + وضعیت بازارها
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         Modifier
@@ -597,11 +641,17 @@ private fun WidgetPreviewCard(cfg: WidgetConfig) {
                         fontSize = (12f * scale).sp
                     )
                     Spacer(Modifier.weight(1f))
-                    if (cfg.showTime) {
+                    val headerBits = buildList {
+                        if (cfg.showTime) add(txt("به‌روز ۱۴:۳۲", persian))
+                        if (cfg.showMarketStatus)
+                            add(txt(MarketStatus.headerFor(cfg.activeSourceIds, short = true), persian))
+                    }
+                    if (headerBits.isNotEmpty()) {
                         Text(
-                            txt("به‌روز ۱۴:۳۲", persian),
+                            headerBits.joinToString(" • "),
                             color = pal.sub,
-                            fontSize = (9.5f * scale).sp
+                            fontSize = (9.5f * scale).sp,
+                            maxLines = 1
                         )
                     }
                 }
@@ -655,6 +705,14 @@ private fun PreviewRow(
                 )
             }
         }
+        // نمودار مینیاتوری — در پیش‌نمایش هم دیده شود تا کاربر بداند چه چیزی فعال است
+        if (cfg.showSparkline) {
+            Spacer(Modifier.width(8.dp))
+            PreviewSpark(
+                up = change > 0,
+                modifier = Modifier.size(width = 36.dp, height = 16.dp)
+            )
+        }
         Column(horizontalAlignment = Alignment.End) {
             Text(
                 Format.price(price, cfg.persianDigits, cfg.compactNumbers),
@@ -671,6 +729,27 @@ private fun PreviewRow(
                 )
             }
         }
+    }
+}
+
+/** نمودار مینیاتوری پیش‌نمایش — خط ساده‌ی صعودی/نزولی هم‌رنگ بج تغییر */
+@Composable
+private fun PreviewSpark(up: Boolean, modifier: Modifier = Modifier) {
+    val color = if (up) Color(0xFF22C55E) else Color(0xFFF43F5E)
+    Canvas(modifier = modifier) {
+        // الگوی نمونه: صعودی/نزولی — مثل ویجت واقعی رنگش با جهت تغییر می‌شود
+        val fractions = listOf(0.78f, 0.60f, 0.68f, 0.48f, 0.55f, 0.32f)
+            .map { if (up) 1f - it else it }
+        val path = Path()
+        fractions.forEachIndexed { i, f ->
+            val x = size.width * i / (fractions.size - 1)
+            val y = size.height * f
+            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        drawPath(
+            path, color = color,
+            style = Stroke(width = 2.2f, cap = StrokeCap.Round)
+        )
     }
 }
 
@@ -704,7 +783,8 @@ fun UpdateCategory(
                 )
             }
         }
-        Hint("کریپتو و سهام آمریکا: ۱۰ تا ۳۰ ثانیه • بورس تهران: ۶۰ ثانیه (داده‌ی TSETMC با تأخیر می‌آید)")
+        Hint("کریپتو و طلا و ارز: ۱۰ تا ۳۰ ثانیه • بورس تهران: ۶۰ ثانیه (داده‌ی TSETMC با تأخیر می‌آید)")
+        Hint("بدون اینترنت یا بیرون از بازه‌ی بالا ویجت خالی نمی‌شود: آخرین قیمت‌ها روی صفحه می‌ماند و فقط چراغ کنار نمادها قرمز می‌شود.")
 
         // ── بازه‌ی ساعتی تازه‌سازی — صرفه‌جویی در مصرف اینترنت ──
         SectionHeader(
@@ -746,6 +826,7 @@ fun UpdateCategory(
 @Composable
 fun AlertsCategory(
     cfg: WidgetConfig,
+    sources: List<SourceDef> = emptyList(),
     snoozeUntil: Long = 0L,
     onSnooze: (Int) -> Unit = {},
     onCancelSnooze: () -> Unit = {},
@@ -808,8 +889,14 @@ fun AlertsCategory(
             InfoCard("هنوز هشداری ثبت نشده. مثلاً: «وقتی بیت‌کوین از ۱۰۰٬۰۰۰ گذشت به من خبر بده».")
         } else {
             cfg.alerts.forEach { rule ->
+                // واحدِ نمادِ هشدار از تعریف منبع — تا شرط هشدار مثل ویجت، همراه واحد دیده شود
+                val ruleSource = sources.firstOrNull { it.id == rule.sourceId }
                 AlertRuleCard(
                     rule = rule,
+                    unit = ruleSource?.unit.orEmpty(),
+                    // منبعِ حذف‌شده (مثل منابع نسخه‌های قدیم): هشدار هرگز بررسی نمی‌شود —
+                    // باید به کاربر گفته شود، نه اینکه بی‌صدا از کار بیفتد
+                    sourceMissing = ruleSource == null,
                     persian = cfg.persianDigits,
                     onToggle = { on -> onToggleAlert(rule, on) },
                     onEdit = { onEditAlert(rule) },
@@ -833,10 +920,12 @@ fun AlertsCategory(
     }
 }
 
-/** کارت یک قانون هشدار */
+/** کارت یک قانون هشدار — شرط با واحدِ نماد (ریال/تومان/$) نشان داده می‌شود */
 @Composable
 private fun AlertRuleCard(
     rule: AlertRule,
+    unit: String,
+    sourceMissing: Boolean,
     persian: Boolean,
     onToggle: (Boolean) -> Unit,
     onEdit: () -> Unit,
@@ -866,7 +955,7 @@ private fun AlertRuleCard(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    AlertRule.conditionText(rule.condition, rule.threshold, "", persian),
+                    AlertRule.conditionText(rule.condition, rule.threshold, unit, persian),
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.secondary,
                     modifier = Modifier.padding(top = 2.dp)
@@ -878,6 +967,15 @@ private fun AlertRuleCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 2.dp)
                 )
+                if (sourceMissing) {
+                    Text(
+                        "⚠️ منبع این هشدار دیگر موجود نیست — با ویرایش، نماد را از منبع دیگر انتخاب کن",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = 3.dp)
+                    )
+                }
             }
             Switch(checked = rule.enabled, onCheckedChange = onToggle)
             IconButton(onClick = onDelete) {
