@@ -9,7 +9,6 @@ import com.pulse.market.data.AlertEngine
 import com.pulse.market.data.ConfigStore
 import com.pulse.market.data.Quote
 import com.pulse.market.data.QuoteRepo
-import com.pulse.market.data.SourceCatalog
 import com.pulse.market.data.SymbolDef
 import com.pulse.market.data.SymbolSort
 import com.pulse.market.data.WidgetConfig
@@ -95,9 +94,10 @@ open class StockWidgetProvider : AppWidgetProvider() {
         scope.launch {
             try {
                 appWidgetIds.forEach { ConfigStore.deleteWidget(context, it) }
-                if (WidgetRenderer.allWidgetIds(context).isEmpty()) {
-                    LiveUpdateService.stop(context)
-                }
+                // هم سرویس زنده و هم Worker دوره‌ای مطابق ویجت‌های باقی‌مانده همگام شوند —
+                // حذفِ آخرین ویجت باید هر دو را خاموش کند (وگرنه Worker هر ۱۵ دقیقه
+                // تا همیشه بی‌دلیل بیدار می‌شد و باتری می‌سوزاند)
+                syncLiveService(context)
             } finally {
                 pending.finish()
             }
@@ -207,9 +207,15 @@ open class StockWidgetProvider : AppWidgetProvider() {
             val sourceIds = cfg.activeSourceIds
             val sourceTitle = when {
                 sourceIds.size == 1 ->
-                    SourceCatalog.byId(sourceIds.first())?.title?.substringBefore(" —") ?: "منبع دلخواه"
+                    // resolveSource (نه فقط کاتالوگ) — تا ویجتِ تک‌منبعیِ «دلخواه»
+                    // نامی که کاربر خودش گذاشته را نشان دهد، نه «منبع دلخواه»
+                    ConfigStore.resolveSource(context, sourceIds.first())
+                        ?.title?.substringBefore(" —") ?: "منبع دلخواه"
                 else -> "نبض بازار"
             }
+            // منبعِ انتخاب‌شده ولی ناموجود (مثل منابع حذف‌شده‌ی نسخه‌های قدیم) —
+            // حالت خالیِ ویجت باید بگوید مشکل چیست، نه «رفرش بزن»
+            val missingSources = sourceIds.filter { ConfigStore.resolveSource(context, it) == null }
             // واحدِ خالی (مثلاً داده‌ی قدیمیِ کش) از تعریف منبع پر می‌شود —
             // تا واحدِ نماد هیچ‌وقت به خاطر داده‌ی کهنه از ویجت نیفتد
             val healed = quotes.map { q ->
@@ -229,7 +235,10 @@ open class StockWidgetProvider : AppWidgetProvider() {
                 quotes = QuoteRepo.withLocalSpark(context, sortQuotes(healed, cfg.sortMode)),
                 live = cfg.liveService,
                 updatedAt = updatedAt,
-                sourceTitle = sourceTitle
+                sourceTitle = sourceTitle,
+                emptyHint = if (missingSources.isNotEmpty())
+                    "منبع این ویجت حذف شده — از تنظیمات، منبع جدید انتخاب کن"
+                else ""
             )
         }
 

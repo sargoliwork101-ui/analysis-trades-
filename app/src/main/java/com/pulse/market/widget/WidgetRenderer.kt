@@ -78,7 +78,10 @@ object WidgetRenderer {
         quotes: List<Quote>,
         live: Boolean,
         updatedAt: Long,
-        sourceTitle: String = ""
+        sourceTitle: String = "",
+        /** متنِ حالت خالی وقتی علتِ خالی بودن معلوم است (مثل منبعِ حذف‌شده) —
+         *  خالی یعنی حالت پیش‌فرض «دکمه‌ی رفرش را بزن» */
+        emptyHint: String = ""
     ) {
         val views = RemoteViews(context.packageName, R.layout.widget_stock)
         val pal = palette(cfg.theme)
@@ -164,7 +167,10 @@ object WidgetRenderer {
             applyRowChrome(row, pal, cfg, 0, scale)
             row.setImageViewResource(R.id.row_led, R.drawable.led_gray)
             row.setTextViewText(R.id.row_label, text("منتظر داده…", cfg))
-            row.setTextViewText(R.id.row_sub, text("دکمه‌ی رفرش را بزن", cfg))
+            row.setTextViewText(
+                R.id.row_sub,
+                text(if (emptyHint.isNotBlank()) emptyHint else "دکمه‌ی رفرش را بزن", cfg)
+            )
             row.setTextViewText(R.id.row_price, "—")
             row.setViewVisibility(R.id.row_change, View.GONE)
             row.setViewVisibility(R.id.row_unit, View.GONE)

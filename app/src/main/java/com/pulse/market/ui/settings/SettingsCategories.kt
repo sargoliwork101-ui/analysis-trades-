@@ -102,6 +102,15 @@ fun SourcesCategory(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
         SectionHeader("منابع داده", "چند منبع را می‌توانی هم‌زمان روشن کنی — نمادهای همه در یک ویجت")
+        // منبعِ انتخاب‌شده‌ی قدیمی که دیگر وجود ندارد (مثل منابع حذف‌شده‌ی نسخه‌های
+        // قبل) — بدون این کاربر نمی‌فهمید چرا ویجتش خالی است
+        val missingIds = selectedIds.filter { id -> allSources.none { it.id == id } }
+        if (missingIds.isNotEmpty()) {
+            InfoCard(
+                "⚠️ ${Format.toPersianDigits(missingIds.size.toString())} منبعِ انتخاب‌شده‌ی این ویجت دیگر موجود نیست " +
+                        "(از نسخه‌های قدیمی) — نمادهایش نمایش داده نمی‌شوند؛ یک منبع جدید از پایین انتخاب کن."
+            )
+        }
         RowsCard {
             allSources.forEachIndexed { i, src ->
                 if (i > 0) RowDivider()
@@ -881,10 +890,13 @@ fun AlertsCategory(
         } else {
             cfg.alerts.forEach { rule ->
                 // واحدِ نمادِ هشدار از تعریف منبع — تا شرط هشدار مثل ویجت، همراه واحد دیده شود
-                val ruleUnit = sources.firstOrNull { it.id == rule.sourceId }?.unit.orEmpty()
+                val ruleSource = sources.firstOrNull { it.id == rule.sourceId }
                 AlertRuleCard(
                     rule = rule,
-                    unit = ruleUnit,
+                    unit = ruleSource?.unit.orEmpty(),
+                    // منبعِ حذف‌شده (مثل منابع نسخه‌های قدیم): هشدار هرگز بررسی نمی‌شود —
+                    // باید به کاربر گفته شود، نه اینکه بی‌صدا از کار بیفتد
+                    sourceMissing = ruleSource == null,
                     persian = cfg.persianDigits,
                     onToggle = { on -> onToggleAlert(rule, on) },
                     onEdit = { onEditAlert(rule) },
@@ -913,6 +925,7 @@ fun AlertsCategory(
 private fun AlertRuleCard(
     rule: AlertRule,
     unit: String,
+    sourceMissing: Boolean,
     persian: Boolean,
     onToggle: (Boolean) -> Unit,
     onEdit: () -> Unit,
@@ -954,6 +967,15 @@ private fun AlertRuleCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 2.dp)
                 )
+                if (sourceMissing) {
+                    Text(
+                        "⚠️ منبع این هشدار دیگر موجود نیست — با ویرایش، نماد را از منبع دیگر انتخاب کن",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = 3.dp)
+                    )
+                }
             }
             Switch(checked = rule.enabled, onCheckedChange = onToggle)
             IconButton(onClick = onDelete) {
