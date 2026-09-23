@@ -82,8 +82,8 @@ private data class SearchHit(
 /**
  * پنجره‌ی جستجوی نماد — برای **همه‌ی منابع**، نه فقط بورس:
  * - بورس تهران: جستجوی آنلاین TSETMC (نام، کد یا لینک صفحه) + فهرست پرمعامله‌ها
- * - کریپتو و سهام آمریکا: جستجوی آنلاین (CoinGecko / Yahoo) + فهرست آماده
- * - بقیه‌ی منابع (طلا و ارز، منابع دلخواه): جستجو در فهرست خودشان
+ * - کریپتو: جستجوی آنلاین (CoinGecko) + فهرست آماده
+ * - بقیه‌ی منابع (طلا و ارز TGJU، منابع دلخواه): جستجو در فهرست خودشان
  *   + افزودن نماد با هر کد دلخواه
  */
 @OptIn(ExperimentalLayoutApi::class)
@@ -274,7 +274,7 @@ private suspend fun tseHits(q: String, custom: List<SymbolDef>): List<SearchHit>
     }
 }
 
-/** منابع دیگر: فهرست محلی + جستجوی آنلاین (کریپتو/آمریکا) — بدون تکرار */
+/** منابع دیگر: فهرست محلی + جستجوی آنلاین (کریپتو) — بدون تکرار */
 private suspend fun generalHits(src: SourceDef, q: String): List<SearchHit> {
     val local = if (q.isBlank()) src.symbols
     else src.symbols.filter { it.label.contains(q, true) || it.code.contains(q, true) }

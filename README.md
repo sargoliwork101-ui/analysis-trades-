@@ -15,7 +15,7 @@ An Android home-screen widget that shows **live market prices** — Tehran Stock
 - **Live values per symbol** — price with its unit right under it (identical on every widget size and source), change badge, volume, sparkline.
 - **Sparkline for every symbol, every widget size** — all-or-nothing: enabled for all sizes (small/medium/large) or none. Price history is stored locally on the phone, so even TSE symbols get a chart; the number of displayed points (6–60) is user-configurable.
 - **Offline & update-off resilience** — with no internet or auto-update disabled, the widget never goes blank: the last prices stay on screen, each row's **blinking LED** turns red/green (green = fresh, red = stale, gray = no data), and the bottom bar says what state it's in. The header shows the last-update time.
-- **Status of the widget's own markets** — next to the clock, open/closed for each market active in that widget: «بورس / کریپتو (۲۴/۷) / آمریکا / طلا و ارز». Toggleable.
+- **Status of the widget's own markets** — next to the clock, open/closed for each market active in that widget: «بورس / کریپتو (۲۴/۷) / طلا و ارز». Toggleable.
 - **Smart sorting** — display symbols manually, by biggest daily change, or alphabetically.
 - **Row count control** — choose how many symbols (1–6) each widget shows.
 
@@ -34,7 +34,7 @@ An Android home-screen widget that shows **live market prices** — Tehran Stock
 - **In-app updater** — checks the latest GitHub release; a newer APK installs *over* the current one (nothing is wiped). Test dial auto-hides after 3 s.
 
 ### Data sources
-- Built-ins: **TSE (TSETMC)**, CoinGecko, Yahoo Finance, TGJU (gold/forex), Navasan mirror.
+- Built-ins: **TSE (TSETMC)**, CoinGecko (crypto), **TGJU** (free-market USD, gold & coins — via tgju.org's own live API). Custom sources: JSON API or HTML scraping.
 - **Custom sources** — any JSON API (dot-path, batch templates, scale/unit) or HTML page (CSS selector) — and TSE symbol search by name or TSETMC page link.
 - 📡 Porting the source-fetching layer to another app? See **[SOURCES_SPEC_fa.md](SOURCES_SPEC_fa.md)** (Persian) — full spec of the data model, JSON path language, TSETMC APIs, and caching strategy.
 - 🏗 Contributing/Extending? See **[ARCHITECTURE_fa.md](ARCHITECTURE_fa.md)** (Persian) — module map and the golden rules (no source-id string switches, all price/unit text via `QuoteText`).

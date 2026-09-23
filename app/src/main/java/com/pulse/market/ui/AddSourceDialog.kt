@@ -191,6 +191,7 @@ fun AddSourceDialog(
                                 shape = RoundedCornerShape(12.dp)
                             )
                             Hint("مثل #price .value — چند سلکتور را با , جدا کن")
+                            Hint("کپی از کروم دسکتاپ: روی عددِ قیمت در سایت راست‌کلیک → Inspect → در پنجره‌ی بازشده روی خطِ همون عدد راست‌کلیک → Copy → Copy selector → همین‌جا بچسبان. سلکتورهای خیلی طولانیِ خودکار (مثل nth-child) را به کلاسِ پایدارِ آخرش کم کن. بعداً با دکمه‌ی «تست داده» در تنظیمات ویجت امتحانش کن.")
                             OutlinedTextField(
                                 value = cssAttr, onValueChange = { cssAttr = it },
                                 label = { Text("خواندن از ویژگی (اختیاری)") },

@@ -36,8 +36,7 @@ enum class MarketKind(val key: String, val label: String) {
 fun marketKindOf(sourceId: String): MarketKind? = when (sourceId) {
     "tse_tsetmc", "tse_index" -> MarketKind.TSE
     "crypto_coingecko" -> MarketKind.CRYPTO
-    "us_yahoo" -> MarketKind.US
-    "fx_rates", "gold_rates", "web_tgju" -> MarketKind.GOLD_FX
+    "tgju" -> MarketKind.GOLD_FX
     else -> null
 }
 

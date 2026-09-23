@@ -13,8 +13,8 @@ android {
         applicationId = "com.pulse.market"
         minSdk = 26          // اندروید ۸ به بالا
         targetSdk = 34
-        versionCode = 12
-        versionName = "1.11"
+        versionCode = 13
+        versionName = "1.12"
     }
 
     /**

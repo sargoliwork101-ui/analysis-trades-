@@ -200,6 +200,28 @@ num  = Num.parse(raw) * scale
 error = (num == null) ? "«raw» عدد نبود" : (سلکتور پیدا نشد؟ "سلکتور در صفحه پیدا نشد")
 ```
 
+### ۶.۲.۱) راهنمای عملی اسکرپ — دقیقاً چه چیزی را کپی کنم؟
+
+برای ساخت یک منبع HTML فقط **دو چیز** لازم است: آدرسِ صفحه و **سلکتور CSSِ المنطِ عدد**.
+
+1. صفحه‌ی مورد نظر را در کرومِ دسکتاپ باز کن (موبایل هم می‌شود ولی دسکتاپ راحت‌تر است).
+2. روی **خودِ عددِ قیمت** راست‌کلیک → **Inspect** (یا F12 و انتخاب المنط با نشانگر). پنجره‌ی DevTools باز می‌شود و خطِ HTMLِ همان عدد هایلایت می‌شود — مثلاً `<span class="price-value">1,050,000</span>`.
+3. روی همان خطِ هایلایت راست‌کلیک → **Copy → Copy selector**.
+4. در اپ (تنظیمات ویجت → منابع → افزودن منبع دلخواه):
+   - «نوع» را **صفحه‌ی HTML** بگذار؛
+   - «آدرس — کد نماد را {symbol} بگذار» = آدرس صفحه؛ اگر برای هر نماد صفحه‌ی جدا دارد، جای کد را با `{symbol}` علامت بزن؛
+   - «سلکتور CSS *» = چیزی که کپی کردی؛
+   - «واحد» و «ضریب» را پر کن (اگر سایت ریال می‌دهد و تو تومان می‌خواهی: ضریب `0.1`)؛
+   - «نمادها — هر خط: کد:نام» = کدی که در آدرسِ `{symbol}` جایگزین می‌شود.
+5. ذخیره کن و در تنظیمات ویجت دکمه‌ی **«تست داده»** را بزن — قیمتِ خوانده‌شده یا دقیق‌ترین دلیلِ خطا نمایش داده می‌شود.
+
+نکته‌ها:
+- سلکتورِ کپی‌شده از DevTools گاهی خیلی طولانی و شکننده است (مثل `#main > div:nth-child(3) > span`)؛ به‌ترین کار کوتاهش کردن به **کلاسِ پایدارِ آخر** است (مثل `.price-value`).
+- چند گزینه‌ی جایگزین را با کاما بده؛ اولین تطبیق استفاده می‌شود: `.price-value, #last-price`.
+- اگر عدد داخل ویژگی (attribute) است نه متنِ المنط، نامش را در «خواندن از ویژگی» بنویس (مثل `content` یا `data-price`).
+- جدول/فهرست‌هایی که با جاوااسکریپت بعد از لود پر می‌شوند قابل خواندن نیستند — اپ HTMLِ خامِ اولیه را می‌گیرد. اگر عدد در View-Source (کنترل+U) دیده می‌شود، اینجا هم دیده می‌شود.
+- سایت مقصد ممکن است ربات‌ها را بلاک کند یا چیدمانش عوض شود؛ این ذاتِ اسکرپ است — راه مطمئن‌تر همیشه JSON است (مثل منبع TGJU که از API رسمی خود سایت می‌خواند).
+
 ### ۶.۳) حالت‌های «تغییر» (changeMode)
 
 | حالت | معنی مقدار changePath | فرمول درصد |
@@ -257,56 +279,31 @@ error = (num == null) ? "«raw» عدد نبود" : (سلکتور پیدا نش�
 | changePath / حالت | `[0].indexChange \| indexB1LastAll[0].indexChange \| indexChange` / `ABSOLUTE` |
 | unit | واحد |
 
-### ۷.۴) ارز — Navasan (آینه‌ی jsDelivr + پشتیبان GitHub)
+### ۷.۴) طلا و ارز — TGJU (دلار آزاد، طلا و سکه)
+
+از v1.12 تنها منبع طلا و ارز، API رسمیِ خودِ tgju.org است — همان سرویسی که خود سایت برای به‌روزرسانی لحظه‌ای صدا می‌زند (بررسی‌شده: هر دو هاست زنده‌اند و داده‌ی همین لحظه را می‌دهند).
 
 | مورد | مقدار |
 |---|---|
 | kind | `JSON_REST` |
-| تکی/گروهی | `https://cdn.jsdelivr.net/gh/HosseinOdd/Navasan-API@main/data/fiat.json` |
-| urlFallbacks | `https://raw.githubusercontent.com/HosseinOdd/Navasan-API/main/data/fiat.json` |
-| pricePath | `{symbol}.value` |
-| changePath / حالت | `{symbol}.change_pct` / `PERCENT` |
+| تکی/گروهی | `https://call1.tgju.org/ajax.json` (همه‌ی نمادها با **یک** درخواست) |
+| urlFallbacks | `https://call.tgju.org/ajax.json` |
+| pricePath | `current.{symbol}.p` |
+| changePath / حالت | `current.{symbol}.dp` / `PERCENT` |
+| scale | `0.1` (مقادیر API «ریال» است ← تومان) |
 | unit | تومان |
-| نمادها | `usd` دلار، `eur` یورو، `gbp` پوند، `aed` درهم، `try` لیر، `jpy` ین، `chf` فرانک، `cny` یوان |
+| نمادها | `price_dollar_rl` دلار آمریکا (آزاد)، `price_eur` یورو، `geram18` طلای ۱۸ عیار، `geram24` طلای ۲۴ عیار، `mesghal` مثقال طلا، `sekee` سکه امامی، `sekeb` سکه بهار آزادی، `nim` نیم‌سکه، `rob` ربع‌سکه |
 
-### ۷.۵) طلا و سکه — Navasan (آینه‌ی GitHub)
-
-| مورد | مقدار |
-|---|---|
-| آدرس | `https://raw.githubusercontent.com/HosseinOdd/Navasan-API/main/data/gold.json` |
-| بقیه | مثل ارز (pricePath: `{symbol}.value`، change: `{symbol}.change_pct` / `PERCENT`، unit: تومان) |
-| نمادها | `18ayar` طلای ۱۸ عیار، `gerami` مثقال، `sekkeh` سکه، `bahar` بهار آزادی، `nim` نیم، `rob` ربع |
-
-پاسخ نمونه (هر دو):
+پاسخ نمونه (کوتاه‌شده):
 
 ```json
-{ "usd": { "value": 61500, "change_pct": 0.4 } }
+{ "current": { "price_dollar_rl": { "p": "2,313,100", "d": "18,900", "dp": 0.82, "ts": "2026-09-23 13:03:56" } } }
 ```
 
-### ۷.۶) سهام آمریکا — Yahoo Finance
+- عدد قیمت ممکن است با کاما بیاید (`"2,313,100"`) — پاک‌سازی `Num` (زیربخش ۵) جداکننده‌ها را خودش برمی‌دارد.
+- هر کلیدِ این API می‌تواند یک نماد باشد — مثلاً `price_gbp` (پوند)، `price_aed` (درهم)، `silver` (انس نقره)، `ons` (انس جهانی طلا). در «افزودن نماد» کد را همین‌طور بنویس و اضافه کن.
 
-| مورد | مقدار |
-|---|---|
-| kind | `JSON_REST` |
-| آدرس | `https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=5m&range=1d&includePrePost=false` |
-| urlFallbacks | همان آدرس روی `query2.finance.yahoo.com` |
-| pricePath | `chart.result[0].meta.regularMarketPrice` |
-| changePath / حالت | `chart.result[0].meta.chartPreviousClose` / `PREV_CLOSE` |
-| sparkPath | `chart.result[0].indicators.quote[0].close` |
-| volumePath | `chart.result[0].indicators.quote[0].volume` (آرایه — جمع زده می‌شود) |
-| unit | `$` |
-| نمادها | `AAPL`, `TSLA`, `MSFT`, `NVDA`, `GOOGL`, `AMZN`, `META`, `BTC-USD` |
-| جستجوی نماد | `GET https://query1.finance.yahoo.com/v1/finance/search?q={q}&quotesCount=15&newsCount=0` → `quotes[] {symbol, shortname, quoteType}` — فقط `quoteType` های `EQUITY/ETF/CRYPTOCURRENCY/INDEX/CURRENCY` |
-
-### ۷.۷) نمونه‌ی اسکرپ وب — TGJU
-
-| مورد | مقدار |
-|---|---|
-| kind | `HTML_CSS` |
-| آدرس | `https://www.tgju.org/profile/{symbol}` |
-| cssSelector | `span[data-col='info-last-trade'], .price, .info-price .value` |
-| unit | تومان |
-| نمادها | `price_dollar_rl` دلار آزاد، `geram18` طلای ۱۸ عیار، `sekeb` سکه بهار |
+> تاریخچه: تا v1.11 علاوه بر این، «ارز — Navasan»، «طلا و سکه — Navasan» (آینه‌های jsDelivr/GitHub) و «سهام آمریکا — Yahoo» هم منبع آماده بودند؛ در v1.12 حذف شدند (Yahoo برای IP ایران محدود است و Navasan برای همه‌ی شبکه‌ها پایدار نبود). ویجتی که هنوز منبع حذف‌شده دارد، آن ردیف‌ها را خالی می‌بیند — منبع «طلا و ارز — TGJU» را جایگزین کن.
 
 ---
 

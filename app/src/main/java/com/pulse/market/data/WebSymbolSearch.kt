@@ -9,10 +9,9 @@ import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
 /**
- * جستجوی آنلاین نماد برای منبعی که API جستجو دارد:
- * کریپتو (CoinGecko) و سهام آمریکا (Yahoo).
+ * جستجوی آنلاین نماد برای منبعی که API جستجو دارد: کریپتو (CoinGecko).
  *
- * بقیه‌ی منابع (طلا و ارز، منابع دلخواه و…) فهرست محلی دارند و در همان
+ * بقیه‌ی منابع (طلا و ارز TGJU، منابع دلخواه و…) فهرست محلی دارند و در همان
  * جستجو می‌شوند؛ این شیء برایشان null برمی‌گرداند تا UI به فهرست محلی برگردد.
  * هر خطا هم null می‌شود — جستجوی محلی هیچ‌وقت به خاطر شبکه از کار نمی‌افتد.
  */
@@ -41,7 +40,6 @@ object WebSymbolSearch {
             runCatching {
                 when (marketKindOf(sourceId)) {
                     MarketKind.CRYPTO -> coingecko(sourceId, q)
-                    MarketKind.US -> yahoo(sourceId, q)
                     else -> null
                 }
             }.getOrNull()
@@ -61,29 +59,6 @@ object WebSymbolSearch {
         return out.take(15)
     }
 
-    /** Yahoo: query1.finance.yahoo.com/v1/finance/search?q=… → quotes[] {symbol, shortname, quoteType} */
-    private fun yahoo(sourceId: String, q: String): List<SymbolDef> {
-        val query = "v1/finance/search?q=" + enc(q) + "&quotesCount=15&newsCount=0"
-        val body = getAny(
-            listOf(
-                "https://query1.finance.yahoo.com/$query",
-                "https://query2.finance.yahoo.com/$query"   // پشتیبان اگر هاست اولی محدود بود
-            )
-        )
-        val arr = JSONObject(body).optJSONArray("quotes") ?: return emptyList()
-        // فقط ابزارهای واقعی — گزینه‌های اختیار و پیچیده را نمایش نده
-        val allowed = setOf("EQUITY", "ETF", "CRYPTOCURRENCY", "INDEX", "CURRENCY")
-        val out = mutableListOf<SymbolDef>()
-        for (i in 0 until arr.length()) {
-            val o = arr.optJSONObject(i) ?: continue
-            val symbol = o.optString("symbol").trim()
-            if (symbol.isEmpty()) continue
-            if (o.optString("quoteType") !in allowed) continue
-            out += SymbolDef(symbol, o.optString("shortname").ifBlank { symbol }, sourceId)
-        }
-        return out.take(15)
-    }
-
     private fun get(url: String): String =
         client.newCall(
             Request.Builder().url(url).header("User-Agent", UA).build()
@@ -91,19 +66,6 @@ object WebSymbolSearch {
             if (!resp.isSuccessful) error("HTTP ${resp.code}")
             resp.body?.string().orEmpty()
         }
-
-    /** اولین آدرسی که جواب داد — پشتیبان‌ها بعد از آدرس اصلی امتحان می‌شوند */
-    private fun getAny(urls: List<String>): String {
-        var last: Throwable? = null
-        for (u in urls) {
-            try {
-                return get(u)
-            } catch (t: Throwable) {
-                last = t
-            }
-        }
-        throw last ?: error("آدرسی برای جستجو تعریف نشده بود")
-    }
 
     private fun enc(s: String): String =
         URLEncoder.encode(s, "UTF-8").replace("+", "%20")
