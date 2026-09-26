@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.Warning
@@ -41,6 +42,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pulse.market.data.MAX_SYMBOLS
+import com.pulse.market.data.PumpAlertEngine
 import com.pulse.market.data.PumpScanner
 import com.pulse.market.data.SymbolDef
 import com.pulse.market.data.WidgetConfig
@@ -62,7 +64,9 @@ import kotlinx.coroutines.launch
 @Composable
 fun PumpsCategory(
     cfg: WidgetConfig,
+    alertOwnerKey: String,
     onChange: (WidgetConfig) -> Unit,
+    onAlertToggle: (Boolean) -> Unit,
     onAddSymbol: (SymbolDef) -> Unit
 ) {
     val context = LocalContext.current
@@ -89,6 +93,7 @@ fun PumpsCategory(
         scope.launch {
             val res = PumpScanner.scan(context, cfg.pumpUniverse, cfg.pumpMinChange, force = force)
             scan = res
+            if (res.error == null) PumpAlertEngine.evaluateScan(context, alertOwnerKey, cfg, res)
             busy = false
             note = res.error?.let { "⚠️ اسکن تازه نگرفت — $it (فهرست قبلی نمایش داده می‌شود)" } ?: ""
         }
@@ -192,6 +197,46 @@ fun PumpsCategory(
                             label = { Text("${Format.toPersianDigits("${t.toInt()}")}٪ و بیشتر") }
                         )
                     }
+                }
+            }
+
+            RowDivider()
+
+            SwitchRow(
+                "آلارم پامپ",
+                if (cfg.pumpAlertEnabled)
+                    "فعال است؛ اسکن دوره‌ای همراه با پیشنهاد احتیاطی و دلیل"
+                else "در صورت عبور از آستانه اعلان بده (سیگنال خرید نیست)",
+                cfg.pumpAlertEnabled
+            ) { onAlertToggle(it) }
+
+            if (cfg.pumpAlertEnabled) {
+                InnerRow {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Default.NotificationsActive,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(7.dp))
+                        Text(
+                            "فاصله‌ی اعلان‌ها",
+                            fontSize = 13.5.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(30, 60, 180, 360).forEach { minutes ->
+                            val label = if (minutes < 60) "$minutes دقیقه" else "${minutes / 60} ساعت"
+                            FilterChip(
+                                selected = cfg.pumpAlertCooldownMin == minutes,
+                                onClick = { onChange(cfg.copy(pumpAlertCooldownMin = minutes)) },
+                                label = { Text(Format.toPersianDigits(label)) }
+                            )
+                        }
+                    }
+                    Hint("برای جلوگیری از اسپم، هر نتیجه‌ی اسکن فقط یک‌بار بررسی می‌شود و در این فاصله اعلان دیگری نمی‌آید.")
                 }
             }
 
@@ -395,6 +440,20 @@ private fun PumpRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+            val advice = coin.advice
+            Text(
+                "پیشنهاد: ${advice.recommendation.label}",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = riskColor,
+                modifier = Modifier.padding(top = 6.dp)
+            )
+            Text(
+                "دلیل: ${advice.reason}",
+                fontSize = 10.5.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp)
+            )
         }
         Spacer(Modifier.width(8.dp))
         if (alreadyAdded) {

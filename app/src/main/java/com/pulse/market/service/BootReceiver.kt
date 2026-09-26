@@ -28,7 +28,7 @@ class BootReceiver : BroadcastReceiver() {
                 // ممنوع کرده است. پس هنگام بوت فقط Worker را همگام و یک کار فوری
                 // صف می‌کنیم؛ سرویس زنده با اقدام مستقیم کاربر دوباره شروع می‌شود.
                 StockWidgetProvider.syncLiveService(context, startForeground = false)
-                if (StockWidgetProvider.anyLiveWidget(context)) {
+                if (StockWidgetProvider.anyPeriodicWidget(context)) {
                     LiveUpdateWorker.enqueueNow(context)
                 }
             } finally {

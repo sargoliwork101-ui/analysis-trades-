@@ -40,6 +40,57 @@ class PumpScannerTest {
     }
 
     @Test
+    fun adviceAvoidsChasingSmallOrExtremePumps() {
+        val small = PumpScanner.PumpCoin(
+            id = "small", symbol = "sm", name = "Small", rank = 220,
+            change1h = 8.0, change24h = 18.0, volume = 5e6, marketCap = 20e6
+        )
+        val extremeLargeCap = PumpScanner.PumpCoin(
+            id = "large", symbol = "lg", name = "Large", rank = 5,
+            change1h = 4.0, change24h = 30.0, volume = 2e9, marketCap = 20e9
+        )
+        assertEquals(PumpScanner.Recommendation.AVOID, small.advice.recommendation)
+        assertEquals(PumpScanner.Recommendation.AVOID, extremeLargeCap.advice.recommendation)
+        val unusualTurnover = PumpScanner.PumpCoin(
+            id = "turnover", symbol = "tv", name = "Turnover", rank = 5,
+            change1h = 2.0, change24h = 10.0, volume = 6e9, marketCap = 10e9
+        )
+        assertEquals(PumpScanner.Recommendation.AVOID, unusualTurnover.advice.recommendation)
+        assertTrue(unusualTurnover.advice.reason.contains("حجم"))
+        assertTrue(small.advice.reason.isNotBlank())
+    }
+
+    @Test
+    fun adviceExplainsStoppedMomentumAndCautiousWatch() {
+        val stopped = PumpScanner.PumpCoin(
+            id = "stopped", symbol = "s", name = "Stopped", rank = 10,
+            change1h = -1.0, change24h = 12.0, volume = 1e9, marketCap = 20e9
+        )
+        val moving = stopped.copy(id = "moving", change1h = 2.0)
+        assertEquals(PumpScanner.Recommendation.WAIT, stopped.advice.recommendation)
+        assertEquals(PumpScanner.Recommendation.WATCH, moving.advice.recommendation)
+        assertTrue(stopped.advice.reason.contains("یک‌ساعته"))
+    }
+
+    @Test
+    fun alertCandidateRespectsThresholdAndUsesHighestScore() {
+        val below = PumpScanner.PumpCoin(
+            id = "below", symbol = "b", name = "Below", change1h = 20.0, change24h = 7.9,
+            score = 100.0
+        )
+        val first = PumpScanner.PumpCoin(
+            id = "first", symbol = "f", name = "First", change1h = 1.0, change24h = 10.0,
+            score = 12.0
+        )
+        val top = PumpScanner.PumpCoin(
+            id = "top", symbol = "t", name = "Top", change1h = 5.0, change24h = 12.0,
+            score = 22.0
+        )
+        assertEquals("top", PumpAlertEngine.selectCandidate(listOf(below, first, top), 8.0)?.id)
+        assertEquals(null, PumpAlertEngine.selectCandidate(listOf(below), 8.0))
+    }
+
+    @Test
     fun coinBecomesWidgetSymbolWithDollarUnit() {
         val coin = PumpScanner.PumpCoin(id = "solana", symbol = "sol", name = "Solana")
         val sym = coin.toSymbolDef()

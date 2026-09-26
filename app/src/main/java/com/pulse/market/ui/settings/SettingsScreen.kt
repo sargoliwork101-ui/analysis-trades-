@@ -200,10 +200,12 @@ fun SettingsScreen(
     val notifPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { }
-    // درخواست مجوز فقط وقتی کاربر وارد بخش هشدارها می‌شود؛ درخواست ناگهانی در
+    // درخواست مجوز فقط وقتی کاربر وارد یکی از بخش‌های اعلان‌دار می‌شود؛ درخواست ناگهانی در
     // اولین اجرای برنامه هم نرخ رد شدن را بالا می‌برد و هم با سیاست فروشگاه‌ها ناسازگار است.
     LaunchedEffect(section) {
-        if (section == SettingsSection.ALERTS && Build.VERSION.SDK_INT >= 33) {
+        if ((section == SettingsSection.ALERTS || section == SettingsSection.PUMPS) &&
+            Build.VERSION.SDK_INT >= 33
+        ) {
             val granted = ContextCompat.checkSelfPermission(
                 context, Manifest.permission.POST_NOTIFICATIONS
             ) == PackageManager.PERMISSION_GRANTED
@@ -612,7 +614,16 @@ fun SettingsScreen(
 
                     SettingsSection.PUMPS -> PumpsCategory(
                         cfg = cfg,
+                        alertOwnerKey = "widget_$widgetId",
                         onChange = { new -> persist(new) },
+                        onAlertToggle = { enabled ->
+                            val new = cfg.copy(pumpAlertEnabled = enabled)
+                            persist(new)
+                            scope.launch {
+                                ConfigStore.save(context, new, widgetId)
+                                StockWidgetProvider.syncLiveService(context)
+                            }
+                        },
                         onAddSymbol = { sym ->
                             // منبع کوین (کریپتو) اگر روشن نبود، خودکار روشن می‌شود؛
                             // وگرنه نماد اضافه می‌شد ولی هیچ‌وقت داده نمی‌گرفت

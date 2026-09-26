@@ -75,6 +75,10 @@ object PumpScanner {
                 rank in 1..120 && (marketCap ?: 0.0) >= 500_000_000.0 -> Risk.MEDIUM
                 else -> Risk.HIGH
             }
+
+        /** پیشنهاد احتیاطی و دلیل آن؛ عمداً هیچ حالت «خرید» ندارد. */
+        val advice: Advice
+            get() = adviceFor(this)
     }
 
     /** سطح ریسکِ تقریبی — فقط برای نمایش رنگ و برچسب */
@@ -83,6 +87,14 @@ object PumpScanner {
         MEDIUM("پرنوسان"),
         HIGH("پرخطر")
     }
+
+    enum class Recommendation(val label: String) {
+        WATCH("فقط زیر نظر بگیر"),
+        WAIT("برای ورود عجله نکن"),
+        AVOID("از تعقیب قیمت دوری کن")
+    }
+
+    data class Advice(val recommendation: Recommendation, val reason: String)
 
     /** نتیجه‌ی یک اسکن */
     @Serializable
@@ -216,17 +228,57 @@ object PumpScanner {
     }
 
     /**
+     * پیشنهاد احتیاطی بر اساس ریسک، شتاب یک‌ساعته و گردش حجم. این خروجی توصیه‌ی
+     * سرمایه‌گذاری نیست و عمداً هیچ‌وقت «بخر» نمی‌گوید.
+     */
+    fun adviceFor(coin: PumpCoin): Advice {
+        val ch1 = coin.change1h?.takeIf { it.isFinite() } ?: 0.0
+        val ch24 = coin.change24h?.takeIf { it.isFinite() } ?: 0.0
+        val turnover = turnover(coin.volume, coin.marketCap)
+        return when {
+            coin.risk == Risk.HIGH -> Advice(
+                Recommendation.AVOID,
+                "رتبه/ارزش بازار پایین است و برگشت قیمت در کوین‌های کوچک می‌تواند بسیار سریع باشد."
+            )
+            ch24 >= 25.0 -> Advice(
+                Recommendation.AVOID,
+                "رشد ۲۴ ساعته از ۲۵٪ گذشته و احتمال خرید در سقف و اصلاح تند بیشتر شده است."
+            )
+            turnover >= 0.50 -> Advice(
+                Recommendation.AVOID,
+                "حجم ۲۴ ساعته بیش از نصف ارزش بازار است؛ گردش غیرعادی می‌تواند نشانه‌ی هیجان یا تخلیه باشد."
+            )
+            ch1 <= 0.0 -> Advice(
+                Recommendation.WAIT,
+                "با وجود رشد ۲۴ ساعته، شتاب یک‌ساعته متوقف یا منفی شده و ادامه‌ی حرکت تأیید نشده است."
+            )
+            coin.risk == Risk.MEDIUM -> Advice(
+                Recommendation.WAIT,
+                "حرکت هنوز مثبت است اما نوسان و ریسک برگشت بالاست؛ تثبیت قیمت و حجم را صبر کن."
+            )
+            else -> Advice(
+                Recommendation.WATCH,
+                "ارزش بازار بزرگ‌تر ریسک دست‌کاری را کمتر می‌کند، اما رشد سریع هنوز می‌تواند اصلاح شود."
+            )
+        }
+    }
+
+    fun turnover(volume: Double?, marketCap: Double?): Double {
+        val safeVolume = volume?.takeIf { it.isFinite() && it >= 0.0 }
+        val safeCap = marketCap?.takeIf { it.isFinite() && it > 0.0 }
+        return if (safeVolume != null && safeCap != null) {
+            (safeVolume / safeCap).coerceIn(0.0, 1.0)
+        } else 0.0
+    }
+
+    /**
      * امتیاز پامپ — ترکیب «شدت رشد» و «ورود پول واقعی».
      * turnover = حجم ۲۴ ساعته ÷ ارزش بازار (سقف ۱ تا یک کوین کل بازار را قبضه نکند).
      */
     fun score(change1h: Double?, change24h: Double?, volume: Double?, marketCap: Double?): Double {
         val ch1 = change1h?.takeIf { it.isFinite() } ?: 0.0
         val ch24 = change24h?.takeIf { it.isFinite() } ?: 0.0
-        val safeVolume = volume?.takeIf { it.isFinite() && it >= 0.0 }
-        val safeCap = marketCap?.takeIf { it.isFinite() && it > 0.0 }
-        val turnover = if (safeVolume != null && safeCap != null) {
-            (safeVolume / safeCap).coerceIn(0.0, 1.0)
-        } else 0.0
+        val turnover = turnover(volume, marketCap)
         return (ch24 + 2.0 * ch1 + 50.0 * turnover).takeIf { it.isFinite() } ?: 0.0
     }
 }

@@ -146,6 +146,7 @@ object ConfigStore {
             refreshToMinute = cfg.refreshToMinute.coerceIn(0, 1439),
             pumpUniverse = cfg.pumpUniverse.coerceIn(10, 250),
             pumpMinChange = safePumpChange,
+            pumpAlertCooldownMin = cfg.pumpAlertCooldownMin.coerceIn(15, 24 * 60),
             title = cfg.title.take(200)
         )
     }

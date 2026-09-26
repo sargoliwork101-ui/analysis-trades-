@@ -9,6 +9,7 @@ import android.util.Log
 import com.pulse.market.data.AlertEngine
 import com.pulse.market.data.ConfigStore
 import com.pulse.market.data.InternalGuard
+import com.pulse.market.data.PumpAlertEngine
 import com.pulse.market.data.Quote
 import com.pulse.market.data.QuoteRepo
 import com.pulse.market.data.SymbolDef
@@ -212,6 +213,13 @@ open class StockWidgetProvider : AppWidgetProvider() {
                     runCatching { AlertEngine.evaluate(context, cfg, alertQuotes) }
                 }
             }
+
+            // آلارم پامپ از همان چرخه‌ی موجود استفاده می‌کند، اما موتور خودش فقط هر
+            // ۱۵ دقیقه یک اسکن مشترک می‌گیرد و برای هر ویجت cooldown جدا دارد.
+            val pumpConfigs = cfgs.filter { (_, cfg) ->
+                !respectSchedule || inRefreshWindow(cfg)
+            }
+            runCatching { PumpAlertEngine.evaluateConfigured(context, pumpConfigs) }
         }
 
         /** رندر یک ویجت از روی کش — برای تغییر اندازه بدون شبکه */
@@ -301,6 +309,15 @@ open class StockWidgetProvider : AppWidgetProvider() {
             return ids.isNotEmpty() && ids.any { ConfigStore.current(context, it).liveService }
         }
 
+        /** آیا Worker دوره‌ای برای قیمت زنده یا آلارم پامپ لازم است؟ */
+        suspend fun anyPeriodicWidget(context: Context): Boolean {
+            val ids = WidgetRenderer.allWidgetIds(context)
+            return ids.isNotEmpty() && ids.any {
+                val cfg = ConfigStore.current(context, it)
+                cfg.liveService || cfg.pumpAlertEnabled
+            }
+        }
+
         /** کمینه‌ی فاصله‌ی تازه‌سازی بین ویجت‌های واقعیِ زنده — الگو به‌تنهایی وارد نمی‌شود */
         suspend fun liveInterval(context: Context): Int {
             val ids = WidgetRenderer.allWidgetIds(context)
@@ -312,18 +329,24 @@ open class StockWidgetProvider : AppWidgetProvider() {
         }
 
         /**
-         * سرویس/Worker فقط وقتی لازم‌اند که ویجت زنده‌ای روی صفحه باشد.
+         * سرویس چندثانیه‌ای فقط برای ویجت زنده است؛ Worker پانزده‌دقیقه‌ای برای
+         * ویجت زنده یا آلارم پامپ نگه داشته می‌شود.
          *
          * [startForeground] باید فقط پس از اقدام مستقیم کاربر true باشد. بوت، Worker و
          * ساخت پس‌زمینه‌ی پروسه حق شروع dataSync ForegroundService را در Android 15+
          * ندارند؛ در آن مسیرها فقط WorkManager زمان‌بندی می‌شود.
          */
         suspend fun syncLiveService(context: Context, startForeground: Boolean = true) {
-            if (anyLiveWidget(context)) {
+            val hasLiveWidget = anyLiveWidget(context)
+            if (hasLiveWidget) {
                 if (startForeground) LiveUpdateService.start(context)
-                LiveUpdateWorker.schedule(context)
             } else {
                 LiveUpdateService.stop(context)
+            }
+
+            if (anyPeriodicWidget(context)) {
+                LiveUpdateWorker.schedule(context)
+            } else {
                 LiveUpdateWorker.cancel(context)
             }
         }

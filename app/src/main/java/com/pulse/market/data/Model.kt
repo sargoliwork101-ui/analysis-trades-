@@ -217,7 +217,11 @@ data class WidgetConfig(
     /** چند کوین برتر بازار اسکن شود (۵۰/۱۰۰/۲۵۰) */
     val pumpUniverse: Int = 100,
     /** کمترین رشد ۲۴ ساعته (٪) برای اینکه یک کوین «پامپ» حساب شود */
-    val pumpMinChange: Double = 8.0
+    val pumpMinChange: Double = 8.0,
+    /** اعلان دوره‌ای وقتی دست‌کم یک کوین از آستانه‌ی پامپ عبور کند */
+    val pumpAlertEnabled: Boolean = false,
+    /** حداقل فاصله‌ی دو اعلان پامپ برای همین ویجت (دقیقه) */
+    val pumpAlertCooldownMin: Int = 60
 ) {
     /** منابع فعال (با پشتیبانی از فرمت قدیمی تک‌منبعی) */
     val activeSourceIds: List<String>
