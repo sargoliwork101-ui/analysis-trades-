@@ -59,4 +59,22 @@ class AlertLogicTest {
         val scheduled = rule(from = 9 * 60, to = 12 * 60 + 30)
         assertEquals("هر روز، ۰۹:۰۰ تا ۱۲:۳۰", scheduled.scheduleText(persian = true))
     }
+
+    @Test
+    fun volumeSpikeUsesTwoConsecutiveSamples() {
+        assertEquals(25.0, AlertLogic.volumeSpikePercent(1000.0, 1250.0)!!, 1e-9)
+        assertEquals(-10.0, AlertLogic.volumeSpikePercent(1000.0, 900.0)!!, 1e-9)
+        assertTrue(
+            AlertLogic.isTriggered(
+                rule(condition = AlertCondition.VOLUME_SPIKE, threshold = 20.0),
+                25.0
+            )
+        )
+        assertFalse(
+            AlertLogic.isTriggered(
+                rule(condition = AlertCondition.VOLUME_SPIKE, threshold = 20.0),
+                -25.0
+            )
+        )
+    }
 }

@@ -118,7 +118,8 @@ object ConfigStore {
                     symbolLabel = rule.symbolLabel.trim().ifBlank { rule.symbolCode.trim() }.take(200),
                     sourceId = rule.sourceId.trim().ifBlank { ids.first() }.take(200),
                     threshold = when (rule.condition) {
-                        AlertCondition.PCT_UP, AlertCondition.PCT_DOWN -> kotlin.math.abs(rule.threshold)
+                        AlertCondition.PCT_UP, AlertCondition.PCT_DOWN,
+                        AlertCondition.VOLUME_SPIKE -> kotlin.math.abs(rule.threshold)
                         else -> rule.threshold
                     },
                     fromMinute = rule.fromMinute.coerceIn(0, 1439),
@@ -245,6 +246,7 @@ object ConfigStore {
 
     private val KEY_CUSTOM_SOURCES = stringPreferencesKey("custom_sources")
     private val KEY_TSE_SYMBOLS = stringPreferencesKey("tse_custom_symbols")
+    private val KEY_WATCHLISTS = stringPreferencesKey("named_watchlists")
 
     fun customSourcesFlow(context: Context): Flow<List<SourceDef>> =
         context.dataStore.data.map { prefs ->
@@ -337,6 +339,61 @@ object ConfigStore {
         }
     }
 
+    // ───────────── واچ‌لیست‌های نام‌دار (سراسری) ─────────────
+
+    fun watchlistsFlow(context: Context): Flow<List<Watchlist>> =
+        context.dataStore.data.map { prefs ->
+            val decoded = prefs[KEY_WATCHLISTS]?.let { raw ->
+                runCatching {
+                    json.decodeFromString(ListSerializer(Watchlist.serializer()), raw)
+                }.getOrNull()
+            } ?: emptyList()
+            sanitizeWatchlists(decoded)
+        }
+
+    suspend fun currentWatchlists(context: Context): List<Watchlist> = watchlistsFlow(context).first()
+
+    suspend fun saveWatchlists(context: Context, list: List<Watchlist>) {
+        val safe = sanitizeWatchlists(list)
+        context.dataStore.edit {
+            it[KEY_WATCHLISTS] = json.encodeToString(ListSerializer(Watchlist.serializer()), safe)
+        }
+    }
+
+    private fun sanitizeWatchlists(list: List<Watchlist>): List<Watchlist> =
+        list.asSequence()
+            .filter { it.id.isNotBlank() && it.name.isNotBlank() }
+            .map { watchlist ->
+                val ids = watchlist.sourceIds.map { it.trim().take(200) }
+                    .filter { it.isNotBlank() }.distinct().take(20)
+                val symbols = watchlist.symbols.asSequence()
+                    .filter { it.code.isNotBlank() }
+                    .map { symbol ->
+                        symbol.copy(
+                            code = symbol.code.trim().take(200),
+                            label = symbol.label.trim().ifBlank { symbol.code.trim() }.take(200),
+                            sourceId = symbol.sourceId.trim().take(200),
+                            unit = symbol.unit.trim().take(40),
+                            scale = symbol.scale?.takeIf { it.isFinite() && it > 0.0 }
+                        )
+                    }
+                    .distinctBy { it.sourceId to it.code }
+                    .take(MAX_SYMBOLS)
+                    .toList()
+                watchlist.copy(
+                    id = watchlist.id.trim().take(200),
+                    name = watchlist.name.trim().take(80),
+                    sourceIds = (ids + symbols.map { it.sourceId }.filter { it.isNotBlank() })
+                        .distinct().take(20),
+                    symbols = symbols,
+                    updatedAt = watchlist.updatedAt.coerceAtLeast(0L)
+                )
+            }
+            .distinctBy { it.id }
+            .sortedByDescending { it.updatedAt }
+            .take(30)
+            .toList()
+
     @Synchronized
     private fun cancelPending(widgetId: Int) {
         pendingSaves.remove(widgetId)?.cancel()
@@ -366,7 +423,13 @@ object ConfigStore {
                 runCatching {
                     json.decodeFromString(ListSerializer(SymbolDef.serializer()), raw)
                 }.getOrNull()
-            } ?: emptyList()
+            } ?: emptyList(),
+            watchlists = prefs[KEY_WATCHLISTS]?.let { raw ->
+                runCatching {
+                    json.decodeFromString(ListSerializer(Watchlist.serializer()), raw)
+                }.getOrNull()
+            } ?: emptyList(),
+            alertHistory = AlertHistoryStore.load(context)
         )
         return json.encodeToString(BackupDump.serializer(), dump)
     }
@@ -389,6 +452,7 @@ object ConfigStore {
                 .take(200)
                 .associate { (key, value) -> key to migrate(value) }
         )
+        val safeWatchlists = sanitizeWatchlists(dump.watchlists)
         val safeTseSymbols = dump.tseSymbols.asSequence()
             .filter { it.code.isNotBlank() }
             .map {
@@ -409,7 +473,10 @@ object ConfigStore {
                 json.encodeToString(ListSerializer(SourceDef.serializer()), safeSources)
             prefs[KEY_TSE_SYMBOLS] =
                 json.encodeToString(ListSerializer(SymbolDef.serializer()), safeTseSymbols)
+            prefs[KEY_WATCHLISTS] =
+                json.encodeToString(ListSerializer(Watchlist.serializer()), safeWatchlists)
         }
+        AlertHistoryStore.replace(context, dump.alertHistory)
         return safeWidgets.widgets.size
     }
 
@@ -425,5 +492,7 @@ private data class BackupDump(
     val exportedAt: Long = 0L,
     val widgets: WidgetsFile,
     val customSources: List<SourceDef> = emptyList(),
-    val tseSymbols: List<SymbolDef> = emptyList()
+    val tseSymbols: List<SymbolDef> = emptyList(),
+    val watchlists: List<Watchlist> = emptyList(),
+    val alertHistory: List<AlertEvent> = emptyList()
 )

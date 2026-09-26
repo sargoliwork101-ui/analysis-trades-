@@ -12,7 +12,9 @@ import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
 import org.jsoup.Jsoup
+import java.net.URI
 import java.net.URLEncoder
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * موتور گرفتن داده از سایت‌ها.
@@ -33,8 +35,16 @@ object Fetcher {
 
     /** حداکثر درخواست هم‌زمان — جلوی سیل درخواست‌ها با چند ویجت/چند نماد را می‌گیرد */
     private const val MAX_PARALLEL = 4
+    private const val FAILED_ENDPOINT_COOLDOWN_MS = 5 * 60 * 1000L
+
+    /** آخرین endpoint سالم، فقط با نام میزبان تا query/header حساس ذخیره نشود. */
+    data class EndpointUse(val host: String, val fallback: Boolean, val at: Long)
 
     private val gate = Semaphore(MAX_PARALLEL)
+    private val failedUntil = ConcurrentHashMap<String, Long>()
+    private val endpointBySource = ConcurrentHashMap<String, EndpointUse>()
+
+    fun lastEndpoint(sourceId: String): EndpointUse? = endpointBySource[sourceId]
 
     /** گرفتن قیمت همه‌ی نمادهای انتخاب‌شده‌ی یک منبع */
     suspend fun fetchAll(source: SourceDef, symbols: List<SymbolDef>): List<Quote> {
@@ -237,9 +247,16 @@ object Fetcher {
      */
     private fun getAny(urls: List<String>, source: SourceDef): String {
         var last: Throwable? = null
-        for (u in urls) {
+        val now = System.currentTimeMillis()
+        val candidates = urls.distinct().mapIndexed { index, url -> index to url }
+        // endpoint شکست‌خورده پنج دقیقه به انتهای صف می‌رود؛ سپس دوباره امتحان می‌شود
+        // تا primary پس از رفع اختلال برای همیشه کنار گذاشته نشود.
+        val ordered = candidates.sortedBy { (_, url) ->
+            if ((failedUntil[endpointKey(url)] ?: 0L) > now) 1 else 0
+        }
+        for ((originalIndex, u) in ordered) {
             try {
-                return Http.getTextBlocking(
+                val body = Http.getTextBlocking(
                     url = u,
                     accept = if (source.kind == FetchKind.HTML_CSS)
                         "text/html,application/xhtml+xml,*/*"
@@ -248,14 +265,31 @@ object Fetcher {
                     maxBytes = if (source.kind == FetchKind.HTML_CSS)
                         Http.MAX_HTML_BYTES else Http.MAX_JSON_BYTES
                 )
+                failedUntil.remove(endpointKey(u))
+                endpointBySource[source.id] = EndpointUse(
+                    host = endpointHost(u),
+                    fallback = originalIndex > 0,
+                    at = System.currentTimeMillis()
+                )
+                return body
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {
+                failedUntil[endpointKey(u)] = System.currentTimeMillis() + FAILED_ENDPOINT_COOLDOWN_MS
                 last = failure
             }
         }
         throw last ?: error("آدرسی برای خواندن تعریف نشده بود")
     }
+
+    private fun endpointHost(url: String): String = runCatching {
+        URI(url).host?.takeIf { it.isNotBlank() }
+    }.getOrNull() ?: "میزبان ناشناخته"
+
+    private fun endpointKey(url: String): String = runCatching {
+        val uri = URI(url)
+        "${uri.scheme}://${uri.host}${uri.path}"
+    }.getOrNull() ?: url.substringBefore('?').take(1000)
 
     private fun parseJson(body: String): Any =
         try {

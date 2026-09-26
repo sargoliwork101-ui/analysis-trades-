@@ -110,7 +110,7 @@ fun AddAlertDialog(
         icon = Icons.Default.NotificationsActive,
         tint = Color(0xFFF43F5E),
         title = if (existing == null) "هشدار جدید" else "ویرایش هشدار",
-        subtitle = "با هر به‌روزرسانی قیمت بررسی می‌شود",
+        subtitle = "با هر به‌روزرسانی قیمت و حجم بررسی می‌شود",
         onClose = onDismiss
     ) {
         Column(
@@ -180,7 +180,8 @@ fun AddAlertDialog(
                                 AlertCondition.ABOVE to "قیمت بالاتر از",
                                 AlertCondition.BELOW to "قیمت پایین‌تر از",
                                 AlertCondition.PCT_UP to "رشد بیش از ٪",
-                                AlertCondition.PCT_DOWN to "افت بیش از ٪"
+                                AlertCondition.PCT_DOWN to "افت بیش از ٪",
+                                AlertCondition.VOLUME_SPIKE to "جهش حجم ٪"
                             ).forEach { (c, label) ->
                                 FilterChip(
                                     selected = condition == c,
@@ -197,6 +198,7 @@ fun AddAlertDialog(
                                         AlertCondition.ABOVE, AlertCondition.BELOW ->
                                             if (selectedUnit.isNotEmpty()) "عدد قیمت به $selectedUnit (مثلاً 6420)"
                                             else "عدد قیمت (مثلاً 6420)"
+                                        AlertCondition.VOLUME_SPIKE -> "درصد افزایش حجم از نمونه‌ی قبلی (مثلاً 20)"
                                         else -> "درصد (مثلاً 5)"
                                     }
                                 )
@@ -280,13 +282,24 @@ fun AddAlertDialog(
                                 }
                         }
                     }
-                    RowDivider()
-                    SwitchRow(
-                        title = "فقط لحظه‌ی عبور از حد",
-                        desc = "تا قیمت برنگردد و دوباره عبور نکند، نوتیف تکرار نمی‌شود",
-                        checked = onlyOnCross,
-                        onChange = { onlyOnCross = it }
-                    )
+                    if (condition != AlertCondition.VOLUME_SPIKE) {
+                        RowDivider()
+                        SwitchRow(
+                            title = "فقط لحظه‌ی عبور از حد",
+                            desc = "تا قیمت برنگردد و دوباره عبور نکند، نوتیف تکرار نمی‌شود",
+                            checked = onlyOnCross,
+                            onChange = { onlyOnCross = it }
+                        )
+                    } else {
+                        RowDivider()
+                        InnerRow {
+                            Text(
+                                "جهش حجم با دو نمونه‌ی متوالی سنجیده می‌شود و فاصله‌ی ضداسپم بالا را رعایت می‌کند.",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -317,7 +330,8 @@ fun AddAlertDialog(
                         sourceId = cleanSource,
                         condition = condition,
                         threshold = when (condition) {
-                            AlertCondition.PCT_UP, AlertCondition.PCT_DOWN -> kotlin.math.abs(thresholdValue ?: 0.0)
+                            AlertCondition.PCT_UP, AlertCondition.PCT_DOWN,
+                            AlertCondition.VOLUME_SPIKE -> kotlin.math.abs(thresholdValue ?: 0.0)
                             else -> thresholdValue ?: 0.0
                         },
                         scheduleEnabled = scheduleEnabled,

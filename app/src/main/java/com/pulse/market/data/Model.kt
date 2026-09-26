@@ -111,7 +111,11 @@ data class Quote(
     /** سری قیمت برای نمودار مینیاتوری */
     val spark: List<Double> = emptyList(),
     /** منبعی که قیمت از آن خوانده شده */
-    val sourceId: String = ""
+    val sourceId: String = "",
+    /** نمونه‌ی تازه جهش غیرعادی داشت و تا تأیید نمونه‌ی دوم وارد کش نشد. */
+    val anomalyDetected: Boolean = false,
+    /** درصد اختلاف نمونه‌ی مشکوک با آخرین قیمت سالم. */
+    val anomalyPct: Double? = null
 )
 
 /** تم ویجت — تیره/روشن + سه تم ترند: شیشه‌ای، شفق قطبی، نئون */

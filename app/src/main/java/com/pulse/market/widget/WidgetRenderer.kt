@@ -192,6 +192,7 @@ object WidgetRenderer {
 
         // ── نوار وضعیت (قابل خاموش شدن) — «الان در چه وضعیتی هستیم؟» ──
         val errors = quotes.count { it.error != null && it.price == null }
+        val anomalyCount = quotes.count { it.anomalyDetected }
         // نمادهایی که این نوبت تازه نشدند ولی آخرین قیمت سالم‌شان روی ویجت مانده (چراغ قرمز)
         val staleCount = quotes.count { it.stale && it.price != null }
         val activeAlerts = cfg.alerts.count { it.enabled }
@@ -201,6 +202,7 @@ object WidgetRenderer {
             " • ⏰ ${time2d(cfg.refreshFromMinute)}–${time2d(cfg.refreshToMinute)}" else ""
         val status = when {
             quotes.isEmpty() -> "داده‌ای نیست — روی رفرش بزن"
+            anomalyCount > 0 -> "⚠ $anomalyCount قیمت غیرعادی؛ آخرین قیمت سالم حفظ شد$alertInfo$windowInfo"
             errors > 0 -> "$errors نماد بدون داده$alertInfo$windowInfo"
             // بدون اینترنت یا توقف تازه‌سازی: داده پاک نمی‌شود، فقط چراغ‌ها قرمز می‌شوند
             staleCount > 0 -> "آفلاین — آخرین قیمت‌ها نگه داشته شد$alertInfo$windowInfo"
@@ -360,6 +362,10 @@ object WidgetRenderer {
     private fun subLabel(q: Quote, cfg: WidgetConfig): String {
         // خطا فقط وقتی نشان داده می‌شود که مقداری برای نمایش نداشته باشیم؛
         // در حالت stale (آخرین مقدار سالم) عدد می‌ماند و فقط LED قرمز می‌شود
+        if (q.anomalyDetected) {
+            val pct = Format.price(kotlin.math.abs(q.anomalyPct ?: 0.0), cfg.persianDigits)
+            return "⚠ قیمت غیرعادی $pct٪؛ در انتظار تأیید"
+        }
         if (q.error != null && q.price == null) return "⚠ ${q.error}"
         val parts = mutableListOf<String>()
         if (cfg.showCode && q.code.isNotBlank()) parts += q.code

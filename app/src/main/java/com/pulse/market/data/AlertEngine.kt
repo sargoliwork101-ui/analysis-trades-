@@ -55,10 +55,8 @@ object AlertEngine {
         val rules = cfg.alerts.filter { it.enabled }
         if (rules.isEmpty() || quotes.isEmpty()) return
 
-        // خواب موقت (میتینگ/شب): در این بازه هیچ هشداری بررسی و نوتیفی نمی‌رود
-        if (isSnoozed(context)) return
-
         val now = System.currentTimeMillis()
+        val snoozed = isSnoozed(context)
         val cal = Calendar.getInstance().apply { timeInMillis = now }
         val minuteOfDay = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
         val dayIndex = persianDayIndex(cal.get(Calendar.DAY_OF_WEEK))
@@ -74,23 +72,39 @@ object AlertEngine {
                         (rule.sourceId.isEmpty() || it.sourceId.isEmpty() || it.sourceId == rule.sourceId)
             } ?: continue
             val price = quote.price?.takeIf { it.isFinite() } ?: continue
-
-            // مجموعه‌ی روز خالی یعنی هیچ روزی؛ قبلاً اشتباهاً مثل «همه‌ی روزها» عمل می‌کرد.
-            if (!AlertLogic.isInsideSchedule(rule, dayIndex, minuteOfDay)) continue
-
-            // برای هشدار درصدی باید «درصد قبلی» ذخیره شود، نه قیمت قبلی. در غیر این
-            // صورت onlyOnCross بعد از نخستین ارزیابی دیگر هیچ عبور درصدی را نمی‌دید.
-            val metric = AlertLogic.metric(rule, price, quote.changePct) ?: continue
-            val triggered = AlertLogic.isTriggered(rule, metric)
             val keyMetric = "last_metric_${rule.id}_${rule.condition.name}"
             val keyNotified = "last_notified_${rule.id}"
             val previous = store.getString(keyMetric, null)?.toDoubleOrNull()
                 ?.takeIf { it.isFinite() }
 
-            // ۱) شرط برقرار باشد  ۲) در حالت عبور، نوبت قبل برقرار نبوده باشد
-            // ۳) فاصله‌ی ضداسپم تمام شده باشد.
+            // هشدار جهش حجم، حجم خام دو نمونه‌ی متوالی را نگه می‌دارد و درصد جهش را
+            // محاسبه می‌کند. بقیه‌ی شرط‌ها قیمت/درصد هم‌نوع خودشان را مقایسه می‌کنند.
+            val storedMetric: Double
+            val observed: Double
+            val triggered: Boolean
+            if (rule.condition == AlertCondition.VOLUME_SPIKE) {
+                storedMetric = quote.volume?.takeIf { it.isFinite() && it >= 0.0 } ?: continue
+                observed = AlertLogic.volumeSpikePercent(previous, storedMetric) ?: 0.0
+                triggered = previous != null && AlertLogic.isTriggered(rule, observed)
+            } else {
+                storedMetric = AlertLogic.metric(rule, price, quote.changePct) ?: continue
+                observed = storedMetric
+                triggered = AlertLogic.isTriggered(rule, observed)
+            }
+
+            // نمونه‌ی جاری حتی در حالت خواب یا خارج از برنامه‌ی زمانی ثبت می‌شود تا
+            // پس از بیدارشدن، اعلان دیرهنگام یا جهش حجم کاذب ساخته نشود.
+            editor.putString(keyMetric, storedMetric.toString())
+            dirty = true
+
+            if (snoozed || !AlertLogic.isInsideSchedule(rule, dayIndex, minuteOfDay)) continue
+
+            // ۱) شرط برقرار باشد ۲) برای قیمت/درصد در حالت عبور، نوبت قبل برقرار نباشد
+            // ۳) فاصله‌ی ضداسپم تمام شده باشد. جهش حجم خودش رویداد بین دو نمونه است.
             var shouldNotify = triggered
-            if (shouldNotify && rule.onlyOnCross && previous != null) {
+            if (shouldNotify && rule.condition != AlertCondition.VOLUME_SPIKE &&
+                rule.onlyOnCross && previous != null
+            ) {
                 shouldNotify = !AlertLogic.isTriggered(rule, previous)
             }
             if (shouldNotify) {
@@ -99,13 +113,33 @@ object AlertEngine {
             }
 
             if (shouldNotify) {
-                // فقط اعلان واقعاً تحویل‌داده‌شده را ثبت کن. در خطای مجوز/سیستم، مقدار
-                // قبلی هم حفظ می‌شود تا نوبت بعد دوباره امکان تلاش وجود داشته باشد.
-                if (!notify(context, cfg, rule, quote)) continue
+                // فقط اعلان واقعاً تحویل‌داده‌شده ثبت می‌شود. در خطای مجوز/سیستم،
+                // metric قبلی حفظ می‌شود تا نوبت بعد امکان تلاش دوباره وجود داشته باشد.
+                if (!notify(context, cfg, rule, quote, observed)) {
+                    if (previous == null) editor.remove(keyMetric)
+                    else editor.putString(keyMetric, previous.toString())
+                    continue
+                }
                 editor.putLong(keyNotified, now)
+                AlertHistoryStore.add(
+                    context,
+                    AlertEvent(
+                        id = "event_${rule.id}_$now",
+                        ruleId = rule.id,
+                        symbolCode = rule.symbolCode,
+                        symbolLabel = rule.symbolLabel,
+                        sourceId = rule.sourceId,
+                        condition = rule.condition,
+                        threshold = rule.threshold,
+                        price = quote.price,
+                        changePct = quote.changePct,
+                        volume = quote.volume,
+                        observedValue = observed,
+                        unit = quote.unit,
+                        triggeredAt = now
+                    )
+                )
             }
-            editor.putString(keyMetric, metric.toString())
-            dirty = true
         }
 
         if (dirty) editor.apply()
@@ -144,23 +178,36 @@ object AlertEngine {
 
     // ─────────────────────── نوتیف ───────────────────────
 
-    fun notify(context: Context, cfg: WidgetConfig, rule: AlertRule, quote: Quote): Boolean {
+    fun notify(
+        context: Context,
+        cfg: WidgetConfig,
+        rule: AlertRule,
+        quote: Quote,
+        observedValue: Double? = null
+    ): Boolean {
         ensureChannel(context)
 
         val priceText = Format.price(quote.price, cfg.persianDigits)
         val unit = quote.unit.ifBlank { "" }
-        val title = when (rule.condition) {
+        // RLM باعث می‌شود عنوان فارسی حتی با ایموجی یا نماد لاتین از راست آغاز شود.
+        val rtl = "\u200F"
+        val title = rtl + when (rule.condition) {
             AlertCondition.ABOVE -> "🔔 ${rule.symbolLabel} از حد گذشت"
             AlertCondition.BELOW -> "🔻 ${rule.symbolLabel} زیر حد آمد"
             AlertCondition.PCT_UP -> "🚀 رشد ${rule.symbolLabel}"
             AlertCondition.PCT_DOWN -> "⚠️ افت ${rule.symbolLabel}"
+            AlertCondition.VOLUME_SPIKE -> "📊 جهش حجم ${rule.symbolLabel}"
         }
 
-        val thresholdText = when (rule.condition) {
+        val thresholdText = rtl + when (rule.condition) {
             AlertCondition.ABOVE, AlertCondition.BELOW ->
                 "$priceText $unit (حد: ${Format.price(rule.threshold, cfg.persianDigits)} $unit)"
             AlertCondition.PCT_UP, AlertCondition.PCT_DOWN ->
                 "${Format.pct(quote.changePct, cfg.persianDigits)} (حد: ${Format.price(abs(rule.threshold), cfg.persianDigits)}٪)"
+            AlertCondition.VOLUME_SPIKE ->
+                "حجم ${Format.volume(quote.volume, cfg.persianDigits)} • جهش " +
+                        "${Format.price(observedValue, cfg.persianDigits)}٪ " +
+                        "(حد: ${Format.price(abs(rule.threshold), cfg.persianDigits)}٪)"
         }
 
         val open = PendingIntent.getActivity(
@@ -201,8 +248,8 @@ object AlertEngine {
         )
         val n = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_pulse)
-            .setContentTitle("🔔 نوتیف تستی")
-            .setContentText("اگر این را می‌بینی، هشدارها درست کار می‌کنند.")
+            .setContentTitle("\u200F🔔 نوتیف تستی")
+            .setContentText("\u200Fاگر این را می‌بینی، هشدارها درست کار می‌کنند.")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setVibrate(VIBRATION_PATTERN)
             .setAutoCancel(true)

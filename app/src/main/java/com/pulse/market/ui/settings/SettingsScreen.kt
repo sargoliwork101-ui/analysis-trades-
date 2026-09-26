@@ -29,6 +29,8 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.HealthAndSafety
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.NotificationsActive
@@ -68,6 +70,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.pulse.market.data.AlertEngine
+import com.pulse.market.data.AlertEvent
+import com.pulse.market.data.AlertHistoryStore
 import com.pulse.market.data.AlertRule
 import com.pulse.market.data.AppUpdater
 import com.pulse.market.data.ConfigStore
@@ -76,7 +80,10 @@ import com.pulse.market.data.MarketKind
 import com.pulse.market.data.MAX_SYMBOLS
 import com.pulse.market.data.SourceCatalog
 import com.pulse.market.data.SourceDef
+import com.pulse.market.data.SourceHealth
+import com.pulse.market.data.SourceHealthStore
 import com.pulse.market.data.SymbolDef
+import com.pulse.market.data.Watchlist
 import com.pulse.market.data.WidgetConfig
 import com.pulse.market.data.WidgetTheme
 import com.pulse.market.data.marketKindOf
@@ -98,7 +105,9 @@ import java.util.Locale
 /** بخش‌های تنظیمات — هر کدام صفحه‌ی خودش را دارد */
 enum class SettingsSection(val title: String) {
     SOURCES("منابع داده"),
+    HEALTH("سلامت منابع"),
     SYMBOLS("نمادها"),
+    WATCHLISTS("واچ‌لیست‌ها"),
     VALUES("مقادیر نمایشی"),
     LOOK("ظاهر و فونت"),
     UPDATE("به‌روزرسانی"),
@@ -128,6 +137,9 @@ fun SettingsScreen(
     var cfg by remember { mutableStateOf(WidgetConfig()) }
     var customSources by remember { mutableStateOf<List<SourceDef>>(emptyList()) }
     var tseCustomSymbols by remember { mutableStateOf<List<SymbolDef>>(emptyList()) }
+    var watchlists by remember { mutableStateOf<List<Watchlist>>(emptyList()) }
+    var sourceHealth by remember { mutableStateOf<List<SourceHealth>>(emptyList()) }
+    var alertHistory by remember { mutableStateOf<List<AlertEvent>>(emptyList()) }
     var busy by remember { mutableStateOf(false) }
     var testResult by remember { mutableStateOf("") }
     var section by remember { mutableStateOf<SettingsSection?>(null) }
@@ -171,6 +183,16 @@ fun SettingsScreen(
         cfg = ConfigStore.current(context, widgetId)
         customSources = ConfigStore.currentCustomSources(context)
         tseCustomSymbols = ConfigStore.currentTseSymbols(context)
+        watchlists = ConfigStore.currentWatchlists(context)
+        sourceHealth = SourceHealthStore.load(context)
+        alertHistory = AlertHistoryStore.load(context)
+    }
+
+    LaunchedEffect(section) {
+        if (section == SettingsSection.ALERTS) alertHistory = AlertHistoryStore.load(context)
+        if (section == SettingsSection.HEALTH || section == null) {
+            sourceHealth = SourceHealthStore.load(context)
+        }
     }
 
     // ─── اجازه‌ی اعلان (اندروید ۱۳ به بالا) ───
@@ -244,6 +266,8 @@ fun SettingsScreen(
                         cfg = ConfigStore.current(context, widgetId)
                         customSources = ConfigStore.currentCustomSources(context)
                         tseCustomSymbols = ConfigStore.currentTseSymbols(context)
+                        watchlists = ConfigStore.currentWatchlists(context)
+                        alertHistory = AlertHistoryStore.load(context)
                         StockWidgetProvider.requestUpdate(context)
                         // سرویس زنده/Worker هم مطابق تنظیمات بازیابی‌شده همگام شود —
                         // وگرنه تا اولین تغییرِ دستی، به‌روزرسانی پس‌زمینه راه نمی‌افتد
@@ -324,6 +348,8 @@ fun SettingsScreen(
                     null -> LandingMenu(
                         cfg = cfg,
                         selectedSources = selectedSources,
+                        watchlistCount = watchlists.size,
+                        healthySourceCount = sourceHealth.count { it.sourceId in selectedIds && it.isHealthy },
                         onOpen = { section = it }
                     )
 
@@ -376,6 +402,91 @@ fun SettingsScreen(
                             }
                         },
                         onAddClick = { showAddDialog = true }
+                    )
+
+                    SettingsSection.HEALTH -> SourceHealthCategory(
+                        sources = selectedSources,
+                        health = sourceHealth,
+                        busy = busy,
+                        onTestAll = {
+                            scope.launch {
+                                busy = true
+                                try {
+                                    selectedSources.forEach { source ->
+                                        val symbols = cfg.symbolsOf(source.id).ifEmpty {
+                                            source.symbols.take(1).map { it.copy(sourceId = source.id) }
+                                        }
+                                        if (symbols.isEmpty()) {
+                                            SourceHealthStore.recordFailure(
+                                                context, source.id, "نمادی برای آزمایش منبع وجود ندارد"
+                                            )
+                                        } else {
+                                            val started = System.currentTimeMillis()
+                                            val quotes = Fetcher.fetchAll(source, symbols)
+                                            SourceHealthStore.record(
+                                                context,
+                                                source.id,
+                                                quotes,
+                                                System.currentTimeMillis() - started,
+                                                Fetcher.lastEndpoint(source.id)
+                                            )
+                                        }
+                                    }
+                                    sourceHealth = SourceHealthStore.load(context)
+                                } finally {
+                                    busy = false
+                                }
+                            }
+                        },
+                        onClear = {
+                            SourceHealthStore.clear(context)
+                            sourceHealth = emptyList()
+                        }
+                    )
+
+                    SettingsSection.WATCHLISTS -> WatchlistsCategory(
+                        cfg = cfg,
+                        watchlists = watchlists,
+                        onSaveCurrent = { name ->
+                            scope.launch {
+                                val existing = watchlists.firstOrNull {
+                                    it.name.equals(name, ignoreCase = true)
+                                }
+                                val item = Watchlist(
+                                    id = existing?.id ?: "watchlist_${System.currentTimeMillis()}",
+                                    name = name,
+                                    sourceIds = cfg.activeSourceIds,
+                                    symbols = cfg.symbols,
+                                    updatedAt = System.currentTimeMillis()
+                                )
+                                val updated = watchlists.filterNot { it.id == item.id } + item
+                                ConfigStore.saveWatchlists(context, updated)
+                                watchlists = ConfigStore.currentWatchlists(context)
+                            }
+                        },
+                        onApply = { watchlist ->
+                            val availableIds = watchlist.sourceIds.filter { id ->
+                                allSources.any { it.id == id }
+                            }
+                            val ids = availableIds.ifEmpty { cfg.activeSourceIds }
+                            val symbols = watchlist.symbols.filter { symbol ->
+                                symbol.sourceId.isBlank() || symbol.sourceId in ids
+                            }.take(MAX_SYMBOLS)
+                            persist(
+                                cfg.copy(
+                                    sourceIds = ids,
+                                    sourceId = ids.first(),
+                                    symbols = symbols
+                                )
+                            )
+                        },
+                        onDelete = { watchlist ->
+                            scope.launch {
+                                val updated = watchlists.filterNot { it.id == watchlist.id }
+                                ConfigStore.saveWatchlists(context, updated)
+                                watchlists = updated
+                            }
+                        }
                     )
 
                     SettingsSection.SYMBOLS -> SymbolsCategory(
@@ -491,7 +602,12 @@ fun SettingsScreen(
                             persistAlerts(cfg.alerts.filterNot { it.id == rule.id })
                         },
                         onAddAlert = { editingAlert = null; alertDialogOpen = true },
-                        onTestNotification = { AlertEngine.notifyTest(context) }
+                        onTestNotification = { AlertEngine.notifyTest(context) },
+                        history = alertHistory,
+                        onClearHistory = {
+                            AlertHistoryStore.clear(context)
+                            alertHistory = emptyList()
+                        }
                     )
 
                     SettingsSection.PUMPS -> PumpsCategory(
@@ -717,6 +833,8 @@ fun SettingsScreen(
 private fun LandingMenu(
     cfg: WidgetConfig,
     selectedSources: List<SourceDef>,
+    watchlistCount: Int,
+    healthySourceCount: Int,
     onOpen: (SettingsSection) -> Unit
 ) {
     // خلاصه‌ی زنده‌ی هر بخش — بدون شلوغی، فقط آنچه لازم است
@@ -750,11 +868,27 @@ private fun LandingMenu(
             ) { onOpen(SettingsSection.SOURCES) }
             RowDivider()
             NavMenuRow(
+                icon = Icons.Default.HealthAndSafety,
+                tint = Color(0xFF14B8A6),
+                title = SettingsSection.HEALTH.title,
+                summary = if (selectedSources.isEmpty()) "منبع فعالی نیست" else
+                    "${Format.toPersianDigits(healthySourceCount.toString())} منبع سالم از ${Format.toPersianDigits(selectedSources.size.toString())}"
+            ) { onOpen(SettingsSection.HEALTH) }
+            RowDivider()
+            NavMenuRow(
                 icon = Icons.Default.ShowChart,
                 tint = Color(0xFF22C55E),
                 title = SettingsSection.SYMBOLS.title,
                 summary = symbolsSummary
             ) { onOpen(SettingsSection.SYMBOLS) }
+            RowDivider()
+            NavMenuRow(
+                icon = Icons.Default.FavoriteBorder,
+                tint = Color(0xFFEC4899),
+                title = SettingsSection.WATCHLISTS.title,
+                summary = if (watchlistCount == 0) "هنوز واچ‌لیستی ذخیره نشده" else
+                    "${Format.toPersianDigits(watchlistCount.toString())} واچ‌لیست نام‌دار"
+            ) { onOpen(SettingsSection.WATCHLISTS) }
             RowDivider()
             NavMenuRow(
                 icon = Icons.Default.Tune,

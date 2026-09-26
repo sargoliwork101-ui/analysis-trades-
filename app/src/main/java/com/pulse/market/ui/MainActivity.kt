@@ -3,15 +3,19 @@ package com.pulse.market.ui
 import android.appwidget.AppWidgetManager
 import android.content.Intent
 import android.os.Bundle
+import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.LayoutDirection.Rtl
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.lifecycle.lifecycleScope
 import com.pulse.market.data.ConfigStore
 import com.pulse.market.ui.settings.SettingsScreen
@@ -26,6 +30,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // رابط برنامه فارسی است؛ جهت صفحه نباید به زبان تنظیم‌شده‌ی گوشی وابسته باشد.
+        window.decorView.layoutDirection = View.LAYOUT_DIRECTION_RTL
         readWidgetId(intent)
 
         // در جریان «افزودن ویجت»، حتی با دکمه‌ی برگشت هم ویجت اضافه شود
@@ -52,15 +58,17 @@ class MainActivity : ComponentActivity() {
         })
 
         setContent {
-            PulseTheme {
-                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    // با تغییر ویجت (افزودن دومی در حالت singleTop) کل صفحه از نو ساخته می‌شود
-                    key(widgetIdState.value) {
-                        SettingsScreen(
-                            widgetId = widgetIdState.value,
-                            isAddFlow = intent?.action == AppWidgetManager.ACTION_APPWIDGET_CONFIGURE,
-                            onApply = { finishConfigure() }
-                        )
+            CompositionLocalProvider(LocalLayoutDirection provides Rtl) {
+                PulseTheme {
+                    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                        // با تغییر ویجت (افزودن دومی در حالت singleTop) کل صفحه از نو ساخته می‌شود
+                        key(widgetIdState.value) {
+                            SettingsScreen(
+                                widgetId = widgetIdState.value,
+                                isAddFlow = intent?.action == AppWidgetManager.ACTION_APPWIDGET_CONFIGURE,
+                                onApply = { finishConfigure() }
+                            )
+                        }
                     }
                 }
             }

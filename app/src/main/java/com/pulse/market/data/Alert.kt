@@ -16,7 +16,10 @@ enum class AlertCondition {
     PCT_UP,
 
     /** درصد افت روزانه از حد مشخص بیشتر شود */
-    PCT_DOWN
+    PCT_DOWN,
+
+    /** حجم نسبت به نمونه‌ی قبلی بیشتر از درصد تعیین‌شده جهش کند */
+    VOLUME_SPIKE
 }
 
 /**
@@ -77,6 +80,7 @@ data class AlertRule(
                 AlertCondition.BELOW -> "قیمت ≤ $t $unit"
                 AlertCondition.PCT_UP -> "رشد ≥ ${com.pulse.market.ui.Format.price(abs(threshold), persian)}٪"
                 AlertCondition.PCT_DOWN -> "افت ≥ ${com.pulse.market.ui.Format.price(abs(threshold), persian)}٪"
+                AlertCondition.VOLUME_SPIKE -> "جهش حجم ≥ ${com.pulse.market.ui.Format.price(abs(threshold), persian)}٪"
             }
         }
     }
@@ -93,6 +97,7 @@ object AlertLogic {
         when (rule.condition) {
             AlertCondition.ABOVE, AlertCondition.BELOW -> price
             AlertCondition.PCT_UP, AlertCondition.PCT_DOWN -> changePct
+            AlertCondition.VOLUME_SPIKE -> null // با دو نمونه‌ی متوالی حجم محاسبه می‌شود
         }?.takeIf { it.isFinite() }
 
     /** آیا یک مقدارِ هم‌نوعِ شرط، حد را رد کرده است؟ */
@@ -101,6 +106,14 @@ object AlertLogic {
         AlertCondition.BELOW -> metric <= rule.threshold
         AlertCondition.PCT_UP -> metric >= abs(rule.threshold)
         AlertCondition.PCT_DOWN -> metric <= -abs(rule.threshold)
+        AlertCondition.VOLUME_SPIKE -> metric >= abs(rule.threshold)
+    }
+
+    /** درصد افزایش حجم نسبت به نمونه‌ی قبلی؛ کاهش حجم جهش مثبت نیست. */
+    fun volumeSpikePercent(previousVolume: Double?, currentVolume: Double?): Double? {
+        val previous = previousVolume?.takeIf { it.isFinite() && it > 0.0 } ?: return null
+        val current = currentVolume?.takeIf { it.isFinite() && it >= 0.0 } ?: return null
+        return (((current - previous) / previous) * 100.0).takeIf { it.isFinite() }
     }
 
     /**

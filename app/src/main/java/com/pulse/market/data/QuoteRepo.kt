@@ -35,11 +35,14 @@ object QuoteRepo {
     private const val PREF = "pulse_cache"
     private const val KEY_QUOTES = "quotes"
     private const val KEY_HISTORY = "price_history"
+    private const val KEY_ANOMALY_CANDIDATES = "price_anomaly_candidates"
     private const val KEY_TS = "ts"
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val historySerializer =
         MapSerializer(String.serializer(), ListSerializer(Double.serializer()))
+    private val anomalySerializer =
+        MapSerializer(String.serializer(), PriceAnomalyCandidate.serializer())
 
     /** کش در حافظه — منبع اصلی خواندن در طول عمر پروسه */
     @Volatile
@@ -134,6 +137,65 @@ object QuoteRepo {
         }
     }
 
+    private data class AnomalyScreen(
+        val accepted: List<Quote>,
+        val rejected: Map<String, Quote>
+    )
+
+    /**
+     * پرش توضیح‌داده‌نشده‌ی ۴۰٪+ یک بار قرنطینه می‌شود. اگر نمونه‌ی دوم در کمتر از
+     * ۳۰ دقیقه همان محدوده را تأیید کرد، حرکت واقعی فرض و پذیرفته می‌شود.
+     */
+    private fun screenAnomalies(
+        context: Context,
+        fetched: List<Quote>,
+        cached: Map<String, Quote>
+    ): AnomalyScreen {
+        val store = prefs(context)
+        val candidates = store.getString(KEY_ANOMALY_CANDIDATES, null)?.let { raw ->
+            runCatching { json.decodeFromString(anomalySerializer, raw) }.getOrNull()
+        }?.toMutableMap() ?: mutableMapOf()
+        val accepted = mutableListOf<Quote>()
+        val rejected = mutableMapOf<String, Quote>()
+        val now = System.currentTimeMillis()
+        var changed = false
+
+        fetched.forEach { quote ->
+            val current = quote.price
+            if (current == null) {
+                accepted += quote
+                return@forEach
+            }
+            val k = key(quote.sourceId, quote.code)
+            val previous = cached[k]?.price
+            val decision = PriceAnomalyDetector.inspect(previous, current, quote.changePct)
+            if (!decision.suspicious) {
+                accepted += quote.copy(anomalyDetected = false, anomalyPct = null)
+                if (candidates.remove(k) != null) changed = true
+            } else if (PriceAnomalyDetector.confirms(candidates[k], current, now)) {
+                // نمونه‌ی دوم هم‌قیمت است: جهش واقعی یا تغییر پایدار منبع تأیید شد.
+                accepted += quote.copy(anomalyDetected = false, anomalyPct = null)
+                candidates.remove(k)
+                changed = true
+            } else {
+                candidates[k] = PriceAnomalyCandidate(current, now)
+                rejected[k] = quote.copy(
+                    anomalyDetected = true,
+                    anomalyPct = decision.deviationPct,
+                    error = "پرش غیرعادی ${kotlin.math.abs(decision.deviationPct).toInt()}٪؛ منتظر تأیید بعدی"
+                )
+                changed = true
+            }
+        }
+
+        if (changed) {
+            val safe = candidates.entries.sortedByDescending { it.value.firstSeenAt }
+                .take(100).associate { it.toPair() }
+            store.edit().putString(KEY_ANOMALY_CANDIDATES, json.encodeToString(anomalySerializer, safe)).apply()
+        }
+        return AnomalyScreen(accepted, rejected)
+    }
+
     // ───────────── شبکه ─────────────
 
     /**
@@ -190,28 +252,55 @@ object QuoteRepo {
         val fetched = coroutineScope {
             bySource.map { (sid, syms) ->
                 async {
-                    val src = ConfigStore.resolveSource(context, sid) ?: return@async emptyList()
-                    Fetcher.fetchAll(src, syms)
+                    val src = ConfigStore.resolveSource(context, sid)
+                    if (src == null) {
+                        SourceHealthStore.recordFailure(context, sid, "منبع پیدا نشد")
+                        return@async emptyList()
+                    }
+                    val started = System.currentTimeMillis()
+                    val quotes = Fetcher.fetchAll(src, syms)
+                    SourceHealthStore.record(
+                        context = context,
+                        sourceId = sid,
+                        quotes = quotes,
+                        responseMs = System.currentTimeMillis() - started,
+                        endpoint = Fetcher.lastEndpoint(sid)
+                    )
+                    quotes
                 }
             }.awaitAll().flatten()
         }
 
-        // کش دائمی فقط با داده‌ی سالم تازه می‌شود (+ ثبت نقطه‌ی تاریخچه برای نمودار)
-        val good = fetched.filter { it.price != null }
+        val cached = loadCachedMap(context)
+        val screened = screenAnomalies(context, fetched, cached)
+        val anomalyBySource = screened.rejected.values.groupingBy { it.sourceId }.eachCount()
+        anomalyBySource.forEach { (sourceId, count) ->
+            SourceHealthStore.recordAnomalies(context, sourceId, count)
+        }
+
+        // کش دائمی فقط با داده‌ی سالم و تأییدشده تازه می‌شود (+ تاریخچه‌ی نمودار).
+        val good = screened.accepted.filter { it.price != null }
         if (good.isNotEmpty()) {
             persist(context, good, appendHistory(context, good))
         }
-        val cached = loadCachedMap(context)
-        val fresh = fetched.associateBy { key(it.sourceId, it.code) }
+        val fresh = screened.accepted.associateBy { key(it.sourceId, it.code) }
 
         // نقشه‌ی نمایش: تازه اگر آمده؛ وگرنه آخرین مقدار سالم + علامت stale (چراغ قرمز).
         // ts همان «آخرین داده‌ی سالم» می‌ماند (نه زمانِ تلاشِ ناموفق) تا ساعتِ هر ویجت
         // و چراغ‌هایش وضعیت واقعی همان ویجت را نشان دهند.
         val out = mutableMapOf<String, Quote>()
-        (cached.keys + fresh.keys).forEach { k ->
+        (cached.keys + fresh.keys + screened.rejected.keys).forEach { k ->
             val f = fresh[k]
             val c = cached[k]
+            val anomaly = screened.rejected[k]
             val quote = when {
+                anomaly != null && c?.price != null -> c.copy(
+                    stale = true,
+                    anomalyDetected = true,
+                    anomalyPct = anomaly.anomalyPct,
+                    error = anomaly.error
+                )
+                anomaly != null -> anomaly.copy(price = null, stale = true)
                 f != null && f.price != null -> f
                 c != null && c.price != null -> c.copy(stale = true)
                 f != null -> f

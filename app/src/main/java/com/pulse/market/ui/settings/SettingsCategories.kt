@@ -39,6 +39,10 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -49,13 +53,17 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.pulse.market.data.AlertCondition
+import com.pulse.market.data.AlertEvent
 import com.pulse.market.data.AlertRule
 import com.pulse.market.data.MarketKind
 import com.pulse.market.data.MarketStatus
 import com.pulse.market.data.MAX_SYMBOLS
 import com.pulse.market.data.SourceDef
+import com.pulse.market.data.SourceHealth
 import com.pulse.market.data.SymbolDef
 import com.pulse.market.data.SymbolSort
+import com.pulse.market.data.Watchlist
 import com.pulse.market.data.WidgetConfig
 import com.pulse.market.data.WidgetTheme
 import com.pulse.market.data.marketKind
@@ -821,6 +829,169 @@ fun UpdateCategory(
     }
 }
 
+// ═══════════════════ سلامت منابع و fallback ═══════════════════
+
+@Composable
+fun SourceHealthCategory(
+    sources: List<SourceDef>,
+    health: List<SourceHealth>,
+    busy: Boolean,
+    onTestAll: () -> Unit,
+    onClear: () -> Unit
+) {
+    val byId = health.associateBy { it.sourceId }
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        SectionHeader(
+            "سلامت منابع",
+            "آدرس اصلی و پشتیبان‌ها خودکار آزمایش می‌شوند؛ endpoint خراب ۵ دقیقه به انتهای صف می‌رود"
+        )
+        if (sources.isEmpty()) {
+            InfoCard("منبع فعالی برای آزمایش وجود ندارد.")
+        } else {
+            RowsCard {
+                sources.forEachIndexed { index, source ->
+                    if (index > 0) RowDivider()
+                    val item = byId[source.id]
+                    InnerRow {
+                        Text(
+                            source.title.substringBefore(" —"),
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            when {
+                                item == null || item.lastCheckedAt <= 0L -> "هنوز آزمایش نشده"
+                                item.isHealthy && item.usingFallback -> "سالم — در حال استفاده از آدرس پشتیبان"
+                                item.isHealthy -> "سالم — آدرس اصلی پاسخ می‌دهد"
+                                else -> "اختلال — ${item.consecutiveFailures} شکست پیاپی"
+                            }.let(Format::toPersianDigits),
+                            fontSize = 11.5.sp,
+                            color = when {
+                                item?.isHealthy == true -> Color(0xFF16A34A)
+                                item == null -> MaterialTheme.colorScheme.onSurfaceVariant
+                                else -> MaterialTheme.colorScheme.error
+                            }
+                        )
+                        if (item != null && item.lastCheckedAt > 0L) {
+                            val details = buildList {
+                                add("آخرین بررسی ${Format.dateTime(item.lastCheckedAt)}")
+                                if (item.endpointHost.isNotBlank()) add("میزبان ${item.endpointHost}")
+                                if (item.responseMs > 0L) add("${Format.toPersianDigits(item.responseMs.toString())} میلی‌ثانیه")
+                                if (item.totalCount > 0) add("${Format.toPersianDigits(item.successCount.toString())} از ${Format.toPersianDigits(item.totalCount.toString())} نماد")
+                                if (item.anomalyCount > 0) add("${Format.toPersianDigits(item.anomalyCount.toString())} قیمت غیرعادی")
+                            }.joinToString(" • ")
+                            Text(details, fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (item.lastError.isNotBlank()) {
+                                Text(
+                                    "آخرین خطا: ${item.lastError}",
+                                    fontSize = 10.5.sp,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Button(
+                onClick = onTestAll,
+                enabled = !busy && sources.isNotEmpty(),
+                modifier = Modifier.weight(1f)
+            ) { Text(if (busy) "در حال آزمایش…" else "آزمایش همه", fontSize = 12.5.sp) }
+            OutlinedButton(onClick = onClear, enabled = health.isNotEmpty(), modifier = Modifier.weight(1f)) {
+                Text("پاک‌کردن وضعیت", fontSize = 12.5.sp)
+            }
+        }
+        Hint("برای امنیت، فقط نام میزبان ذخیره می‌شود؛ URL کامل، query، توکن و هدرها در گزارش سلامت نمی‌آیند.")
+    }
+}
+
+// ═══════════════════ واچ‌لیست‌های نام‌دار ═══════════════════
+
+@Composable
+fun WatchlistsCategory(
+    cfg: WidgetConfig,
+    watchlists: List<Watchlist>,
+    onSaveCurrent: (String) -> Unit,
+    onApply: (Watchlist) -> Unit,
+    onDelete: (Watchlist) -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        SectionHeader(
+            "واچ‌لیست‌های نام‌دار",
+            "ترکیب نمادهای این ویجت را ذخیره کن و بعداً روی هر ویجت دیگری اعمال کن"
+        )
+        RowsCard {
+            InnerRow {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it.take(80) },
+                    label = { Text("نام واچ‌لیست؛ مثلاً سبد طلا") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp)
+                )
+                Button(
+                    onClick = {
+                        onSaveCurrent(name.trim())
+                        name = ""
+                    },
+                    enabled = name.isNotBlank() && cfg.symbols.isNotEmpty(),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("ذخیره‌ی نمادهای فعلی با این نام", fontSize = 12.5.sp)
+                }
+                if (cfg.symbols.isEmpty()) {
+                    Text(
+                        "برای ساخت واچ‌لیست، اول دست‌کم یک نماد به این ویجت اضافه کن.",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        if (watchlists.isEmpty()) {
+            InfoCard("هنوز واچ‌لیست نام‌داری ذخیره نشده است.")
+        } else {
+            RowsCard {
+                watchlists.forEachIndexed { index, watchlist ->
+                    if (index > 0) RowDivider()
+                    InnerRow {
+                        Text(
+                            watchlist.name,
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            watchlist.symbols.joinToString("، ") { it.label }
+                                .ifBlank { "بدون نماد" },
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = { onApply(watchlist) },
+                                enabled = watchlist.symbols.isNotEmpty(),
+                                modifier = Modifier.weight(1f)
+                            ) { Text("اعمال روی ویجت", fontSize = 12.sp) }
+                            OutlinedButton(
+                                onClick = { onDelete(watchlist) },
+                                modifier = Modifier.weight(1f)
+                            ) { Text("حذف", fontSize = 12.sp) }
+                        }
+                    }
+                }
+            }
+        }
+        Hint("اگر نام تکراری وارد کنی، همان واچ‌لیست با نمادهای فعلی به‌روزرسانی می‌شود.")
+    }
+}
+
 // ═══════════════════ ۶) هشدارها ═══════════════════
 
 @Composable
@@ -834,7 +1005,9 @@ fun AlertsCategory(
     onEditAlert: (AlertRule) -> Unit,
     onDeleteAlert: (AlertRule) -> Unit,
     onAddAlert: () -> Unit,
-    onTestNotification: () -> Unit
+    onTestNotification: () -> Unit,
+    history: List<AlertEvent> = emptyList(),
+    onClearHistory: () -> Unit = {}
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
 
@@ -883,7 +1056,7 @@ fun AlertsCategory(
             }
         }
 
-        SectionHeader("هشدار قیمت", "با هر بار تازه شدن قیمت‌ها بررسی می‌شود — حالت زنده را روشن نگه دار")
+        SectionHeader("هشدار قیمت و حجم", "با هر بار تازه شدن داده بررسی می‌شود — حالت زنده را روشن نگه دار")
 
         if (cfg.alerts.isEmpty()) {
             InfoCard("هنوز هشداری ثبت نشده. مثلاً: «وقتی بیت‌کوین از ۱۰۰٬۰۰۰ گذشت به من خبر بده».")
@@ -921,7 +1094,61 @@ fun AlertsCategory(
                 Text("تست نوتیف", fontSize = 12.5.sp)
             }
         }
+
+        SectionHeader(
+            "تاریخچه‌ی هشدارها",
+            "فقط اعلان‌هایی که واقعاً تحویل سیستم شده‌اند؛ حداکثر ۲۰۰ رویداد روی گوشی"
+        )
+        if (history.isEmpty()) {
+            InfoCard("هنوز هشداری فعال نشده است.")
+        } else {
+            RowsCard {
+                history.take(30).forEachIndexed { index, event ->
+                    if (index > 0) RowDivider()
+                    InnerRow {
+                        Text(
+                            alertEventTitle(event),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            alertEventDetail(event, cfg.persianDigits),
+                            fontSize = 11.5.sp,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                        Text(
+                            Format.dateTime(event.triggeredAt, persian = true),
+                            fontSize = 10.5.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+            OutlinedButton(onClick = onClearHistory, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.Delete, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text("پاک‌کردن تاریخچه", fontSize = 12.5.sp)
+            }
+        }
     }
+}
+
+private fun alertEventTitle(event: AlertEvent): String = when (event.condition) {
+    AlertCondition.ABOVE -> "قیمت ${event.symbolLabel} از حد گذشت"
+    AlertCondition.BELOW -> "قیمت ${event.symbolLabel} زیر حد آمد"
+    AlertCondition.PCT_UP -> "رشد ${event.symbolLabel}"
+    AlertCondition.PCT_DOWN -> "افت ${event.symbolLabel}"
+    AlertCondition.VOLUME_SPIKE -> "جهش حجم ${event.symbolLabel}"
+}
+
+private fun alertEventDetail(event: AlertEvent, persian: Boolean): String = when (event.condition) {
+    AlertCondition.ABOVE, AlertCondition.BELOW ->
+        "قیمت ${Format.price(event.price, persian)} ${event.unit} • حد ${Format.price(event.threshold, persian)}"
+    AlertCondition.PCT_UP, AlertCondition.PCT_DOWN ->
+        "تغییر ${Format.pct(event.changePct, persian)} • حد ${Format.price(kotlin.math.abs(event.threshold), persian)}٪"
+    AlertCondition.VOLUME_SPIKE ->
+        "جهش ${Format.price(event.observedValue, persian)}٪ • حجم ${Format.volume(event.volume, persian)}"
 }
 
 /** کارت یک قانون هشدار — شرط با واحدِ نماد (ریال/تومان/$) نشان داده می‌شود */
