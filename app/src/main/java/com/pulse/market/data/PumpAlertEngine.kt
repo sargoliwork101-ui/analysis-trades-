@@ -116,7 +116,7 @@ object PumpAlertEngine {
         val ch1 = Format.price(coin.change1h, cfg.persianDigits)
         val count = if (cfg.persianDigits) Format.toPersianDigits(matchCount.toString()) else matchCount.toString()
         val title = "$rtl⚠️ هشدار پامپ: ${coin.displayName}"
-        val shortText = "$rtlرشد ۲۴ساعته $ch24٪ • پیشنهاد: ${advice.recommendation.label}"
+        val shortText = "${rtl}رشد ۲۴ساعته $ch24٪ • پیشنهاد: ${advice.recommendation.label}"
         val longText = "$shortText\n${rtl}رشد ۱ساعته: $ch1٪ • $count کوین بالای آستانه\n" +
                 "${rtl}دلیل: ${advice.reason}\n${rtl}این هشدار سیگنال خرید نیست."
 
