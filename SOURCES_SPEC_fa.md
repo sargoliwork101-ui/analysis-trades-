@@ -363,8 +363,9 @@ error = (num == null) ? "«raw» عدد نبود" : (سلکتور پیدا نش�
 
 | کار | آدرس | نکته |
 |---|---|---|
+| تابلوی bulk بازار | `GET https://cdn.tsetmc.com/api/ClosingPrice/GetMarketWatch?...` | مسیر اصلی نسخه‌ی ۱٫۲۰؛ همه‌ی نمادهای ویجت با یک درخواست |
 | جستجوی نماد | `GET https://cdn.tsetmc.com/api/Instrument/GetInstrumentSearch/{query-urlencoded}` | پاسخ: `instrumentSearch[]` |
-| قیمت پایانی | `GET https://cdn.tsetmc.com/api/ClosingPrice/GetClosingPriceInfo/{insCode}` | پاسخ: `closingPriceInfo{}` |
+| قیمت پایانی تکی | `GET https://cdn.tsetmc.com/api/ClosingPrice/GetClosingPriceInfo/{insCode}` | فقط برای نمادی که در bulk پیدا نشد؛ پاسخ: `closingPriceInfo{}` |
 | مشخصات نماد | `GET https://cdn.tsetmc.com/api/Instrument/GetInstrumentInfo/{insCode}` | پاسخ: `instrumentInfo{}` |
 
 فیلدهای مهم:
@@ -389,16 +390,18 @@ changePct = (pClosing − priceYesterday) / priceYesterday × 100
 volume    = qTotTran5J
 ```
 
-### ۸.۳) لایه‌های fetchQuote(code) — به‌ترتیب، اولین موفق برمی‌گردد
+### ۸.۳) لایه‌های دریافت — به‌ترتیب
 
-1. **insCode مستقیم:** اگر `code` عدد ۸ تا ۲۰ رقمی بود → `GetClosingPriceInfo` (نام از `GetInstrumentInfo` یا کاتالوگ داخلی).
-2. **کاتالوگ داخلی:** جستجو در فهرست آماده‌ی نمادهای پرمعامله (آفلاین، سریع — برای resiliency) → قیمت با `GetClosingPriceInfo`.
-3. **جستجوی آنلاین:** `GetInstrumentSearch?{code}` → اولین نتیجه‌ی با نمادِ منطبق (یا نتیجه‌ی اول) → قیمت با `GetClosingPriceInfo`.
-4. هیچ‌کدام نشد → حداقل نام نماد برگردد (نه خطا).
+1. **تابلوی bulk:** همه‌ی کدهای ویجت با یک `GetMarketWatch` خوانده و با نماد نرمال‌شده/insCode تطبیق داده می‌شوند؛ این کار rate-limit و تعداد اتصال را کم می‌کند.
+2. **insCode مستقیم:** اگر نمادی در bulk نبود و `code` عدد ۸ تا ۲۰ رقمی بود → `GetClosingPriceInfo` (نام از `GetInstrumentInfo` یا کاتالوگ داخلی).
+3. **کاتالوگ داخلی:** جستجو در فهرست آماده‌ی نمادهای پرمعامله → قیمت تکی.
+4. **جستجوی آنلاین:** `GetInstrumentSearch/{code}` → نتیجه‌ی منطبق → قیمت تکی.
+5. در خطای TLS، فقط برای داده‌ی عمومی TSETMC، HTTP رسمی همان `cdn.tsetmc.com` با timeout ۱۲ ثانیه امتحان می‌شود؛ هیچ credential روی این مسیر نیست.
+6. اگر TSETMC به‌علت VPN/IP خارجی یا اختلال اپراتور پاسخ نداد، آخرین قیمت سالم حفظ و علت قابل‌فهم نمایش داده می‌شود.
 
 ### ۸.۴) پارس لینک/ورودی کاربر (TseUrlParser)
 
-- **insCode:** الگوی `(?:i=|/instInfo/|/Instrument/|^)(\d{15,20})` — مثلاً `loader.aspx?ParTree=151311&i=46348633615832441`.
+- **insCode:** الگوی `(?:i=|/instInfo/|/Instrument/|^)(\d{15,20})` — مثلاً `loader.aspx?ParTree=151311&i=46348559193224090`.
 - **ISIN:** `(?:/instInfo/|^)(IRO[0-9A-Z]{9})` — مثلاً `IRO1FOLD0001`.
 - **لینک دیگر:** آخرین segment مسیر (قبل از `?`).
 - متن معمولی → جستجوی متنی.

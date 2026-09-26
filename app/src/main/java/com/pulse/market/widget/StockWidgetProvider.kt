@@ -34,7 +34,7 @@ open class StockWidgetProvider : AppWidgetProvider() {
         val pending = goAsync()
         scope.launch {
             try {
-                refreshAll(context)
+                safely { refreshAll(context) }
             } finally {
                 pending.finish()
             }
@@ -52,7 +52,7 @@ open class StockWidgetProvider : AppWidgetProvider() {
         val pending = goAsync()
         scope.launch {
             try {
-                renderFromCache(context, appWidgetId)
+                safely { renderFromCache(context, appWidgetId) }
             } finally {
                 pending.finish()
             }
@@ -73,7 +73,7 @@ open class StockWidgetProvider : AppWidgetProvider() {
                 val pending = goAsync()
                 scope.launch {
                     try {
-                        refreshAll(context, force = true)
+                        safely { refreshAll(context, force = true) }
                     } finally {
                         pending.finish()
                     }
@@ -84,15 +84,18 @@ open class StockWidgetProvider : AppWidgetProvider() {
                 val pending = goAsync()
                 scope.launch {
                     try {
-                        // هر ویجت حالت زنده‌ی خودش را کنترل می‌کند؛ PendingIntent کهنه‌ی
-                        // ویجت حذف‌شده نباید دوباره برای یک id نامعتبر تنظیمات بسازد.
-                        val wId = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, 0)
-                        if (wId !in WidgetRenderer.allWidgetIds(context)) return@launch
-                        val cfg = ConfigStore.current(context, wId)
-                        val newState = !cfg.liveService
-                        ConfigStore.save(context, cfg.copy(liveService = newState), wId)
-                        syncLiveService(context)
-                        refreshAll(context, force = true)
+                        safely {
+                            // هر ویجت حالت زنده‌ی خودش را کنترل می‌کند؛ PendingIntent کهنه‌ی
+                            // ویجت حذف‌شده نباید دوباره برای یک id نامعتبر تنظیمات بسازد.
+                            val wId = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, 0)
+                            if (wId in WidgetRenderer.allWidgetIds(context)) {
+                                val cfg = ConfigStore.current(context, wId)
+                                val newState = !cfg.liveService
+                                ConfigStore.save(context, cfg.copy(liveService = newState), wId)
+                                syncLiveService(context)
+                                refreshAll(context, force = true)
+                            }
+                        }
                     } finally {
                         pending.finish()
                     }
@@ -107,11 +110,13 @@ open class StockWidgetProvider : AppWidgetProvider() {
         val pending = goAsync()
         scope.launch {
             try {
-                appWidgetIds.forEach { ConfigStore.deleteWidget(context, it) }
-                // هم سرویس زنده و هم Worker دوره‌ای مطابق ویجت‌های باقی‌مانده همگام شوند —
-                // حذفِ آخرین ویجت باید هر دو را خاموش کند (وگرنه Worker هر ۱۵ دقیقه
-                // تا همیشه بی‌دلیل بیدار می‌شد و باتری می‌سوزاند)
-                syncLiveService(context, startForeground = false)
+                safely {
+                    appWidgetIds.forEach { ConfigStore.deleteWidget(context, it) }
+                    // هم سرویس زنده و هم Worker دوره‌ای مطابق ویجت‌های باقی‌مانده همگام شوند —
+                    // حذفِ آخرین ویجت باید هر دو را خاموش کند (وگرنه Worker هر ۱۵ دقیقه
+                    // تا همیشه بی‌دلیل بیدار می‌شد و باتری می‌سوزاند)
+                    syncLiveService(context, startForeground = false)
+                }
             } finally {
                 pending.finish()
             }
@@ -127,6 +132,17 @@ open class StockWidgetProvider : AppWidgetProvider() {
 
         private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         private val refreshMutex = Mutex()
+
+        /** خطای یک callback ویجت روی رام خاص نباید پروسه‌ی برنامه را crash کند. */
+        private suspend fun safely(operation: suspend () -> Unit) {
+            try {
+                operation()
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                Log.e(TAG, "عملیات ویجت کامل نشد (${failure.javaClass.simpleName})")
+            }
+        }
 
         /**
          * به‌روزرسانی همه‌ی ویجت‌ها — هر کدام با پیکربندی و نمادهای خودش؛

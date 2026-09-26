@@ -68,11 +68,19 @@ object Http {
      * اجرای یک Request دلخواه با سقف حجم.
      * برای کدهایی که Request خودشان را می‌سازند (مثل TSETMC).
      */
-    fun execute(request: Request, maxBytes: Long = MAX_JSON_BYTES): String {
+    fun execute(
+        request: Request,
+        maxBytes: Long = MAX_JSON_BYTES,
+        callTimeoutSeconds: Int? = null
+    ): String {
         rejectSensitiveCleartext(request)
         var current = request
         repeat(MAX_REDIRECTS + 1) { redirectCount ->
-            client.newCall(current).execute().use { response ->
+            val call = client.newCall(current)
+            callTimeoutSeconds?.let {
+                call.timeout().timeout(it.coerceIn(3, 60).toLong(), TimeUnit.SECONDS)
+            }
+            call.execute().use { response ->
                 if (!response.isRedirect) return readCapped(response, maxBytes)
                 if (redirectCount >= MAX_REDIRECTS) error("تعداد تغییر مسیر پاسخ بیش از حد مجاز است")
                 // POST هوش مصنوعی یا هر بدنه‌ی حساس نباید خودکار به مقصد دیگری فرستاده شود.

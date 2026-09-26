@@ -252,7 +252,10 @@ fun SymbolsCategory(
         )
         RowsCard {
             InnerRow {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     listOf(
                         SymbolSort.MANUAL to "دستی (فلش‌ها)",
                         SymbolSort.BIGGEST_CHANGE to "بیشترین تغییر",
@@ -275,7 +278,10 @@ fun SymbolsCategory(
         )
         RowsCard {
             InnerRow {
-                Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     (1..6).forEach { n ->
                         FilterChip(
                             selected = rows == n,
@@ -300,7 +306,7 @@ fun SymbolsCategory(
             Spacer(Modifier.width(6.dp))
             Text("جستجو یا افزودن نماد", fontSize = 12.5.sp)
         }
-        Hint("بورس: نام/لینک TSETMC • کریپتو: جستجوی آنلاین • بقیه: فهرست منبع + کد دلخواه")
+        Hint("بورس: نام/لینک TSETMC (بدون VPN خارجی) • کریپتو: جستجوی آنلاین • بقیه: فهرست منبع + کد دلخواه")
 
         // ── نمادهای دلخواه بورس من (قابل حذف) ──
         if (tseCustomSymbols.isNotEmpty()) {
@@ -345,7 +351,10 @@ fun SymbolsCategory(
             if (available.isEmpty()) {
                 Hint("نماد آماده ندارد — نمادها را در «منبع دلخواه» وارد کن.")
             } else {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     available.forEach { sym ->
                         val selected = selectedSymbols.any {
                             it.code == sym.code && (it.sourceId.isEmpty() || it.sourceId == src.id)
@@ -517,7 +526,10 @@ fun LookCategory(
             Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                 Text("تم ویجت", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface)
                 Spacer(Modifier.height(10.dp))
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     WidgetTheme.entries.forEach { t ->
                         ThemeSwatch(
                             theme = t,
@@ -555,7 +567,10 @@ fun LookCategory(
 
             // تعداد ردیف‌ها
             SettingRow("تعداد ردیف‌ها", "در ویجت کوچک خودکار کمتر نمایش داده می‌شود") {
-                Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     (1..6).forEach { n ->
                         FilterChip(
                             selected = cfg.rows == n,
@@ -845,6 +860,12 @@ fun SourceHealthCategory(
             "سلامت منابع",
             "آدرس اصلی و پشتیبان‌ها خودکار آزمایش می‌شوند؛ endpoint خراب ۵ دقیقه به انتهای صف می‌رود"
         )
+        if (sources.any { it.marketKind == MarketKind.TSE }) {
+            InfoCard(
+                "اگر بورس تهران داده نمی‌دهد: VPN یا Private DNS خارجی را موقتاً خاموش کن و «آزمایش همه» را بزن. " +
+                        "TSETMC بعضی IPهای خارج ایران و بعضی اپراتورها را قطع می‌کند. برنامه ابتدا HTTPS، سپس مسیر عمومی HTTP رسمی را آزمایش می‌کند و آخرین قیمت سالم را پاک نمی‌کند."
+            )
+        }
         if (sources.isEmpty()) {
             InfoCard("منبع فعالی برای آزمایش وجود ندارد.")
         } else {
@@ -921,15 +942,20 @@ fun WatchlistsCategory(
     var name by remember { mutableStateOf("") }
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         SectionHeader(
-            "واچ‌لیست‌های نام‌دار",
-            "ترکیب نمادهای این ویجت را ذخیره کن و بعداً روی هر ویجت دیگری اعمال کن"
+            "فهرست‌های آماده (واچ‌لیست)",
+            "ترکیب نمادهای این ویجت را برای استفاده‌ی دوباره ذخیره کن"
+        )
+        InfoCard(
+            "واچ‌لیست خرید، فروش یا هشدار انجام نمی‌دهد؛ فقط یک نسخه از نام منابع و نمادهای فعلی نگه می‌دارد. " +
+                    "مثلاً ترکیب «طلا و دلار» را یک‌بار ذخیره می‌کنی و بعد با یک دکمه روی ویجت دیگری می‌گذاری. " +
+                    "اعمال یک واچ‌لیست، نمادهای فعلی همان ویجت را جایگزین می‌کند. اگر به این میان‌بر نیاز نداری، می‌توانی این بخش را نادیده بگیری."
         )
         RowsCard {
             InnerRow {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it.take(80) },
-                    label = { Text("نام واچ‌لیست؛ مثلاً سبد طلا") },
+                    label = { Text("نام فهرست؛ مثلاً طلا و دلار") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     shape = RoundedCornerShape(12.dp)
@@ -942,7 +968,7 @@ fun WatchlistsCategory(
                     enabled = name.isNotBlank() && cfg.symbols.isNotEmpty(),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("ذخیره‌ی نمادهای فعلی با این نام", fontSize = 12.5.sp)
+                    Text("ذخیره‌ی ترکیب فعلی", fontSize = 12.5.sp)
                 }
                 if (cfg.symbols.isEmpty()) {
                     Text(
@@ -955,7 +981,7 @@ fun WatchlistsCategory(
         }
 
         if (watchlists.isEmpty()) {
-            InfoCard("هنوز واچ‌لیست نام‌داری ذخیره نشده است.")
+            InfoCard("هنوز ترکیب آماده‌ای ذخیره نشده است. ابتدا نمادهای دلخواه را در بخش «نمادها» انتخاب کن.")
         } else {
             RowsCard {
                 watchlists.forEachIndexed { index, watchlist ->
@@ -973,22 +999,22 @@ fun WatchlistsCategory(
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Button(
                                 onClick = { onApply(watchlist) },
                                 enabled = watchlist.symbols.isNotEmpty(),
-                                modifier = Modifier.weight(1f)
-                            ) { Text("اعمال روی ویجت", fontSize = 12.sp) }
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text("جایگزینی نمادهای این ویجت", fontSize = 11.5.sp) }
                             OutlinedButton(
                                 onClick = { onDelete(watchlist) },
-                                modifier = Modifier.weight(1f)
-                            ) { Text("حذف", fontSize = 12.sp) }
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text("حذف این فهرست آماده", fontSize = 11.5.sp) }
                         }
                     }
                 }
             }
         }
-        Hint("اگر نام تکراری وارد کنی، همان واچ‌لیست با نمادهای فعلی به‌روزرسانی می‌شود.")
+        Hint("اگر نام تکراری وارد کنی، همان فهرست با ترکیب فعلی به‌روزرسانی می‌شود.")
     }
 }
 

@@ -29,7 +29,7 @@ class PumpAiReviewerTest {
             """
             {
               "verdict":"محتاط‌تر",
-              "recommendation":"از تعقیب قیمت دوری کن",
+              "recommendation":"فعلاً وارد نشو؛ قیمت را تعقیب نکن",
               "reason":"حجم غیرعادی است و خبر هنوز تأیید گسترده ندارد.",
               "confidence":84,
               "news":[
@@ -39,7 +39,7 @@ class PumpAiReviewerTest {
             }
             """.trimIndent()
         )
-        assertEquals("از تعقیب قیمت دوری کن", review.recommendation)
+        assertEquals("فعلاً وارد نشو؛ قیمت را تعقیب نکن", review.recommendation)
         assertEquals(84, review.confidence)
         assertEquals(1, review.news.size)
         assertEquals("https://news.example/item", review.news.single().url)
@@ -49,16 +49,16 @@ class PumpAiReviewerTest {
     @Test
     fun directBuyAdviceIsRejected() {
         val review = PumpAiReviewer.parseReview(
-            """{"verdict":"همسو","recommendation":"فقط زیر نظر بگیر","reason":"حتماً بخر؛ سود تضمینی است","confidence":99,"news":[]}"""
+            """{"verdict":"همسو","recommendation":"فعلاً فقط زیر نظر بگیر","reason":"حتماً بخر؛ سود تضمینی است","confidence":99,"news":[]}"""
         )
-        assertEquals("برای ورود عجله نکن", review.recommendation)
+        assertEquals("صبر کن؛ ورود عجولانه نکن", review.recommendation)
         assertTrue(review.reason.contains("برای ایمنی رد شد"))
     }
 
     @Test
     fun malformedResponseFallsBackToWait() {
         val review = PumpAiReviewer.parseReview("پاسخ آزاد و بدون ساختار")
-        assertEquals("برای ورود عجله نکن", review.recommendation)
+        assertEquals("صبر کن؛ ورود عجولانه نکن", review.recommendation)
         assertEquals("نامطمئن", review.verdict)
         assertNull(review.confidence)
     }

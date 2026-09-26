@@ -11,10 +11,10 @@ android {
 
     defaultConfig {
         applicationId = "com.pulse.market"
-        minSdk = 26          // اندروید ۸ به بالا
+        minSdk = 23          // اندروید ۶ به بالا
         targetSdk = 36
-        versionCode = 20
-        versionName = "1.19"
+        versionCode = 21
+        versionName = "1.20"
     }
 
     /**

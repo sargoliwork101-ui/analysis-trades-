@@ -51,7 +51,7 @@ object Fetcher {
         if (symbols.isEmpty()) return emptyList()
         return withContext(Dispatchers.IO) {
             when {
-                source.kind == FetchKind.TSE_TSETMC -> parallel(symbols) { s -> fetchTse(source, s) }
+                source.kind == FetchKind.TSE_TSETMC -> fetchTseBatch(source, symbols)
 
                 source.batchTemplate != null -> fetchBatch(source, symbols)
 
@@ -103,25 +103,62 @@ object Fetcher {
         }
     }
 
+    /**
+     * بورس تهران با یک درخواست bulk خوانده می‌شود؛ این کار احتمال rate-limit روی
+     * اپراتورها و رام‌های کند را بسیار کمتر از درخواست جداگانه‌ی هر نماد می‌کند.
+     */
+    private suspend fun fetchTseBatch(source: SourceDef, symbols: List<SymbolDef>): List<Quote> {
+        val market = TseService.fetchMarketWatch(symbols.map { it.code })
+        if (market == null) {
+            return symbols.map { sym ->
+                Quote(
+                    code = sym.code,
+                    sourceId = source.id,
+                    label = sym.label,
+                    unit = unitOf(source, sym),
+                    error = "TSETMC در این شبکه پاسخ نداد؛ VPN خارجی را خاموش کن و دوباره بزن",
+                    ts = System.currentTimeMillis()
+                )
+            }
+        }
+        val out = ArrayList<Quote>(symbols.size)
+        for (sym in symbols) {
+            val bulk = market[sym.code]
+            out += if (bulk != null && (bulk.closePrice != null || bulk.lastPrice != null)) {
+                quoteFromTse(source, sym, bulk)
+            } else {
+                // نمادهای متوقف/تازه ممکن است در تابلوی bulk نباشند؛ فقط همان یکی مستقیم بررسی شود.
+                fetchTse(source, sym)
+            }
+        }
+        return out
+    }
+
     private suspend fun fetchTse(source: SourceDef, sym: SymbolDef): Quote {
         return try {
-            val inst = TseService.fetchQuote(sym.code)
-            val price = inst.closePrice ?: inst.lastPrice
-            Quote(
-                code = sym.code, sourceId = source.id,
-                label = sym.label.ifBlank { inst.name },
-                price = price,
-                changePct = inst.changePct,
-                volume = inst.volume,
-                unit = unitOf(source, sym),
-                error = if (price == null) "قیمت پیدا نشد" else null,
-                ts = System.currentTimeMillis()
-            )
+            quoteFromTse(source, sym, TseService.fetchQuote(sym.code))
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Exception) {
             errorQuote(source, sym, failure)
         }
+    }
+
+    private fun quoteFromTse(source: SourceDef, sym: SymbolDef, inst: TseInstrument): Quote {
+        val price = inst.closePrice ?: inst.lastPrice
+        return Quote(
+            code = sym.code,
+            sourceId = source.id,
+            label = sym.label.ifBlank { inst.name },
+            price = price,
+            changePct = inst.changePct,
+            volume = inst.volume,
+            unit = unitOf(source, sym),
+            error = if (price == null)
+                "قیمت بورس دریافت نشد؛ VPN خارجی/اختلال اپراتور یا توقف نماد را بررسی کن"
+            else null,
+            ts = System.currentTimeMillis()
+        )
     }
 
     private fun fetchHtml(source: SourceDef, sym: SymbolDef): Quote {

@@ -49,7 +49,7 @@ object SourceCatalog {
         SourceDef(
             id = "tse_tsetmc",
             title = "بورس تهران — TSETMC",
-            subtitle = "قیمت پایانی + درصد تغییر روز (ریال)",
+            subtitle = "قیمت پایانی + درصد تغییر روز (ریال) • TSETMC روی VPN/IP خارجی معمولاً پاسخ نمی‌دهد",
             kind = TSE_TSETMC,
             urlTemplate = "https://cdn.tsetmc.com/api/ClosingPrice/GetClosingPriceInfo/{symbol}",
             unit = "ریال",
@@ -71,6 +71,7 @@ object SourceCatalog {
             subtitle = "شاخص کل بازار از TSETMC",
             kind = JSON_REST,
             urlTemplate = "https://cdn.tsetmc.com/api/Index/GetIndexB1LastAll/0",
+            urlFallbacks = listOf("http://cdn.tsetmc.com/api/Index/GetIndexB1LastAll/0"),
             pricePath = "[0].lastValue | indexB1LastAll[0].lastValue | lastValue",
             changePath = "[0].indexChange | indexB1LastAll[0].indexChange | indexChange",
             changeMode = ChangeMode.ABSOLUTE,

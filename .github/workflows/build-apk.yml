@@ -96,7 +96,34 @@ jobs:
       # تست‌های واحد منطق خالص (JsonPath/Num/نسخه/امتیاز پامپ) — سریع و بدون شبیه‌ساز.
       # خرابی‌شان یعنی احتمال شکستن داده‌خوانی؛ پس ران را قرمز می‌کنند.
       - name: Run unit tests and Android lint
-        run: ./gradlew test lintDebug --no-daemon --stacktrace
+        run: |
+          set +e
+          ./gradlew test lintDebug --no-daemon --stacktrace > verification.log 2>&1
+          code=$?
+          tail -n 120 verification.log
+          if [ "$code" -ne 0 ]; then
+            emit() { enc="${1//'%'/'%25'}"; enc="${enc//$'\r'/'%0D'}"; enc="${enc//$'\n'/'%0A'}"; echo "::error::${enc}"; }
+            grep -E "FAILED|FAILURE:|tests completed|Lint found|^[^[:space:]].* Error:" verification.log \
+              | tail -n 30 | while IFS= read -r line; do emit "$line"; done
+            find app/build/test-results -type f -name '*.xml' -exec grep -H -E '<failure|<error' {} + 2>/dev/null \
+              | head -n 20 | while IFS= read -r line; do emit "$line"; done
+            if [ -f app/build/reports/lint-results-debug.txt ]; then
+              tail -n 160 app/build/reports/lint-results-debug.txt
+            fi
+          fi
+          exit "$code"
+
+      - name: Upload verification reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: PulseMarket-verification-reports
+          path: |
+            verification.log
+            app/build/reports/
+            app/build/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Rename APK for Easy Download
         run: |

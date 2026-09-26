@@ -86,6 +86,7 @@ Two built-in ways; both give the **USD** price of one troy ounce:
 - ⚠️ Versions 1.0–1.3 were signed with the CI runner's throwaway key; installing **1.4** over them needs one uninstall/reinstall. After 1.4 that is no longer needed.
 
 **Version history**
+- **1.20** — 1h/1d/1w/1m pump changes, period sorting, five-result preview with “show more”, clearer in-app help, responsive spacing, watchlist guidance, bulk TSE fetching and Android 6+ support.
 - **1.19** — security/reliability audit: API 36, Android-Keystore encryption for the AI key, no credentials over HTTP/redirects, per-widget alert isolation, clock-rollback handling and input/error sanitization.
 - **1.18** — optional AI second opinion for pumps using a user-selected API/model, with reason, confidence and provider-powered related-news search.
 - **1.17** — added the mandatory “every change gets a version” rule to the repository rules and architecture checklist.
@@ -101,7 +102,7 @@ Two built-in ways; both give the **USD** price of one troy ounce:
 ./gradlew assembleDebug    # APK → app/build/outputs/apk/debug/
 ./gradlew test             # JVM unit tests (no device needed)
 ```
-Kotlin 2.0 · AGP 8.9 · compile/target API 36 · minSdk 26 · Gradle wrapper included.
+Kotlin 2.0 · AGP 8.9 · compile/target API 36 · minSdk 23 (Android 6+) · Gradle wrapper included.
 
 ## 🔐 Notes
 - Settings live only on the device (DataStore/SharedPreferences); no accounts, no secrets in code.

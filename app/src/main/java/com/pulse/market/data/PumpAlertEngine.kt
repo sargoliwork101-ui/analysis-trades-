@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import com.pulse.market.R
 import com.pulse.market.ui.Format
 import com.pulse.market.ui.MainActivity
@@ -68,7 +69,7 @@ object PumpAlertEngine {
         if (!cfg.pumpAlertEnabled || scan.error != null || scan.at <= 0L) return false
         ensureChannel(context)
         val manager = context.getSystemService(NotificationManager::class.java)
-        if (!manager.areNotificationsEnabled()) return false
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return false
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
             manager.getNotificationChannel(CHANNEL_ID)?.importance == NotificationManager.IMPORTANCE_NONE
         ) return false

@@ -218,6 +218,8 @@ data class WidgetConfig(
     val pumpUniverse: Int = 100,
     /** کمترین رشد ۲۴ ساعته (٪) برای اینکه یک کوین «پامپ» حساب شود */
     val pumpMinChange: Double = 8.0,
+    /** بازه‌ی انتخابی کاربر برای مرتب‌سازی فهرست پامپ */
+    val pumpSortPeriod: PumpSortPeriod = PumpSortPeriod.ONE_DAY,
     /** اعلان دوره‌ای وقتی دست‌کم یک کوین از آستانه‌ی پامپ عبور کند */
     val pumpAlertEnabled: Boolean = false,
     /** حداقل فاصله‌ی دو اعلان پامپ برای همین ویجت (دقیقه) */
@@ -229,6 +231,14 @@ data class WidgetConfig(
 
     /** نمادهای متعلق به یک منبع مشخص */
     fun symbolsOf(sourceId: String): List<SymbolDef> = symbols.filter { it.sourceId == sourceId }
+}
+
+/** بازه‌ی تغییر قیمت برای مرتب‌سازی نتایج اسکن پامپ. */
+@Serializable
+enum class PumpSortPeriod {
+    ONE_HOUR,
+    ONE_DAY,
+    ONE_MONTH
 }
 
 /** روش مرتب‌سازی نمادها در ویجت */

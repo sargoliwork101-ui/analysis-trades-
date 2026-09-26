@@ -108,7 +108,7 @@ enum class SettingsSection(val title: String) {
     SOURCES("منابع داده"),
     HEALTH("سلامت منابع"),
     SYMBOLS("نمادها"),
-    WATCHLISTS("واچ‌لیست‌ها"),
+    WATCHLISTS("فهرست‌های آماده (واچ‌لیست)"),
     VALUES("مقادیر نمایشی"),
     LOOK("ظاهر و فونت"),
     UPDATE("به‌روزرسانی"),
@@ -181,12 +181,19 @@ fun SettingsScreen(
     }
 
     LaunchedEffect(widgetId) {
-        cfg = ConfigStore.current(context, widgetId)
-        customSources = ConfigStore.currentCustomSources(context)
-        tseCustomSymbols = ConfigStore.currentTseSymbols(context)
-        watchlists = ConfigStore.currentWatchlists(context)
-        sourceHealth = SourceHealthStore.load(context)
-        alertHistory = AlertHistoryStore.load(context)
+        try {
+            cfg = ConfigStore.current(context, widgetId)
+            customSources = ConfigStore.currentCustomSources(context)
+            tseCustomSymbols = ConfigStore.currentTseSymbols(context)
+            watchlists = ConfigStore.currentWatchlists(context)
+            sourceHealth = SourceHealthStore.load(context)
+            alertHistory = AlertHistoryStore.load(context)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // فایل/رام ناسازگار نباید صفحه را در شروع ببندد؛ پیش‌فرض امن قابل استفاده می‌ماند.
+            testResult = "تنظیمات قبلی کامل خوانده نشد؛ برنامه با تنظیمات امن باز شد"
+        }
     }
 
     LaunchedEffect(section) {
@@ -681,10 +688,22 @@ fun SettingsScreen(
                                 testResult = "در حال تست…"
                                 scope.launch {
                                     val byId = allSources.associateBy { it.id }
-                                    val lines = cfg.symbols.take(6).map { sym ->
-                                        val src = byId[sym.sourceId]
-                                            ?: byId[cfg.activeSourceIds.firstOrNull().orEmpty()]
-                                        val q = src?.let { Fetcher.fetch(it, sym) }
+                                    val selected = cfg.symbols.take(6)
+                                    val quoteByKey = mutableMapOf<Pair<String, String>, com.pulse.market.data.Quote>()
+                                    selected.groupBy { sym ->
+                                        sym.sourceId.ifBlank { cfg.activeSourceIds.firstOrNull().orEmpty() }
+                                    }.forEach { (sourceId, symbols) ->
+                                        byId[sourceId]?.let { source ->
+                                            Fetcher.fetchAll(source, symbols).forEach { quote ->
+                                                quoteByKey[sourceId to quote.code] = quote
+                                            }
+                                        }
+                                    }
+                                    val lines = selected.map { sym ->
+                                        val sourceId = sym.sourceId.ifBlank {
+                                            cfg.activeSourceIds.firstOrNull().orEmpty()
+                                        }
+                                        val q = quoteByKey[sourceId to sym.code]
                                         val vol = q?.let { "  حجم ${QuoteText.volume(it)}" } ?: ""
                                         if (q?.price != null)
                                             "${q.label}: ${QuoteText.priceWithUnit(q)}  ${QuoteText.change(q)}$vol"
@@ -898,8 +917,8 @@ private fun LandingMenu(
                 icon = Icons.Default.FavoriteBorder,
                 tint = Color(0xFFEC4899),
                 title = SettingsSection.WATCHLISTS.title,
-                summary = if (watchlistCount == 0) "هنوز واچ‌لیستی ذخیره نشده" else
-                    "${Format.toPersianDigits(watchlistCount.toString())} واچ‌لیست نام‌دار"
+                summary = if (watchlistCount == 0) "ذخیره‌ی ترکیب نمادها برای استفاده‌ی دوباره" else
+                    "${Format.toPersianDigits(watchlistCount.toString())} ترکیب آماده‌ی نماد"
             ) { onOpen(SettingsSection.WATCHLISTS) }
             RowDivider()
             NavMenuRow(

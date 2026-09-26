@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -18,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.TrendingUp
@@ -53,6 +55,7 @@ import com.pulse.market.data.PumpAiConfigStore
 import com.pulse.market.data.PumpAiReviewer
 import com.pulse.market.data.PumpAlertEngine
 import com.pulse.market.data.PumpScanner
+import com.pulse.market.data.PumpSortPeriod
 import com.pulse.market.data.SymbolDef
 import com.pulse.market.data.WidgetConfig
 import com.pulse.market.ui.Format
@@ -89,6 +92,8 @@ fun PumpsCategory(
     var aiReviews by remember { mutableStateOf<Map<String, PumpAiReviewer.Review>>(emptyMap()) }
     var aiErrors by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var aiStorageError by remember { mutableStateOf(false) }
+    var showHelp by remember { mutableStateOf(false) }
+    var showAllResults by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         aiConfig = PumpAiConfigStore.load(context)
@@ -141,8 +146,14 @@ fun PumpsCategory(
 
     val room = (MAX_SYMBOLS - cfg.symbols.size).coerceAtLeast(0)
     // تغییر آستانه یک فیلتر محلی است و نباید تا اسکن شبکه‌ی بعدی بی‌اثر بماند.
-    val shown = scan?.coins.orEmpty().filter {
+    val matchingCoins = scan?.coins.orEmpty().filter {
         (it.change24h ?: Double.NEGATIVE_INFINITY) >= cfg.pumpMinChange
+    }
+    val shown = PumpScanner.sortByPeriod(matchingCoins, cfg.pumpSortPeriod)
+    val visibleCoins = if (showAllResults) shown else shown.take(5)
+
+    LaunchedEffect(scan?.at, cfg.pumpMinChange, cfg.pumpSortPeriod) {
+        showAllResults = false
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
@@ -152,55 +163,18 @@ fun PumpsCategory(
             "کوین‌هایی که تند رشد کرده‌اند — اول بفهم پامپ چیست، بعد نگاه کن"
         )
 
-        // ── ۱) پامپ چیست؟ (آموزش) ──
-        Card(
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
-            ),
-            shape = RoundedCornerShape(16.dp),
+        // آموزش در آیکون راهنما جمع شده تا صفحه روی گوشی‌های کوچک شلوغ نشود.
+        OutlinedButton(
+            onClick = { showHelp = !showHelp },
             modifier = Modifier.fillMaxWidth()
         ) {
-            Column(
-                modifier = Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Default.TrendingUp,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        "پامپ (Pump) چیست؟",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-                Text(
-                    "پامپ یعنی قیمت یک کوین در زمان کوتاه (دقیقه تا چند ساعت) شارپ بالا می‌رود. " +
-                            "دو شکل دارد:\n" +
-                            "• «پامپ ارگانیک»: خبر واقعی یا ورود پول بزرگ باعث رشد می‌شود؛ حجم معاملات " +
-                            "به‌طور طبیعی بالا می‌رود.\n" +
-                            "• «پامپ گروهی / Pump & Dump»: یک گروه، پیش از رشد، کوین ارزان و کم‌عمق را " +
-                            "می‌خرند؛ بعد با پیام‌های «سیگنال قطعی» در گروه‌ها و شبکه‌های اجتماعی هجوم " +
-                            "خریدراه می‌اندازند؛ وقتی قیمت بالا رفت، خودشان می‌فروشند و بقیه در سقف می‌مانند.",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    "نشانه‌های هشدار پامپ گروهی: رشد ناگهانی کوینی که ارزش بازارش کوچک است • جهش حجم " +
-                            "بدون هیچ خبر رسمی • تبلیغ «سیگنال ۱۰۰٪ تضمینی» و گروه‌های تلگرامی • سرمایه‌گذاری " +
-                            "بدون امکان برداشت در همان صرافی/بات • کندل‌های بلند پشت‌سرهم و بعد فروریختن سریع قیمت.",
-                    fontSize = 11.5.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+            Icon(Icons.Default.HelpOutline, contentDescription = null, modifier = Modifier.size(19.dp))
+            Spacer(Modifier.width(7.dp))
+            Text(if (showHelp) "بستن راهنمای پامپ" else "راهنمای پامپ و معنی پیام‌ها")
         }
+        if (showHelp) PumpHelpCard()
 
-        // ── ۲) تنظیمات اسکن ──
+        // ── تنظیمات اسکن ──
         SectionHeader("اسکن زنده", "داده‌ی لحظه‌ای CoinGecko — کوین‌های برتر بازار")
         RowsCard {
             SwitchRow(
@@ -213,7 +187,10 @@ fun PumpsCategory(
 
             InnerRow {
                 Text("دامنه‌ی اسکن", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     PumpScanner.UNIVERSE_CHOICES.forEach { n ->
                         FilterChip(
                             selected = cfg.pumpUniverse == n,
@@ -229,7 +206,10 @@ fun PumpsCategory(
 
             InnerRow {
                 Text("آستانه‌ی رشد ۲۴ ساعته", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     listOf(3.0, 5.0, 8.0, 15.0, 25.0).forEach { t ->
                         FilterChip(
                             selected = cfg.pumpMinChange == t,
@@ -266,7 +246,10 @@ fun PumpsCategory(
                             color = MaterialTheme.colorScheme.onSurface
                         )
                     }
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
                         listOf(30, 60, 180, 360).forEach { minutes ->
                             val label = if (minutes < 60) "$minutes دقیقه" else "${minutes / 60} ساعت"
                             FilterChip(
@@ -383,7 +366,35 @@ fun PumpsCategory(
 
         if (shown.isNotEmpty()) {
             RowsCard {
-                shown.forEachIndexed { i, coin ->
+                InnerRow {
+                    Text(
+                        "مرتب‌سازی بر اساس بیشترین رشد",
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf(
+                            PumpSortPeriod.ONE_HOUR to "۱ ساعت",
+                            PumpSortPeriod.ONE_DAY to "۱ روز",
+                            PumpSortPeriod.ONE_MONTH to "۱ ماه"
+                        ).forEach { (period, label) ->
+                            FilterChip(
+                                selected = cfg.pumpSortPeriod == period,
+                                onClick = { onChange(cfg.copy(pumpSortPeriod = period)) },
+                                label = { Text(label) }
+                            )
+                        }
+                    }
+                    Hint("ابتدا ۵ کوین اول دیده می‌شود؛ «نمایش بیشتر» بقیه را باز می‌کند.")
+                }
+            }
+
+            RowsCard {
+                visibleCoins.forEachIndexed { i, coin ->
                     if (i > 0) RowDivider()
                     PumpRow(
                         coin = coin,
@@ -405,43 +416,19 @@ fun PumpsCategory(
                     )
                 }
             }
-            if (room <= 0) {
-                Hint("ویجت پر است (سقف ${Format.toPersianDigits("$MAX_SYMBOLS")} نماد) — برای افزودن کوین تازه، یکی از نمادها را حذف کن.")
-            }
-        }
-
-        // ── ۴) قواعد احتیاط ──
-        SectionHeader("چطور در دام پامپ نیفتیم", "چهار قاعده‌ی ساده")
-        Card(
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
-            ),
-            shape = RoundedCornerShape(16.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(
-                modifier = Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                RuleLine("۱", "هرگز فقط به خاطر «رشد زیاد» نخر. رشد زیاد یعنی ریسک زیاد — نه سود تضمینی.")
-                RuleLine("۲", "به حجم نگاه کن، نه به درصد. اگر حجم واقعی نیست، قیمت هم واقعی نیست.")
-                RuleLine("۳", "کوین تازه/کوچک را فقط با پولی بخر که از دست دادنش زندگی‌ات را عوض نمی‌کند.")
-                RuleLine("۴", "به گروه‌ها و «سیگنال‌های تضمینی» اعتماد نکن؛ کسی که سیگنال می‌دهد، قبل از تو خریده است.")
-                Spacer(Modifier.size(2.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Default.Warning,
-                        contentDescription = null,
-                        tint = Color(0xFFF59E0B),
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(Modifier.width(6.dp))
+            if (shown.size > 5) {
+                OutlinedButton(
+                    onClick = { showAllResults = !showAllResults },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
                     Text(
-                        "این بخش ابزار مشاهده و آموزش است، نه توصیه‌ی مالی یا سیگنال خرید.",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        if (showAllResults) "نمایش فقط ۵ کوین اول"
+                        else "نمایش ${Format.toPersianDigits((shown.size - 5).toString())} کوین دیگر"
                     )
                 }
+            }
+            if (room <= 0) {
+                Hint("ویجت پر است (سقف ${Format.toPersianDigits("$MAX_SYMBOLS")} نماد) — برای افزودن کوین تازه، یکی از نمادها را حذف کن.")
             }
         }
 
@@ -459,6 +446,103 @@ fun PumpsCategory(
             Spacer(Modifier.width(6.dp))
             Text(if (busy) "در حال اسکن…" else "اسکن تازه‌ی پامپ‌ها", fontSize = 12.5.sp)
         }
+    }
+}
+
+/** راهنمای جمع‌شونده‌ی این صفحه؛ معنی اصطلاح‌ها را بدون شلوغ‌کردن نتیجه توضیح می‌دهد. */
+@Composable
+private fun PumpHelpCard() {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+        ),
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Default.TrendingUp,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "پامپ و پیام‌های این صفحه یعنی چه؟",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+            Text(
+                "پامپ یعنی قیمت در زمان کوتاه با سرعت زیادی بالا رفته است. این رشد ممکن است از خبر واقعی باشد، " +
+                        "اما در کوین‌های کوچک گاهی گروهی است و بعد از فروش بازیگران اولیه، قیمت سریع می‌ریزد.",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                "معنی نتیجه‌های احتیاطی",
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            HelpMeaning(
+                "فعلاً فقط زیر نظر بگیر",
+                "یعنی داده‌ها ارزش مشاهده دارند، نه اینکه برنامه خرید را پیشنهاد کرده باشد."
+            )
+            HelpMeaning(
+                "صبر کن؛ ورود عجولانه نکن",
+                "یعنی ادامه‌ی رشد هنوز تأیید نشده و بهتر است تثبیت قیمت و حجم را ببینی."
+            )
+            HelpMeaning(
+                "فعلاً وارد نشو؛ قیمت را تعقیب نکن",
+                "یعنی قیمت قبلاً ناگهانی بالا رفته است؛ فقط از ترس جاماندن دنبال آن نرو، چون ممکن است نزدیک سقف بخری. این پیام دستور فروش دارایی فعلی نیست."
+            )
+            Text(
+                "بازه‌ها: ۱ ساعت حرکت خیلی کوتاه‌مدت، ۱ روز تغییر ۲۴ ساعت، ۱ هفته تغییر ۷ روز و ۱ ماه تغییر ۳۰ روز اخیر است. مرتب‌سازی فقط جای نمایش را عوض می‌کند و سیگنال خرید نیست.",
+                fontSize = 11.5.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(2.dp))
+            RuleLine("۱", "فقط به دلیل رشد زیاد خرید نکن؛ رشد زیاد معمولاً یعنی ریسک بیشتر.")
+            RuleLine("۲", "حجم، ارزش بازار، خبر معتبر و امکان برداشت از صرافی را جداگانه بررسی کن.")
+            RuleLine("۳", "به گروه‌ها و عبارت‌هایی مثل «سود قطعی» یا «سیگنال تضمینی» اعتماد نکن.")
+            Row(verticalAlignment = Alignment.Top) {
+                Icon(
+                    Icons.Default.Warning,
+                    contentDescription = null,
+                    tint = Color(0xFFF59E0B),
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    "این بخش ابزار مشاهده و آموزش است؛ هیچ‌کدام از پیام‌ها توصیه‌ی مالی یا دستور خرید و فروش نیست.",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HelpMeaning(title: String, explanation: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            title,
+            fontSize = 11.5.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Text(
+            explanation,
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
@@ -492,7 +576,29 @@ private fun RuleLine(number: String, text: String) {
     }
 }
 
+@Composable
+private fun PumpChangeBadge(label: String, value: Double?, persian: Boolean) {
+    val color = when {
+        value == null -> MaterialTheme.colorScheme.onSurfaceVariant
+        value > 0.0 -> Color(0xFF16A34A)
+        value < 0.0 -> Color(0xFFDC2626)
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Box(
+        modifier = Modifier
+            .background(color.copy(alpha = 0.12f), RoundedCornerShape(7.dp))
+            .padding(horizontal = 7.dp, vertical = 4.dp)
+    ) {
+        Text(
+            "$label ${Format.pct(value, persian).ifBlank { "—" }}",
+            fontSize = 10.5.sp,
+            color = color
+        )
+    }
+}
+
 /** یک کوین در فهرست پامپ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun PumpRow(
     coin: PumpScanner.PumpCoin,
@@ -513,66 +619,68 @@ private fun PumpRow(
         PumpScanner.Risk.MEDIUM -> Color(0xFFF59E0B)
         PumpScanner.Risk.HIGH -> Color(0xFFF43F5E)
     }
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        Column(modifier = Modifier.weight(1f)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
             Text(
                 coin.displayName,
                 fontSize = 13.5.sp,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f)
             )
-            Text(
-                buildString {
-                    append(QuoteText.priceWithUnit(coin.price, "$", persian))
-                    append(" • ۱ساعت ")
-                    append(Format.pct(coin.change1h, persian).ifBlank { "—" })
-                    append(" • ۲۴ساعت ")
-                    append(Format.pct(coin.change24h, persian).ifBlank { "—" })
-                },
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 2.dp)
-            )
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(top = 3.dp)
+            Box(
+                modifier = Modifier
+                    .background(riskColor.copy(alpha = 0.18f), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 7.dp, vertical = 3.dp)
             ) {
-                Box(
-                    modifier = Modifier
-                        .background(riskColor.copy(alpha = 0.18f), RoundedCornerShape(6.dp))
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                ) {
-                    Text(coin.risk.label, fontSize = 10.sp, color = riskColor)
-                }
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    buildString {
-                        if (coin.rank > 0) append("رتبه ${Format.toPersianDigits("${coin.rank}")}")
-                        if (coin.volume != null) {
-                            if (isNotEmpty()) append(" • ")
-                            append("حجم ${Format.volume(coin.volume, persian)}")
-                        }
-                        if (coin.marketCap != null) {
-                            if (isNotEmpty()) append(" • ")
-                            append("ارزش بازار ${Format.volume(coin.marketCap, persian)}")
-                        }
-                    },
-                    fontSize = 10.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Text(coin.risk.label, fontSize = 10.sp, color = riskColor)
             }
-            val advice = coin.advice
-            Text(
-                "پیشنهاد: ${advice.recommendation.label}",
+        }
+        Text(
+            "قیمت ${QuoteText.priceWithUnit(coin.price, "$", persian)}",
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            PumpChangeBadge("۱ ساعت", coin.change1h, persian)
+            PumpChangeBadge("۱ روز", coin.change24h, persian)
+            PumpChangeBadge("۱ هفته", coin.change7d, persian)
+            PumpChangeBadge("۱ ماه", coin.change30d, persian)
+        }
+        Text(
+            buildString {
+                if (coin.rank > 0) append("رتبه ${Format.toPersianDigits("${coin.rank}")}")
+                if (coin.volume != null) {
+                    if (isNotEmpty()) append(" • ")
+                    append("حجم ۲۴ساعته ${Format.volume(coin.volume, persian)}")
+                }
+                if (coin.marketCap != null) {
+                    if (isNotEmpty()) append(" • ")
+                    append("ارزش بازار ${Format.volume(coin.marketCap, persian)}")
+                }
+            },
+            fontSize = 10.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        val advice = coin.advice
+        Text(
+                "نتیجه‌ی احتیاطی: ${advice.recommendation.label}",
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
                 color = riskColor,
-                modifier = Modifier.padding(top = 6.dp)
+                modifier = Modifier.padding(top = 2.dp)
             )
             Text(
                 "دلیل: ${advice.reason}",
@@ -585,7 +693,9 @@ private fun PumpRow(
                 OutlinedButton(
                     onClick = onAiReview,
                     enabled = aiReady && !aiBusy,
-                    modifier = Modifier.padding(top = 7.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 3.dp)
                 ) {
                     Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(5.dp))
@@ -693,8 +803,7 @@ private fun PumpRow(
                     }
                 }
             }
-        }
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.height(2.dp))
         if (alreadyAdded) {
             Text(
                 "✓ در ویجت",
@@ -702,7 +811,11 @@ private fun PumpRow(
                 color = MaterialTheme.colorScheme.primary
             )
         } else {
-            OutlinedButton(onClick = onAdd, enabled = canAdd) {
+            OutlinedButton(
+                onClick = onAdd,
+                enabled = canAdd,
+                modifier = Modifier.fillMaxWidth()
+            ) {
                 Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(4.dp))
                 Text("ویجت", fontSize = 11.5.sp)

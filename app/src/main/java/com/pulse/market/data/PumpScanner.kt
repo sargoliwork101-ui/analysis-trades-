@@ -31,8 +31,8 @@ object PumpScanner {
     /** چند کوین در هر اسکن خوانده شود (سقف رایگان CoinGecko = ۲۵۰) */
     val UNIVERSE_CHOICES = listOf(50, 100, 250)
 
-    /** حداکثر تعداد کوینی که در نتیجه نگه داشته می‌شود */
-    private const val MAX_RESULTS = 30
+    /** همه‌ی دامنه نگه داشته می‌شود تا مرتب‌سازی ۱ساعته/ماهانه نتیجه‌ای را پیشاپیش حذف نکند. */
+    private const val MAX_RESULTS = 250
 
     private const val PREF = "pulse_pumps"
     private const val KEY_LAST = "last_scan"
@@ -52,6 +52,7 @@ object PumpScanner {
         val change1h: Double? = null,
         val change24h: Double? = null,
         val change7d: Double? = null,
+        val change30d: Double? = null,
         val volume: Double? = null,
         val marketCap: Double? = null,
         val rank: Int = 0,
@@ -89,9 +90,9 @@ object PumpScanner {
     }
 
     enum class Recommendation(val label: String) {
-        WATCH("فقط زیر نظر بگیر"),
-        WAIT("برای ورود عجله نکن"),
-        AVOID("از تعقیب قیمت دوری کن")
+        WATCH("فعلاً فقط زیر نظر بگیر"),
+        WAIT("صبر کن؛ ورود عجولانه نکن"),
+        AVOID("فعلاً وارد نشو؛ قیمت را تعقیب نکن")
     }
 
     data class Advice(val recommendation: Recommendation, val reason: String)
@@ -160,7 +161,7 @@ object PumpScanner {
 
         val url = "https://api.coingecko.com/api/v3/coins/markets" +
                 "?vs_currency=usd&order=market_cap_desc&per_page=$size&page=1" +
-                "&sparkline=false&price_change_percentage=1h,24h,7d"
+                "&sparkline=false&price_change_percentage=1h,24h,7d,30d"
 
         val result = try {
             val body = Http.getText(url)
@@ -212,6 +213,7 @@ object PumpScanner {
             val change24: Double? = o.optDouble("price_change_percentage_24h").takeIf { it.isFinite() }
             val change1: Double? = o.optDouble("price_change_percentage_1h_in_currency").takeIf { it.isFinite() }
             val change7: Double? = o.optDouble("price_change_percentage_7d_in_currency").takeIf { it.isFinite() }
+            val change30: Double? = o.optDouble("price_change_percentage_30d_in_currency").takeIf { it.isFinite() }
             sanitizeCoin(
                 PumpCoin(
                     id = id,
@@ -221,6 +223,7 @@ object PumpScanner {
                     change1h = change1,
                     change24h = change24,
                     change7d = change7,
+                    change30d = change30,
                     volume = volume,
                     marketCap = cap,
                     rank = o.optInt("market_cap_rank", 0),
@@ -249,15 +252,15 @@ object PumpScanner {
         return when {
             coin.risk == Risk.HIGH -> Advice(
                 Recommendation.AVOID,
-                "رتبه/ارزش بازار پایین است و برگشت قیمت در کوین‌های کوچک می‌تواند بسیار سریع باشد."
+                "رتبه/ارزش بازار پایین است و برگشت قیمت می‌تواند بسیار سریع باشد؛ بعد از این رشد ناگهانی واردشدن ریسک بالایی دارد."
             )
             ch24 >= 25.0 -> Advice(
                 Recommendation.AVOID,
-                "رشد ۲۴ ساعته از ۲۵٪ گذشته و احتمال خرید در سقف و اصلاح تند بیشتر شده است."
+                "رشد ۲۴ ساعته از ۲۵٪ گذشته است؛ ورود فقط از ترس جاماندن ممکن است خرید در سقف و زیان در اصلاح بعدی باشد."
             )
             turnover >= 0.50 -> Advice(
                 Recommendation.AVOID,
-                "حجم ۲۴ ساعته بیش از نصف ارزش بازار است؛ گردش غیرعادی می‌تواند نشانه‌ی هیجان یا تخلیه باشد."
+                "حجم ۲۴ ساعته بیش از نصف ارزش بازار است؛ این هیجان غیرعادی می‌تواند با تخلیه و افت سریع تمام شود، پس فعلاً وارد نشو."
             )
             ch1 <= 0.0 -> Advice(
                 Recommendation.WAIT,
@@ -289,6 +292,7 @@ object PumpScanner {
             change1h = ch1,
             change24h = ch24,
             change7d = coin.change7d?.takeIf { it.isFinite() },
+            change30d = coin.change30d?.takeIf { it.isFinite() },
             volume = volume,
             marketCap = cap,
             rank = coin.rank.coerceIn(0, 1_000_000),
@@ -304,6 +308,18 @@ object PumpScanner {
         }
         .trim()
         .take(maxLength.coerceIn(0, 500))
+
+    /** مرتب‌سازی پایدار نتایج بر اساس بازه‌ی انتخابی؛ داده‌ی ناموجود همیشه پایین می‌رود. */
+    fun sortByPeriod(coins: List<PumpCoin>, period: PumpSortPeriod): List<PumpCoin> =
+        coins.sortedWith(
+            compareByDescending<PumpCoin> { coin ->
+                when (period) {
+                    PumpSortPeriod.ONE_HOUR -> coin.change1h
+                    PumpSortPeriod.ONE_DAY -> coin.change24h
+                    PumpSortPeriod.ONE_MONTH -> coin.change30d
+                }?.takeIf { it.isFinite() } ?: Double.NEGATIVE_INFINITY
+            }.thenByDescending { it.score }
+        )
 
     fun turnover(volume: Double?, marketCap: Double?): Double {
         val safeVolume = volume?.takeIf { it.isFinite() && it >= 0.0 }

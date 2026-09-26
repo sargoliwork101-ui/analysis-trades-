@@ -83,13 +83,53 @@ data class ParsedTseInput(
  */
 object TseService {
 
+    private const val HTTPS_BASE = "https://cdn.tsetmc.com"
+    private const val HTTP_BASE = "http://cdn.tsetmc.com"
+    private const val NETWORK_COOLDOWN_MS = 60_000L
+    private const val HTTP_PREFERENCE_MS = 5 * 60_000L
+
+    @Volatile private var unavailableUntil = 0L
+    @Volatile private var preferHttpUntil = 0L
+
     /**
-     * خواندن یک آدرس TSETMC — از کلاینت مشترک [Http] (استخر اتصال/سقف حجم/فقط https).
-     * null یعنی پاسخ نگرفتیم یا نامعتبر بود؛ همه‌ی صداکننده‌ها همین را هندل می‌کنند.
+     * TSETMC در بعضی اپراتورها TLS را ناقص جواب می‌دهد و IPهای خارجی/VPN را هم
+     * soft-block می‌کند. ابتدا HTTPS و فقط برای داده‌ی عمومی، در شکست اتصال HTTP
+     * رسمی همان میزبان امتحان می‌شود. timeout کوتاه مانع معطل‌شدن طولانی ویجت است.
      */
-    private fun getBody(url: String): String? = runCatching {
-        Http.execute(Request.Builder().url(url).header("User-Agent", Http.UA_DESKTOP).build())
-    }.getOrNull()
+    private fun getBody(url: String): String? {
+        val now = System.currentTimeMillis()
+        if (now < unavailableUntil) return null
+        val candidates = if (url.startsWith(HTTPS_BASE)) {
+            val http = HTTP_BASE + url.removePrefix(HTTPS_BASE)
+            if (now < preferHttpUntil) listOf(http, url) else listOf(url, http)
+        } else listOf(url)
+        for (candidate in candidates) {
+            val body = runCatching {
+                val request = Request.Builder()
+                    .url(candidate)
+                    .header("User-Agent", Http.UA_DESKTOP)
+                    .header("Accept", "application/json, text/plain, */*")
+                    .header("Accept-Language", "fa,en;q=0.8")
+                    .header("Referer", "https://www.tsetmc.com/")
+                    .build()
+                Http.execute(request, callTimeoutSeconds = 12)
+            }.getOrNull()
+            val first = body?.trimStart()?.firstOrNull()
+            if (!body.isNullOrBlank() && (first == '{' || first == '[') &&
+                !body.contains("General Error Detected", ignoreCase = true) &&
+                !body.contains("دسترسی شما", ignoreCase = true) &&
+                !body.contains("مسدود", ignoreCase = true)
+            ) {
+                unavailableUntil = 0L
+                preferHttpUntil = if (candidate.startsWith(HTTP_BASE)) {
+                    System.currentTimeMillis() + HTTP_PREFERENCE_MS
+                } else 0L
+                return body
+            }
+        }
+        unavailableUntil = System.currentTimeMillis() + NETWORK_COOLDOWN_MS
+        return null
+    }
 
     /**
      * کاتالوگ جامع داخلی نمادهای پرمعامله و بسیار محبوب بورس تهران
@@ -125,7 +165,7 @@ object TseService {
         TseInstrument("", "اعتماد", "صندوق درآمد ثابت اعتماد"),
 
         // ─── سهام شاخص‌ساز و پرمعامله ───
-        TseInstrument("46348633615832441", "فولاد", "فولاد مبارکه اصفهان"),
+        TseInstrument("46348559193224090", "فولاد", "فولاد مبارکه اصفهان"),
         TseInstrument("35425587644337450", "فملی", "ملی صنایع مس ایران"),
         TseInstrument("65863428195688438", "خودرو", "ایران خودرو"),
         TseInstrument("2400322364771558", "خساپا", "سایپا"),
@@ -154,6 +194,76 @@ object TseService {
         TseInstrument("39185207431289419", "خبهمن", "گروه بهمن"),
         TseInstrument("69103099839441128", "وپاسار", "بانک پاسارگاد")
     )
+
+    /**
+     * یک درخواست برای تابلوی کل بازار، به‌جای چند درخواست جدا برای هر نماد.
+     * نتیجه با کد دقیق ورودی map می‌شود؛ null یعنی خود سرویس/شبکه در دسترس نبود.
+     */
+    fun fetchMarketWatch(codes: List<String>): Map<String, TseInstrument>? {
+        if (codes.isEmpty()) return emptyMap()
+        val url = HTTPS_BASE + "/api/ClosingPrice/GetMarketWatch" +
+                "?market=0" +
+                (1..9).joinToString("") { "&paperTypes%5B${it - 1}%5D=$it" } +
+                "&withBestLimits=false&hEven=0&RefID=0"
+        val body = getBody(url) ?: return null
+        return parseMarketWatch(body, codes)
+    }
+
+    internal fun parseMarketWatch(body: String, codes: List<String>): Map<String, TseInstrument>? {
+        val rows = parseArray(body, "closingPrice", "marketWatch", "closingPriceInfo") ?: return null
+        val byIdentity = mutableMapOf<String, TseInstrument>()
+        for (i in 0 until minOf(rows.length(), 10_000)) {
+            val item = rows.optJSONObject(i) ?: continue
+            val insCode = item.optString("insCode").trim()
+            val symbol = item.optString("lva").ifBlank {
+                item.optString("lVal18AFC")
+            }.trim()
+            if (symbol.isBlank() && insCode.isBlank()) continue
+            val name = item.optString("lvc").ifBlank {
+                item.optString("lVal30")
+            }.trim().ifBlank { symbol }
+            val close = positiveNumber(item, "pcl", "pClosing")
+            val last = positiveNumber(item, "pdv", "pDrCotVal")
+            val yesterday = positiveNumber(item, "py", "priceYesterday")
+            val price = close ?: last
+            val changePct = if (price != null && yesterday != null && yesterday > 0.0) {
+                ((price - yesterday) / yesterday) * 100.0
+            } else null
+            val instrument = TseInstrument(
+                insCode = insCode,
+                symbol = symbol.take(200),
+                name = name.take(200),
+                lastPrice = last,
+                closePrice = close,
+                changePct = changePct,
+                volume = positiveNumber(item, "qtj", "qTotTran5J"),
+                cIsin = item.optString("insID").ifBlank { item.optString("cIsin") }.take(40)
+            )
+            if (insCode.isNotBlank()) byIdentity[insCode] = instrument
+            if (symbol.isNotBlank()) byIdentity[normalizeSymbol(symbol)] = instrument
+        }
+        return codes.mapNotNull { code ->
+            val match = byIdentity[code.trim()] ?: byIdentity[normalizeSymbol(code)]
+            match?.let { code to it }
+        }.toMap()
+    }
+
+    private fun positiveNumber(item: JSONObject, vararg keys: String): Double? {
+        for (key in keys) {
+            val number = item.optDouble(key, Double.NaN)
+            if (number.isFinite() && number > 0.0) return number
+        }
+        return null
+    }
+
+    internal fun normalizeSymbol(value: String): String = value
+        .replace('ي', 'ی')
+        .replace('ك', 'ک')
+        .replace("\u200C", "")
+        .replace("ـ", "")
+        .filterNot { it.isWhitespace() }
+        .trim()
+        .lowercase()
 
     /**
      * جستجوی هوشمند نماد بر اساس ورودی کاربر (نام، نماد، کد، یا لینک کامل TSETMC)

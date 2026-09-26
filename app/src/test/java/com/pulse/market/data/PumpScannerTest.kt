@@ -91,6 +91,29 @@ class PumpScannerTest {
     }
 
     @Test
+    fun resultsSortByThePeriodChosenByUserAndKeepMissingLast() {
+        val hourLeader = PumpScanner.PumpCoin(
+            id = "hour", symbol = "h", name = "Hour",
+            change1h = 20.0, change24h = 3.0, change30d = 4.0
+        )
+        val monthLeader = PumpScanner.PumpCoin(
+            id = "month", symbol = "m", name = "Month",
+            change1h = 1.0, change24h = 8.0, change30d = 80.0
+        )
+        val missing = PumpScanner.PumpCoin(id = "missing", symbol = "x", name = "Missing")
+        val coins = listOf(monthLeader, missing, hourLeader)
+
+        assertEquals(
+            listOf("hour", "month", "missing"),
+            PumpScanner.sortByPeriod(coins, PumpSortPeriod.ONE_HOUR).map { it.id }
+        )
+        assertEquals(
+            listOf("month", "hour", "missing"),
+            PumpScanner.sortByPeriod(coins, PumpSortPeriod.ONE_MONTH).map { it.id }
+        )
+    }
+
+    @Test
     fun coinBecomesWidgetSymbolWithDollarUnit() {
         val coin = PumpScanner.PumpCoin(id = "solana", symbol = "sol", name = "Solana")
         val sym = coin.toSymbolDef()

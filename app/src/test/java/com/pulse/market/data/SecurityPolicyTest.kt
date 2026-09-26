@@ -63,4 +63,19 @@ class SecurityPolicyTest {
     fun remoteCoinTextDropsBidiOverridesAndControls() {
         assertEquals("ABCD", PumpScanner.safeRemoteText("A\u202EBC\u0000D", 20))
     }
+
+    @Test
+    fun tseSymbolMatchingHandlesArabicLettersAndHalfSpaces() {
+        assertEquals("فولاد", TseService.normalizeSymbol(" فـولاد "))
+        assertEquals("کیمیای", TseService.normalizeSymbol("كيميا\u200Cی"))
+    }
+
+    @Test
+    fun tseBulkResponseMapsCompressedMarketWatchFields() {
+        val body = """{"closingPrice":[{"insCode":"12345678901234567","lva":"فولاد","lvc":"فولاد مبارکه","pcl":1020,"pdv":1030,"py":1000,"qtj":250000}]}"""
+        val byCode = TseService.parseMarketWatch(body, listOf("فولاد", "12345678901234567"))!!
+        assertEquals(1020.0, byCode.getValue("فولاد").closePrice!!, 0.0)
+        assertEquals(2.0, byCode.getValue("فولاد").changePct!!, 0.0001)
+        assertEquals(250000.0, byCode.getValue("12345678901234567").volume!!, 0.0)
+    }
 }
