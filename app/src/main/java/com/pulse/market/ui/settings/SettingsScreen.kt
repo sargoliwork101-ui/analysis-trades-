@@ -85,10 +85,13 @@ import com.pulse.market.ui.Format
 import com.pulse.market.ui.QuoteText
 import com.pulse.market.ui.SymbolSearchDialog
 import com.pulse.market.widget.StockWidgetProvider
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
 import java.util.Locale
 
 /** بخش‌های تنظیمات — هر کدام صفحه‌ی خودش را دارد */
@@ -194,9 +197,11 @@ fun SettingsScreen(
                     backupResult = "❌ خواندن تنظیمات برای خروجی ممکن نشد"
                 } else {
                     runCatching {
-                        context.contentResolver.openOutputStream(uri)?.use { out ->
-                            out.write(text.toByteArray())
-                        } ?: error("جریان خروجی باز نشد")
+                        withContext(Dispatchers.IO) {
+                            context.contentResolver.openOutputStream(uri)?.use { out ->
+                                out.write(text.toByteArray(Charsets.UTF_8))
+                            } ?: error("جریان خروجی باز نشد")
+                        }
                     }.onSuccess {
                         backupResult = "✅ بکاپ ذخیره شد — مواظب فایل باش!"
                     }.onFailure {
@@ -215,8 +220,10 @@ fun SettingsScreen(
             scope.launch {
                 busy = true
                 val text = runCatching {
-                    context.contentResolver.openInputStream(uri)?.use { inp ->
-                        inp.readBytes().decodeToString()
+                    withContext(Dispatchers.IO) {
+                        context.contentResolver.openInputStream(uri)?.use { inp ->
+                            inp.readUtf8Capped(MAX_BACKUP_BYTES)
+                        } ?: error("جریان ورودی باز نشد")
                     }
                 }.getOrNull()
                 if (text == null) {
@@ -563,16 +570,20 @@ fun SettingsScreen(
                         Button(
                             onClick = {
                                 busy = true
+                                val finalConfig = cfg
                                 scope.launch {
-                                    // ذخیره حتماً کامل می‌شود (NonCancellable) و بعد صفحه بسته می‌شود
+                                    // بستن صفحه فقط بعد از پایان ذخیره انجام می‌شود. قبلاً
+                                    // onApply بیرون coroutine بود و با finish شدن Activity،
+                                    // همین scope پیش از شروع ذخیره cancel می‌شد.
                                     withContext(NonCancellable) {
-                                        ConfigStore.save(context, cfg, widgetId)
+                                        ConfigStore.save(context, finalConfig, widgetId)
                                         StockWidgetProvider.syncLiveService(context)
                                     }
                                     busy = false
+                                    onApply(finalConfig)
                                 }
-                                onApply(cfg)
                             },
+                            enabled = !busy,
                             modifier = Modifier.weight(1.2f)
                         ) {
                             Icon(Icons.Default.Check, contentDescription = null)
@@ -981,4 +992,22 @@ private fun AboutCategory() {
 
         Hint("ساخته‌شده با ❤ برای رصد لحظه‌ای بازار")
     }
+}
+
+
+/** سقف فایل بازیابی؛ تنظیمات عادی چند کیلوبایت‌اند و فایل غول‌آسا نباید حافظه را پر کند. */
+private const val MAX_BACKUP_BYTES = 2 * 1024 * 1024
+
+private fun InputStream.readUtf8Capped(maxBytes: Int): String {
+    val output = ByteArrayOutputStream(minOf(maxBytes, 32 * 1024))
+    val buffer = ByteArray(8 * 1024)
+    var total = 0
+    while (true) {
+        val count = read(buffer)
+        if (count < 0) break
+        total += count
+        if (total > maxBytes) error("حجم فایل بکاپ بیش از حد مجاز است")
+        output.write(buffer, 0, count)
+    }
+    return output.toString(Charsets.UTF_8.name())
 }

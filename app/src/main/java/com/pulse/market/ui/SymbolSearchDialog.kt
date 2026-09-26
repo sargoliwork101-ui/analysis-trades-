@@ -62,6 +62,7 @@ import com.pulse.market.data.marketKind
 import com.pulse.market.ui.settings.DialogShell
 import com.pulse.market.ui.settings.RowDivider
 import com.pulse.market.ui.settings.RowsCard
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 
 /** یک نتیجه‌ی جستجو — یکدست برای همه‌ی منابع */
@@ -119,10 +120,14 @@ fun SymbolSearchDialog(
         val q = query.trim()
         delay(350)
         loading = true
-        val result = runCatching {
+        val result = try {
             if (src.marketKind == MarketKind.TSE) tseHits(q, tseCustomSymbols)
             else generalHits(src, q)
-        }.getOrDefault(emptyList())
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            emptyList()
+        }
         hits = result
         loading = false
         status = when {

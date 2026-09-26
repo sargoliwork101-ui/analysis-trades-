@@ -27,7 +27,18 @@ class NumTest {
     @Test
     fun keepsSigns() {
         assertEquals(-1.5, Num.parse("-1.5")!!, 1e-9)
+        assertEquals(-1.5, Num.parse("−۱٫۵")!!, 1e-9)
         assertEquals(120.0, Num.parse("+120")!!, 1e-9)
+    }
+
+    @Test
+    fun acceptsPersianDecimalSeparator() {
+        assertEquals(4310.94, Num.parse("۴٬۳۱۰٫۹۴")!!, 1e-6)
+    }
+
+    @Test
+    fun rejectsNonFiniteNumbers() {
+        assertNull(Num.parse("1e9999"))
     }
 
     @Test

@@ -34,6 +34,21 @@ class FetcherUnitsTest {
     }
 
     @Test
+    fun absoluteAndPreviousClosePercentUseRawUnits() {
+        // ضریب تبدیل قیمت نباید دوباره داخل فرمول درصد وارد شود.
+        assertEquals(
+            10.0,
+            Fetcher.changePercent(ChangeMode.ABSOLUTE, rawPrice = 1100.0, rawChange = 100.0)!!,
+            1e-9
+        )
+        assertEquals(
+            10.0,
+            Fetcher.changePercent(ChangeMode.PREV_CLOSE, rawPrice = 1100.0, rawChange = 1000.0)!!,
+            1e-9
+        )
+    }
+
+    @Test
     fun dollarGoldOunceIsNotScaledLikeRial() {
         // قیمت خام TGJU برای انس: 4310.94 → باید همان 4310.94 دلار بماند
         val raw = 4310.94

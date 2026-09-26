@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
@@ -43,6 +44,9 @@ object QuoteRepo {
     /** کش در حافظه — منبع اصلی خواندن در طول عمر پروسه */
     @Volatile
     private var memQuotes: Map<String, Quote>? = null
+
+    /** یک‌پارچه نگه داشتن fetch/merge/history در برابر رفرش‌های هم‌زمان. */
+    private val refreshMutex = Mutex()
 
     /** تاریخچه‌ی قیمت در حافظه — نگاشت «منبع|نماد» به سری اعداد */
     @Volatile
@@ -145,7 +149,8 @@ object QuoteRepo {
                     ?: emptyList()
             }
             syms.map { sid to it }
-        }
+        }.distinctBy { it.first to it.second.code }
+            .take(MAX_SYMBOLS)
     }
 
     /**
@@ -156,6 +161,18 @@ object QuoteRepo {
      * با علامت stale برمی‌گردد تا ویجت چراغ قرمز نشان دهد — هرگز داده پاک نمی‌شود.
      */
     suspend fun refreshMany(
+        context: Context,
+        wantedPerWidget: List<List<Pair<String, SymbolDef>>>
+    ): Map<String, Quote> {
+        refreshMutex.lock()
+        return try {
+            refreshManyLocked(context.applicationContext, wantedPerWidget)
+        } finally {
+            refreshMutex.unlock()
+        }
+    }
+
+    private suspend fun refreshManyLocked(
         context: Context,
         wantedPerWidget: List<List<Pair<String, SymbolDef>>>
     ): Map<String, Quote> {
@@ -195,6 +212,16 @@ object QuoteRepo {
                 else -> c
             }
             if (quote != null) out[k] = quote
+        }
+        // وضعیت stale در حافظه بماند؛ وگرنه رندر بعدی که شبکه نمی‌رفت، همان
+        // مقدار شکست‌خورده را دوباره سبز نشان می‌داد. Quote خطادارِ بدون قیمت
+        // همچنان وارد کش دائمی نمی‌شود.
+        synchronized(this) {
+            val current = (memQuotes ?: cached).toMutableMap()
+            out.forEach { (k, quote) ->
+                if (quote.price != null) current[k] = quote
+            }
+            memQuotes = current
         }
         return out
     }

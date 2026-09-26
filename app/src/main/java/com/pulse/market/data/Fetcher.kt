@@ -1,5 +1,6 @@
 package com.pulse.market.data
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -8,6 +9,7 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
 import org.jsoup.Jsoup
 import java.net.URLEncoder
@@ -50,7 +52,7 @@ object Fetcher {
 
     /** گرفتن قیمت یک نماد (برای دکمه‌ی «تست داده» و منابع دلخواه) */
     suspend fun fetch(source: SourceDef, symbol: SymbolDef): Quote =
-        withContext(Dispatchers.IO) { fetchOne(source, symbol) }
+        withContext(Dispatchers.IO) { gate.withPermit { fetchOne(source, symbol) } }
 
     /** اجرای موازی با سقف هم‌زمانی ([MAX_PARALLEL]) */
     private suspend fun parallel(
@@ -66,8 +68,10 @@ object Fetcher {
         FetchKind.TSE_TSETMC -> fetchTse(source, sym)
         FetchKind.JSON_REST -> try {
             quoteFromJson(source, sym, parseJson(getAny(singleUrls(source, sym.code), source)))
-        } catch (t: Throwable) {
-            errorQuote(source, sym, t)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            errorQuote(source, sym, failure)
         }
 
         FetchKind.HTML_CSS -> fetchHtml(source, sym)
@@ -79,9 +83,11 @@ object Fetcher {
             val joined = symbols.joinToString(",") { enc(it.code) }
             val batchUrls = (listOfNotNull(source.batchTemplate) + source.urlFallbacks)
                 .map { it.replace("{symbols}", joined).replace("{symbol}", joined) }
-            val json = parseJson(getAny(batchUrls, source))
+            val json = gate.withPermit { parseJson(getAny(batchUrls, source)) }
             symbols.map { quoteFromJson(source, it, json) }
-        } catch (_: Throwable) {
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
             // اگر درخواست گروهی شکست خورد، تک‌تک امتحان کن
             parallel(symbols) { s -> fetchOne(source, s) }
         }
@@ -102,8 +108,10 @@ object Fetcher {
                 error = if (price == null) "قیمت پیدا نشد" else null,
                 ts = started
             )
-        } catch (t: Throwable) {
-            errorQuote(source, sym, t, started)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            errorQuote(source, sym, failure, started)
         }
     }
 
@@ -128,8 +136,8 @@ object Fetcher {
                 error = if (scaled == null) "«$raw» عدد نبود" else null,
                 ts = started
             )
-        } catch (t: Throwable) {
-            errorQuote(source, sym, t, started)
+        } catch (failure: Exception) {
+            errorQuote(source, sym, failure, started)
         }
     }
 
@@ -139,11 +147,13 @@ object Fetcher {
         val started = System.currentTimeMillis()
         val scale = scaleOf(source, sym)
         val rawPrice = JsonPath.readDouble(json, source.pricePath?.replace("{symbol}", sym.code))
-        val change = readChange(json, source, sym, rawPrice, scale)
+            ?.takeIf { it.isFinite() }
+        val change = readChange(json, source, sym, rawPrice)
         val spark = JsonPath.readDoubleList(json, source.sparkPath?.replace("{symbol}", sym.code))
             .map { it * scale }
+            .filter { it.isFinite() }
             .let { if (it.size >= 3) it.takeLast(SPARK_HISTORY_MAX) else emptyList() }
-        val scaled = rawPrice?.let { it * scale }
+        val scaled = rawPrice?.let { it * scale }?.takeIf { it.isFinite() }
         return Quote(
             code = sym.code, sourceId = source.id,
             label = sym.label,
@@ -171,26 +181,37 @@ object Fetcher {
         json: Any,
         source: SourceDef,
         sym: SymbolDef,
-        rawPrice: Double?,
-        scale: Double
+        rawPrice: Double?
     ): Double? {
         if (source.changeMode == ChangeMode.NONE) return null
-        val raw = JsonPath.readDouble(json, source.changePath?.replace("{symbol}", sym.code)) ?: return null
-        return when (source.changeMode) {
-            ChangeMode.PERCENT -> raw
+        val raw = JsonPath.readDouble(json, source.changePath?.replace("{symbol}", sym.code))
+            ?.takeIf { it.isFinite() } ?: return null
+        return changePercent(source.changeMode, rawPrice, raw)
+    }
+
+    /**
+     * تبدیل تغییر خام به درصد. قیمت و تغییر هر دو هنوز در واحد خام سایت‌اند؛ ضریب
+     * تبدیل واحد از صورت و مخرج حذف می‌شود. قبلاً قیمت خام دوباره بر scale تقسیم
+     * می‌شد و درصدِ منابعی با ضریب ۰٫۱ یا ۱۰۰ اشتباه بود.
+     */
+    fun changePercent(mode: ChangeMode, rawPrice: Double?, rawChange: Double): Double? {
+        if (!rawChange.isFinite()) return null
+        val result = when (mode) {
+            ChangeMode.PERCENT -> rawChange
             ChangeMode.ABSOLUTE -> {
-                val price = rawPrice ?: return null
-                val base = (price / scale) - raw
-                if (base == 0.0) null else (raw / base) * 100.0
+                val price = rawPrice?.takeIf { it.isFinite() } ?: return null
+                val previous = price - rawChange
+                if (previous == 0.0) null else (rawChange / previous) * 100.0
             }
 
             ChangeMode.PREV_CLOSE -> {
-                val price = rawPrice ?: return null
-                if (raw == 0.0) null else ((price / scale - raw) / raw) * 100.0
+                val price = rawPrice?.takeIf { it.isFinite() } ?: return null
+                if (rawChange == 0.0) null else ((price - rawChange) / rawChange) * 100.0
             }
 
             ChangeMode.NONE -> null
         }
+        return result?.takeIf { it.isFinite() }
     }
 
     // ───────────────────── واحد و ضریب هر نماد ─────────────────────
@@ -201,7 +222,7 @@ object Fetcher {
 
     /** ضریب این نماد — اول ضریب خودِ نماد، بعد ضریب منبع */
     fun scaleOf(source: SourceDef, sym: SymbolDef): Double =
-        sym.scale ?: source.scale
+        (sym.scale ?: source.scale).takeIf { it.isFinite() } ?: 1.0
 
     // ───────────────────── ابزارهای HTTP ─────────────────────
 
@@ -228,15 +249,21 @@ object Fetcher {
                     maxBytes = if (source.kind == FetchKind.HTML_CSS)
                         Http.MAX_HTML_BYTES else Http.MAX_JSON_BYTES
                 )
-            } catch (t: Throwable) {
-                last = t
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                last = failure
             }
         }
         throw last ?: error("آدرسی برای خواندن تعریف نشده بود")
     }
 
     private fun parseJson(body: String): Any =
-        runCatching { JSONObject(body) as Any }.getOrElse { JSONArray(body) as Any }
+        try {
+            JSONObject(body)
+        } catch (_: JSONException) {
+            JSONArray(body)
+        }
 
     private fun enc(code: String): String =
         URLEncoder.encode(code, "UTF-8").replace("+", "%20")

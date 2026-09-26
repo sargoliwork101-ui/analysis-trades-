@@ -393,9 +393,8 @@ object WidgetRenderer {
 
     /**
      * PendingIntent دکمه‌ی رفرش — با «توکن داخلی» امضا می‌شود.
-     * رسیور ویجت exported است (لانچر باید APPWIDGET_UPDATE بفرستد)، پس هر برنامه‌ی
-     * دیگری هم می‌توانست این اکشن را بفرستد و رفرش/تغییر حالت زنده را تحمیل کند؛
-     * توکن فقط در حافظه‌ی خصوصی ماست و روی PendingIntent (IMMUTABLE) قفل می‌شود.
+     * رسیور ویجت non-exported است و توکن نیز به‌عنوان دفاع دوم فقط در حافظه‌ی
+     * خصوصی ما نگه داشته و روی PendingIntent تغییرناپذیر قفل می‌شود.
      */
     private fun refreshIntent(context: Context, widgetId: Int): PendingIntent {
         val intent = InternalGuard.sign(

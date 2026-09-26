@@ -1,6 +1,7 @@
 package com.pulse.market.data
 
 import android.content.Context
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -142,9 +143,13 @@ object PumpScanner {
                 "?vs_currency=usd&order=market_cap_desc&per_page=$size&page=1" +
                 "&sparkline=false&price_change_percentage=1h,24h,7d"
 
-        val result = runCatching {
+        val result = try {
             val body = Http.getText(url)
-            parse(body, size, threshold)
+            Result.success(parse(body, size, threshold))
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            Result.failure(failure)
         }
 
         return@withContext result.fold(
@@ -157,7 +162,10 @@ object PumpScanner {
             onFailure = { t ->
                 // خطای شبکه: نتیجه‌ی قبلیِ کش را با پیام خطا برمی‌گردانیم (صفحه خالی نمی‌شود)
                 val old = cached(context)
-                if (old != null) old.copy(error = t.message ?: "خطای شبکه")
+                if (old != null) old.copy(
+                    minChange = threshold,
+                    error = t.message ?: "خطای شبکه"
+                )
                 else PumpScan(
                     at = System.currentTimeMillis(),
                     universe = size,

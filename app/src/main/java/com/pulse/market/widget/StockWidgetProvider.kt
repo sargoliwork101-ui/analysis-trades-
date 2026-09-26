@@ -20,6 +20,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 
 open class StockWidgetProvider : AppWidgetProvider() {
 
@@ -58,9 +59,8 @@ open class StockWidgetProvider : AppWidgetProvider() {
 
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
-        // اکشن‌های سفارشیِ ما فقط با «توکن داخلی» اجرا می‌شوند؛ رسیور باید exported
-        // بماند تا لانچر بتواند APPWIDGET_UPDATE بفرستد، پس بدون این نگهبان هر برنامه‌ی
-        // دیگری روی گوشی می‌توانست رفرش اجباری یا روشن/خاموش کردن حالت زنده را تحمیل کند.
+        // اکشن‌های سفارشی فقط با توکن داخلی اجرا می‌شوند. رسیورها در مانیفست
+        // non-exported هم هستند؛ این بررسی لایه‌ی دفاعی دوم برای PendingIntentهاست.
         val isInternalAction = intent.action == ACTION_REFRESH || intent.action == ACTION_TOGGLE_LIVE
         if (isInternalAction && !InternalGuard.isTrusted(context, intent)) {
             Log.w(TAG, "اکشن داخلی بدون توکن معتبر رد شد: ${intent.action}")
@@ -122,6 +122,7 @@ open class StockWidgetProvider : AppWidgetProvider() {
         const val ACTION_TOGGLE_LIVE = "com.pulse.market.ACTION_TOGGLE_LIVE"
 
         private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        private val refreshMutex = Mutex()
 
         /**
          * به‌روزرسانی همه‌ی ویجت‌ها — هر کدام با پیکربندی و نمادهای خودش؛
@@ -136,6 +137,19 @@ open class StockWidgetProvider : AppWidgetProvider() {
          * نشان می‌دهد و فقط چراغ‌هایش قرمز می‌شوند؛ صفحه هرگز خالی نمی‌شود.
          */
         suspend fun refreshAll(context: Context, force: Boolean = false, respectSchedule: Boolean = false) {
+            refreshMutex.lock()
+            try {
+                refreshAllLocked(context.applicationContext, force, respectSchedule)
+            } finally {
+                refreshMutex.unlock()
+            }
+        }
+
+        private suspend fun refreshAllLocked(
+            context: Context,
+            force: Boolean,
+            respectSchedule: Boolean
+        ) {
             val ids = WidgetRenderer.allWidgetIds(context)
             if (ids.isEmpty()) return
 
@@ -185,18 +199,17 @@ open class StockWidgetProvider : AppWidgetProvider() {
             cfgs.forEachIndexed { i, (id, cfg) ->
                 val quotes = wantedAll[i].mapNotNull { quoteMap[QuoteRepo.key(it.first, it.second.code)] }
                 renderOne(context, id, cfg, quotes)
-                // هشدارها فقط با داده‌ی همین نوبتِ شبکه بررسی می‌شوند؛
-                // نمادِ هشدار لازم نیست حتماً در ویجت نمایش داده شود — از داده‌ی
-                // تازه‌ی کش (تا ۱۵ دقیقه) بررسی می‌شود تا هشداری بی‌صدا از کار نیفتد
-                if (wantedNet[i].isNotEmpty()) {
+                // هشدار فقط بعد از یک نوبت واقعی شبکه و فقط با Quote سالمِ همان
+                // نوبت بررسی می‌شود؛ داده‌ی stale/cached نباید نوتیف تازه بسازد.
+                if (needNetwork && wantedNet[i].isNotEmpty()) {
                     val alertQuotes = cfg.alerts.filter { it.enabled }.mapNotNull { rule ->
-                        (quoteMap[QuoteRepo.key(rule.sourceId, rule.symbolCode)]
-                            ?: quoteMap.entries.firstOrNull {
-                                it.key.endsWith("|${rule.symbolCode}")
-                            }?.value)
-                            ?.takeIf { System.currentTimeMillis() - it.ts <= 15 * 60_000L }
-                    }
-                    runCatching { AlertEngine.evaluate(context, cfg, quotes + alertQuotes) }
+                        val sid = rule.sourceId.ifBlank {
+                            cfg.activeSourceIds.firstOrNull().orEmpty()
+                        }
+                        quoteMap[QuoteRepo.key(sid, rule.symbolCode)]
+                            ?.takeIf { !it.stale && it.error == null && it.price != null }
+                    }.distinctBy { QuoteRepo.key(it.sourceId, it.code) }
+                    runCatching { AlertEngine.evaluate(context, cfg, alertQuotes) }
                 }
             }
         }

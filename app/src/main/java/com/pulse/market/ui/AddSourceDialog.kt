@@ -67,7 +67,9 @@ fun AddSourceDialog(
     var scale by remember { mutableStateOf("1") }
     var symbolsText by remember { mutableStateOf("") }
 
-    val canSave = title.isNotBlank() && url.startsWith("http") &&
+    val cleanUrl = url.trim()
+    val validUrl = cleanUrl.startsWith("https://") || cleanUrl.startsWith("http://")
+    val canSave = title.isNotBlank() && validUrl &&
             (if (kind == FetchKind.JSON_REST) pricePath.isNotBlank() else cssSelector.isNotBlank())
 
     DialogShell(
@@ -280,7 +282,7 @@ fun AddSourceDialog(
                         title = title.trim(),
                         subtitle = if (kind == FetchKind.JSON_REST) "منبع دلخواه (JSON)" else "منبع دلخواه (HTML)",
                         kind = kind,
-                        urlTemplate = url.trim(),
+                        urlTemplate = cleanUrl,
                         pricePath = pricePath.takeIf { it.isNotBlank() },
                         changePath = changePath.takeIf { it.isNotBlank() },
                         volumePath = volumePath.takeIf { it.isNotBlank() },
@@ -288,7 +290,7 @@ fun AddSourceDialog(
                         changeMode = changeMode,
                         cssSelector = cssSelector.takeIf { it.isNotBlank() },
                         cssAttr = cssAttr.takeIf { it.isNotBlank() },
-                        scale = scale.trim().toDoubleOrNull() ?: 1.0,
+                        scale = scale.trim().toDoubleOrNull()?.takeIf { it.isFinite() } ?: 1.0,
                         unit = unit.trim(),
                         symbols = syms,
                         builtIn = false

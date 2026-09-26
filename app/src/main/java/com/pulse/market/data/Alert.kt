@@ -1,6 +1,7 @@
 package com.pulse.market.data
 
 import kotlinx.serialization.Serializable
+import kotlin.math.abs
 
 /** شرط فعال شدن هشدار */
 @Serializable
@@ -77,5 +78,42 @@ data class AlertRule(
                 AlertCondition.PCT_DOWN -> "افت ≥ $t٪"
             }
         }
+    }
+}
+
+/**
+ * منطق خالصِ هشدارها؛ جدا از Android تا هم رفتار عبور از حد دقیق باشد و هم بتوان
+ * آن را با تست واحد قفل کرد.
+ */
+object AlertLogic {
+
+    /** مقداری که برای شرط باید با حد مقایسه شود (قیمت یا درصد تغییر). */
+    fun metric(rule: AlertRule, price: Double, changePct: Double?): Double? =
+        when (rule.condition) {
+            AlertCondition.ABOVE, AlertCondition.BELOW -> price
+            AlertCondition.PCT_UP, AlertCondition.PCT_DOWN -> changePct
+        }?.takeIf { it.isFinite() }
+
+    /** آیا یک مقدارِ هم‌نوعِ شرط، حد را رد کرده است؟ */
+    fun isTriggered(rule: AlertRule, metric: Double): Boolean = when (rule.condition) {
+        AlertCondition.ABOVE -> metric >= rule.threshold
+        AlertCondition.BELOW -> metric <= rule.threshold
+        AlertCondition.PCT_UP -> metric >= abs(rule.threshold)
+        AlertCondition.PCT_DOWN -> metric <= -abs(rule.threshold)
+    }
+
+    /**
+     * بازه‌ی زمانی معمولی و شب‌گذر (مثلاً ۲۲:۰۰ تا ۰۶:۰۰).
+     * مجموعه‌ی روزِ خالی واقعاً یعنی «هیچ روزی»، مطابق متن رابط کاربری.
+     */
+    fun isInsideSchedule(rule: AlertRule, dayIndex: Int, minuteOfDay: Int): Boolean {
+        if (!rule.scheduleEnabled) return true
+        if (dayIndex !in rule.days) return false
+        if (rule.noTimeLimit) return true
+
+        val minute = minuteOfDay.coerceIn(0, 1439)
+        val from = rule.fromMinute.coerceIn(0, 1439)
+        val to = rule.toMinute.coerceIn(0, 1439)
+        return if (from <= to) minute in from..to else (minute >= from || minute <= to)
     }
 }

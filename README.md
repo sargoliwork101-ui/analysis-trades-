@@ -95,7 +95,7 @@ Kotlin 2.0 · AGP 8.5 · minSdk 26 · Gradle wrapper included.
 - Plain-HTTP custom sources are fetched only when the user explicitly configures them, and the dialog warns about the risk.
 - All network reads go through the `Http` module: http/https only, with a hard response-size cap.
 - Widget-internal broadcasts are signed with a private token so other apps cannot force refreshes or toggle live mode.
-- Remaining audit recommendations (signing key, `allowBackup`) are described in [AUDIT_fa.md](AUDIT_fa.md).
+- The remaining signing-key recommendation is described in [AUDIT_fa.md](AUDIT_fa.md).
 
 ## 👤 Developer
 **Hamed Sargoli** — [hamedsargoli.ir](https://hamedsargoli.ir) — +98 912 636 8924

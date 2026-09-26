@@ -6,9 +6,11 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
@@ -74,13 +76,67 @@ object ConfigStore {
         return WidgetsFile(template = migrate(legacy))
     }
 
-    /** سازگاری با فرمت‌های قدیمی: تک‌منبعی ← چندمنبعی + نام‌گذاری منبع نمادها */
+    /**
+     * سازگاری با فرمت‌های قدیمی + نرمال‌سازی داده‌ی خوانده‌شده از بکاپ.
+     * UI خودش بازه‌ها را محدود می‌کند، اما JSON دست‌کاری‌شده نباید interval منفی،
+     * NaN، هزاران نماد یا روز/ساعت نامعتبر را وارد سرویس و ویجت کند.
+     */
     private fun migrate(cfg: WidgetConfig): WidgetConfig {
         val ids = cfg.sourceIds.ifEmpty { listOf(cfg.sourceId) }
-        val symbols = cfg.symbols.map { s ->
-            if (s.sourceId.isEmpty()) s.copy(sourceId = ids.first()) else s
-        }
-        return cfg.copy(sourceIds = ids, symbols = symbols)
+            .map { it.trim().take(200) }
+            .filter { it.isNotEmpty() }
+            .distinct()
+            .take(100)
+            .ifEmpty { listOf("crypto_coingecko") }
+        val symbols = cfg.symbols.asSequence()
+            .filter { it.code.isNotBlank() }
+            .map { s ->
+                val sid = s.sourceId.trim().ifBlank { ids.first() }
+                s.copy(
+                    code = s.code.trim().take(200),
+                    label = s.label.trim().ifBlank { s.code.trim() }.take(200),
+                    sourceId = sid.take(200),
+                    unit = s.unit.trim().take(40),
+                    scale = s.scale?.takeIf { it.isFinite() }
+                )
+            }
+            .distinctBy { it.sourceId to it.code }
+            .take(MAX_SYMBOLS)
+            .toList()
+        val alerts = cfg.alerts.asSequence()
+            .filter { it.id.isNotBlank() && it.symbolCode.isNotBlank() && it.threshold.isFinite() }
+            .map { rule ->
+                rule.copy(
+                    id = rule.id.trim().take(200),
+                    symbolCode = rule.symbolCode.trim().take(200),
+                    symbolLabel = rule.symbolLabel.trim().ifBlank { rule.symbolCode.trim() }.take(200),
+                    sourceId = rule.sourceId.trim().ifBlank { ids.first() }.take(200),
+                    fromMinute = rule.fromMinute.coerceIn(0, 1439),
+                    toMinute = rule.toMinute.coerceIn(0, 1439),
+                    days = rule.days.filterTo(mutableSetOf()) { it in 0..6 },
+                    cooldownMin = rule.cooldownMin.coerceIn(1, 7 * 24 * 60)
+                )
+            }
+            .distinctBy { it.id }
+            .take(100)
+            .toList()
+        val safeFontScale = cfg.fontScale.takeIf { it.isFinite() }?.coerceIn(0.75f, 1.5f) ?: 1.0f
+        val safePumpChange = cfg.pumpMinChange.takeIf { it.isFinite() }?.coerceIn(0.0, 100.0) ?: 8.0
+        return cfg.copy(
+            sourceId = ids.first(),
+            sourceIds = ids,
+            symbols = symbols,
+            alerts = alerts,
+            intervalSec = cfg.intervalSec.coerceIn(5, 3600),
+            fontScale = safeFontScale,
+            sparkPoints = cfg.sparkPoints.coerceIn(6, 60),
+            rows = cfg.rows.coerceIn(1, MAX_SYMBOLS),
+            refreshFromMinute = cfg.refreshFromMinute.coerceIn(0, 1439),
+            refreshToMinute = cfg.refreshToMinute.coerceIn(0, 1439),
+            pumpUniverse = cfg.pumpUniverse.coerceIn(10, 250),
+            pumpMinChange = safePumpChange,
+            title = cfg.title.take(200)
+        )
     }
 
     private fun WidgetsFile.forWidget(widgetId: Int): WidgetConfig =
@@ -122,26 +178,38 @@ object ConfigStore {
         enqueueSave(context, cfg, widgetId, 0)
     }
 
+    @Synchronized
     private fun enqueueSave(context: Context, cfg: WidgetConfig, widgetId: Int, delayMs: Long) {
-        // فقط نوبتِ همان ویجت جایگزین می‌شود؛ نوبت ویجت‌های دیگر دست‌نخورده می‌ماند
+        // فقط نوبتِ همان ویجت جایگزین می‌شود؛ نوبت ویجت‌های دیگر دست‌نخورده می‌ماند.
         pendingSaves.remove(widgetId)?.cancel()
-        var job: Job? = null
-        job = ioScope.launch {
+        // LAZY مهم است: Job باید پیش از شروع در نقشه ثبت شود؛ در حالت delay=0 ممکن
+        // بود coroutine زودتر تمام شود و Job تکمیل‌شده برای همیشه در نقشه بماند.
+        val job = ioScope.launch(start = CoroutineStart.LAZY) {
             try {
                 if (delayMs > 0) delay(delayMs)
-                save(context, cfg, widgetId)
+                save(context.applicationContext, cfg, widgetId)
             } finally {
-                // فقط اگر همان نوبتِ خودمان هنوز در نقشه است حذف می‌شود؛ وگرنه
-                // ممکن است نوبتِ تازه‌تری را از نقشه پاک کنیم و بعداً منقضی نشود
-                val mine = job
+                val mine = currentCoroutineContext()[Job]
                 if (mine != null) pendingSaves.remove(widgetId, mine)
             }
         }
         pendingSaves[widgetId] = job
+        job.start()
+    }
+
+    /** صبر تا آخرین ذخیره‌ی خودکارِ همین ویجت؛ برای بستن امن جریان پیکربندی. */
+    suspend fun awaitPending(widgetId: Int) {
+        while (true) {
+            val pending = pendingSaves[widgetId] ?: return
+            pending.join()
+            // اگر هنگام انتظار، نوبت تازه‌تری جایگزین شد، همان را هم منتظر بمان.
+            if (pendingSaves[widgetId] == null) return
+        }
     }
 
     /** پاک کردن تنظیمات ویجتِ حذف‌شده از صفحه */
     suspend fun deleteWidget(context: Context, widgetId: Int) {
+        cancelPending(widgetId)
         context.dataStore.edit { prefs ->
             val file = loadFile(prefs)
             if (file.widgets.containsKey(widgetId.toString())) {
@@ -184,9 +252,51 @@ object ConfigStore {
      *    وگرنه در فهرست دو منبع هم‌نام دیده می‌شود و سردرگمی می‌سازد.
      */
     private fun sanitizeCustom(list: List<SourceDef>): List<SourceDef> =
-        list.filter { it.id.isNotBlank() && SourceCatalog.byId(it.id) == null }
-            .map { it.copy(builtIn = false) }
+        list.asSequence()
+            .filter {
+                it.id.isNotBlank() && SourceCatalog.byId(it.id.trim()) == null &&
+                        isWebUrl(it.urlTemplate)
+            }
+            .map { source ->
+                source.copy(
+                    id = source.id.trim().take(200),
+                    title = source.title.trim().ifBlank { "منبع دلخواه" }.take(200),
+                    subtitle = source.subtitle.take(300),
+                    urlTemplate = source.urlTemplate.trim().take(4096),
+                    batchTemplate = source.batchTemplate?.trim()?.take(4096)
+                        ?.takeIf(::isWebUrl),
+                    urlFallbacks = source.urlFallbacks.map { it.trim().take(4096) }
+                        .filter(::isWebUrl).distinct().take(5),
+                    scale = source.scale.takeIf { it.isFinite() } ?: 1.0,
+                    unit = source.unit.trim().take(40),
+                    symbols = source.symbols.asSequence()
+                        .filter { it.code.isNotBlank() }
+                        .map { symbol ->
+                            symbol.copy(
+                                code = symbol.code.trim().take(200),
+                                label = symbol.label.trim().ifBlank { symbol.code.trim() }.take(200),
+                                sourceId = "",
+                                unit = symbol.unit.trim().take(40),
+                                scale = symbol.scale?.takeIf { it.isFinite() }
+                            )
+                        }
+                        .distinctBy { it.code }
+                        .take(500)
+                        .toList(),
+                    headers = source.headers.entries.take(30).associate {
+                        it.key.take(200) to it.value.take(2000)
+                    },
+                    builtIn = false
+                )
+            }
             .distinctBy { it.id }
+            .take(100)
+            .toList()
+
+    private fun isWebUrl(url: String): Boolean {
+        val clean = url.trim()
+        return clean.startsWith("https://") || clean.startsWith("http://")
+    }
 
     /** ذخیره‌ی منابع دلخواه بدون نیاز به زنده ماندن صفحه */
     fun saveCustomSourcesAsync(context: Context, list: List<SourceDef>) {
@@ -213,6 +323,17 @@ object ConfigStore {
     /** ذخیره‌ی نمادهای دلخواه بورس بدون نیاز به زنده ماندن صفحه */
     fun saveTseSymbolsAsync(context: Context, list: List<SymbolDef>) {
         ioScope.launch { saveTseSymbols(context, list) }
+    }
+
+    @Synchronized
+    private fun cancelPending(widgetId: Int) {
+        pendingSaves.remove(widgetId)?.cancel()
+    }
+
+    @Synchronized
+    private fun cancelAllPending() {
+        pendingSaves.values.forEach { it.cancel() }
+        pendingSaves.clear()
     }
 
     // ───────────── بکاپ و بازگردانی ─────────────
@@ -243,15 +364,40 @@ object ConfigStore {
      */
     suspend fun importAll(context: Context, text: String): Int {
         val dump = json.decodeFromString(BackupDump.serializer(), text.trim())
+        if (dump.version != 1) error("نسخه‌ی فایل بکاپ پشتیبانی نمی‌شود")
+        // ذخیره‌ی debounce شده‌ی صفحه نباید بعد از بازیابی، فایل تازه را دوباره با
+        // تنظیمات قدیمی بازنویسی کند.
+        cancelAllPending()
         val safeSources = sanitizeCustom(dump.customSources)
+        val safeWidgets = WidgetsFile(
+            template = migrate(dump.widgets.template),
+            widgets = dump.widgets.widgets.entries.asSequence()
+                .filter { (key, _) -> key.toIntOrNull()?.let { it > 0 } == true }
+                .take(200)
+                .associate { (key, value) -> key to migrate(value) }
+        )
+        val safeTseSymbols = dump.tseSymbols.asSequence()
+            .filter { it.code.isNotBlank() }
+            .map {
+                it.copy(
+                    code = it.code.trim().take(200),
+                    label = it.label.trim().ifBlank { it.code.trim() }.take(200),
+                    sourceId = "tse_tsetmc",
+                    unit = it.unit.trim().take(40),
+                    scale = it.scale?.takeIf { value -> value.isFinite() }
+                )
+            }
+            .distinctBy { it.code }
+            .take(500)
+            .toList()
         context.dataStore.edit { prefs ->
-            prefs[KEY_WIDGETS] = json.encodeToString(WidgetsFile.serializer(), dump.widgets)
+            prefs[KEY_WIDGETS] = json.encodeToString(WidgetsFile.serializer(), safeWidgets)
             prefs[KEY_CUSTOM_SOURCES] =
                 json.encodeToString(ListSerializer(SourceDef.serializer()), safeSources)
             prefs[KEY_TSE_SYMBOLS] =
-                json.encodeToString(ListSerializer(SymbolDef.serializer()), dump.tseSymbols)
+                json.encodeToString(ListSerializer(SymbolDef.serializer()), safeTseSymbols)
         }
-        return dump.widgets.widgets.size
+        return safeWidgets.widgets.size
     }
 
     /** همه‌ی منابع = آماده‌های داخل اپ + منابع دلخواه کاربر */

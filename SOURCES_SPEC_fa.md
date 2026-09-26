@@ -238,8 +238,8 @@ error = (num == null) ? "«raw» عدد نبود" : (سلکتور پیدا نش�
 | حالت | معنی مقدار changePath | فرمول درصد |
 |---|---|---|
 | `PERCENT` | خود سایت درصد داده | `pct = raw` |
-| `ABSOLUTE` | تغییر مطلق (مثلاً ریال) | `base = (price/scale) − raw` → `pct = raw / base × 100` |
-| `PREV_CLOSE` | قیمت بسته‌ی قبلی | `pct = ((price/scale − raw) / raw) × 100` |
+| `ABSOLUTE` | تغییر مطلق (مثلاً ریال) | `previousRaw = rawPrice − rawChange` → `pct = rawChange / previousRaw × 100` |
+| `PREV_CLOSE` | قیمت بسته‌ی قبلی | `pct = ((rawPrice − previousRaw) / previousRaw) × 100` |
 | `NONE` | — | `null` (درصد نمایش داده نمی‌شود) |
 
 ### ۶.۴) مدیریت خطا

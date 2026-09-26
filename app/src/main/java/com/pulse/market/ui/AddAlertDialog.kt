@@ -96,11 +96,13 @@ fun AddAlertDialog(
     val canSave = (if (manualMode) manualCode.isNotBlank() else symbolCode.isNotBlank()) &&
             (threshold.replace(",", "").toDoubleOrNull() != null)
 
-    // واحدِ نمادِ انتخاب‌شده — کنار عددِ حد هشدار نشان داده می‌شود (مثل خود ویجت)
-    val selectedUnit = (
-            sources.firstOrNull { it.id == symbolSourceId }
-                ?: sources.firstOrNull()
-            )?.unit.orEmpty()
+    // واحدِ خود نماد بر واحد منبع مقدم است (مثلاً «انس طلا» داخل TGJU دلار است،
+    // در حالی که بقیه‌ی نمادهای همان منبع تومان‌اند).
+    val selectedSource = sources.firstOrNull { it.id == symbolSourceId } ?: sources.firstOrNull()
+    val selectedSymbol = symbolsPerSource.firstOrNull { it.first.id == selectedSource?.id }
+        ?.second?.firstOrNull { it.code == symbolCode }
+    val selectedUnit = selectedSymbol?.unit?.takeIf { it.isNotBlank() }
+        ?: selectedSource?.unit.orEmpty()
 
     DialogShell(
         icon = Icons.Default.NotificationsActive,

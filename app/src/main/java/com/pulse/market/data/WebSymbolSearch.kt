@@ -1,5 +1,6 @@
 package com.pulse.market.data
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -26,12 +27,16 @@ object WebSymbolSearch {
         withContext(Dispatchers.IO) {
             val q = query.trim()
             if (q.isEmpty()) return@withContext null
-            runCatching {
+            try {
                 when (marketKindOf(sourceId)) {
                     MarketKind.CRYPTO -> coingecko(sourceId, q)
                     else -> null
                 }
-            }.getOrNull()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
+            }
         }
 
     /** CoinGecko: api.coingecko.com/api/v3/search?query=… → coins[] {id, name, symbol} */

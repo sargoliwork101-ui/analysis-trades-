@@ -11,6 +11,8 @@ import com.pulse.market.R
 import com.pulse.market.ui.Format
 import com.pulse.market.ui.MainActivity
 import java.util.Calendar
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlin.math.abs
 
 /**
@@ -34,7 +36,15 @@ object AlertEngine {
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
 
+    /** جلوگیری از دو نوتیف تکراری وقتی سرویس، Worker و رسیور هم‌زمان ارزیابی می‌کنند. */
+    private val evaluateMutex = Mutex()
+
     suspend fun evaluate(context: Context, cfg: WidgetConfig, quotes: List<Quote>) {
+        if (!cfg.showNotification) return
+        evaluateMutex.withLock { evaluateLocked(context, cfg, quotes) }
+    }
+
+    private fun evaluateLocked(context: Context, cfg: WidgetConfig, quotes: List<Quote>) {
         val rules = cfg.alerts.filter { it.enabled }
         if (rules.isEmpty() || quotes.isEmpty()) return
 
@@ -46,8 +56,7 @@ object AlertEngine {
         val minuteOfDay = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
         val dayIndex = persianDayIndex(cal.get(Calendar.DAY_OF_WEEK))
 
-        // همه‌ی «قیمت آخرین‌بار دیده‌شده» و «آخرین نوتیف» در یک تراکنش نوشته می‌شوند؛
-        // قبلاً هر قانون تا دو بار روی دیسک می‌نوشت (با ۱۰ هشدار = ۲۰ نوشتن در هر رفرش).
+        // همه‌ی «مقدار آخرین‌بار دیده‌شده» و «آخرین نوتیف» در یک تراکنش نوشته می‌شوند.
         val store = prefs(context)
         val editor = store.edit()
         var dirty = false
@@ -57,26 +66,25 @@ object AlertEngine {
                 it.code.equals(rule.symbolCode, ignoreCase = true) &&
                         (rule.sourceId.isEmpty() || it.sourceId.isEmpty() || it.sourceId == rule.sourceId)
             } ?: continue
-            val price = quote.price ?: continue
+            val price = quote.price?.takeIf { it.isFinite() } ?: continue
 
-            // ── زمان‌بندی: آیا همین حالا این هشدار مجاز است؟ ──
-            if (rule.scheduleEnabled) {
-                if (rule.days.isNotEmpty() && dayIndex !in rule.days) continue
-                if (!rule.noTimeLimit && !insideWindow(minuteOfDay, rule.fromMinute, rule.toMinute)) continue
-            }
+            // مجموعه‌ی روز خالی یعنی هیچ روزی؛ قبلاً اشتباهاً مثل «همه‌ی روزها» عمل می‌کرد.
+            if (!AlertLogic.isInsideSchedule(rule, dayIndex, minuteOfDay)) continue
 
-            val triggered = isTriggered(rule, price, quote.changePct)
-
-            val keyPrice = "last_price_${rule.id}"
+            // برای هشدار درصدی باید «درصد قبلی» ذخیره شود، نه قیمت قبلی. در غیر این
+            // صورت onlyOnCross بعد از نخستین ارزیابی دیگر هیچ عبور درصدی را نمی‌دید.
+            val metric = AlertLogic.metric(rule, price, quote.changePct) ?: continue
+            val triggered = AlertLogic.isTriggered(rule, metric)
+            val keyMetric = "last_metric_${rule.id}_${rule.condition.name}"
             val keyNotified = "last_notified_${rule.id}"
-            // مقدارِ ذخیره‌شده‌ی قبلی — نه مقدارِ این نوبت (همان کلید در همین حلقه
-            // دوباره خوانده نمی‌شود، پس تراکنش باز هم درست کار می‌کند)
-            val previous = store.getString(keyPrice, null)?.toDoubleOrNull()
+            val previous = store.getString(keyMetric, null)?.toDoubleOrNull()
+                ?.takeIf { it.isFinite() }
 
-            // ۱) آیا شرط برقرار است؟  ۲) اگر «فقط لحظه‌ی عبور» است، قبلاً برقرار نبوده باشد  ۳) کول‌داون رد شده باشد
+            // ۱) شرط برقرار باشد  ۲) در حالت عبور، نوبت قبل برقرار نبوده باشد
+            // ۳) فاصله‌ی ضداسپم تمام شده باشد.
             var shouldNotify = triggered
             if (shouldNotify && rule.onlyOnCross && previous != null) {
-                shouldNotify = !isTriggered(rule, previous, quote.changePct)
+                shouldNotify = !AlertLogic.isTriggered(rule, previous)
             }
             if (shouldNotify) {
                 val lastNotified = store.getLong(keyNotified, 0L)
@@ -86,25 +94,13 @@ object AlertEngine {
             if (shouldNotify) {
                 notify(context, cfg, rule, quote)
                 editor.putLong(keyNotified, now)
-                dirty = true
             }
-            editor.putString(keyPrice, price.toString())
+            editor.putString(keyMetric, metric.toString())
             dirty = true
         }
 
-        if (dirty) runCatching { editor.apply() }
+        if (dirty) editor.apply()
     }
-
-    private fun isTriggered(rule: AlertRule, price: Double, changePct: Double?): Boolean = when (rule.condition) {
-        AlertCondition.ABOVE -> price >= rule.threshold
-        AlertCondition.BELOW -> price <= rule.threshold
-        AlertCondition.PCT_UP -> changePct != null && changePct >= abs(rule.threshold)
-        AlertCondition.PCT_DOWN -> changePct != null && changePct <= -abs(rule.threshold)
-    }
-
-    /** بازه‌ی زمانی معمولی و بازه‌های شب‌گذر (مثلاً ۲۲:۰۰ تا ۰۶:۰۰) */
-    private fun insideWindow(minute: Int, from: Int, to: Int): Boolean =
-        if (from <= to) minute in from..to else (minute >= from || minute <= to)
 
     /** شنبه=۰ ... جمعه=۶ */
     private fun persianDayIndex(calendarDay: Int): Int = when (calendarDay) {

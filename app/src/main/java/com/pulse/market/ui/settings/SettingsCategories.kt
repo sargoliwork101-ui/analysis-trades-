@@ -889,11 +889,15 @@ fun AlertsCategory(
             InfoCard("هنوز هشداری ثبت نشده. مثلاً: «وقتی بیت‌کوین از ۱۰۰٬۰۰۰ گذشت به من خبر بده».")
         } else {
             cfg.alerts.forEach { rule ->
-                // واحدِ نمادِ هشدار از تعریف منبع — تا شرط هشدار مثل ویجت، همراه واحد دیده شود
+                // واحدِ خود نماد بر واحد منبع مقدم است (TGJU هم تومان دارد هم دلار).
                 val ruleSource = sources.firstOrNull { it.id == rule.sourceId }
+                val ruleSymbol = cfg.symbols.firstOrNull {
+                    it.sourceId == rule.sourceId && it.code == rule.symbolCode
+                } ?: ruleSource?.symbols?.firstOrNull { it.code == rule.symbolCode }
                 AlertRuleCard(
                     rule = rule,
-                    unit = ruleSource?.unit.orEmpty(),
+                    unit = ruleSymbol?.unit?.takeIf { it.isNotBlank() }
+                        ?: ruleSource?.unit.orEmpty(),
                     // منبعِ حذف‌شده (مثل منابع نسخه‌های قدیم): هشدار هرگز بررسی نمی‌شود —
                     // باید به کاربر گفته شود، نه اینکه بی‌صدا از کار بیفتد
                     sourceMissing = ruleSource == null,

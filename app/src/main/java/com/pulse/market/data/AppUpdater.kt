@@ -28,7 +28,8 @@ object AppUpdater {
     /** همه‌ی آدرس‌های قابل قبول برای فایل نصبی، ریلیزهای همین مخزن‌اند */
     private const val RELEASE_DOWNLOAD_PREFIX = "https://github.com/$REPO/releases/download/"
 
-    private val APK_NAME = Regex("""^PulseMarket-v[\d.]+\.apk$""", RegexOption.IGNORE_CASE)
+    private val APK_NAME = Regex("""^PulseMarket-v\d+(?:\.\d+)*\.apk$""")
+    private val SHA256 = Regex("""^[0-9a-fA-F]{64}$""")
 
     /** اطلاعات آخرین نسخه‌ی منتشرشده */
     data class LatestRelease(
@@ -78,26 +79,25 @@ object AppUpdater {
      * انتخاب فایل نصبی بین asset های ریلیز — با سخت‌گیری کامل.
      * خروجی: (آدرس، sha256) یا null اگر asset معتبری نبود.
      */
-    private fun pickApk(assets: org.json.JSONArray?): Pair<String, String?>? {
+    internal fun pickApk(assets: org.json.JSONArray?): Pair<String, String?>? {
         if (assets == null) return null
-        val candidates = mutableListOf<Triple<String, String, String?>>() // name, url, sha
         for (i in 0 until assets.length()) {
-            val a = assets.optJSONObject(i) ?: continue
-            val name = a.optString("name")
-            val url = a.optString("browser_download_url")
-            val sha = a.optString("digest").takeIf { it.startsWith("sha256:") }
-                ?.substringAfter("sha256:")?.takeIf { it.isNotBlank() }
-            candidates += Triple(name, url, sha)
+            val asset = assets.optJSONObject(i) ?: continue
+            val name = asset.optString("name")
+            val url = asset.optString("browser_download_url")
+            // فقط همان نامی که CI خودمان می‌سازد. fallback قدیمیِ «هر فایل apk»
+            // سخت‌گیری توضیح‌داده‌شده در بالای کلاس را عملاً دور می‌زد.
+            if (!APK_NAME.matches(name)) continue
+            if (!url.startsWith(RELEASE_DOWNLOAD_PREFIX) || url.substringAfterLast('/') != name) continue
+
+            val sha = asset.optString("digest")
+                .takeIf { it.startsWith("sha256:", ignoreCase = true) }
+                ?.substringAfter(':')
+                ?.takeIf { SHA256.matches(it) }
+                ?.lowercase()
+            return url to sha
         }
-        // ۱) فایل خودِ ما با نام استاندارد  ۲) هر فایل apk داخل همان ریلیز
-        val exact = candidates.firstOrNull {
-            it.second.startsWith(RELEASE_DOWNLOAD_PREFIX) && APK_NAME.matches(it.first)
-        }
-        val anyApk = candidates.firstOrNull {
-            it.second.startsWith(RELEASE_DOWNLOAD_PREFIX) && it.first.endsWith(".apk", ignoreCase = true)
-        }
-        val chosen = exact ?: anyApk ?: return null
-        return chosen.second to chosen.third
+        return null
     }
 
     /** آیا نسخه‌ی سمت چپ جدیدتر از نسخه‌ی فعلی است؟ */

@@ -12,13 +12,17 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.lifecycleScope
+import com.pulse.market.data.ConfigStore
 import com.pulse.market.ui.settings.SettingsScreen
 import com.pulse.market.widget.StockWidgetProvider
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
     /** صفر = الگوی پیش‌فرض؛ هر شماره‌ی دیگر = تنظیمات همان ویجت */
     private val widgetIdState = mutableStateOf(0)
+    private var closingConfigure = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -29,7 +33,17 @@ class MainActivity : ComponentActivity() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (widgetIdState.value != 0) {
-                    closeAsConfigure()
+                    if (closingConfigure) return
+                    closingConfigure = true
+                    val widgetId = widgetIdState.value
+                    lifecycleScope.launch {
+                        // برگشت هم طبق قرارداد، ویجت را اضافه می‌کند؛ اما باید اول
+                        // ذخیره‌ی debounce شده تمام شود تا لانچر تنظیم قدیمی نبیند.
+                        ConfigStore.awaitPending(widgetId)
+                        StockWidgetProvider.syncLiveService(this@MainActivity)
+                        StockWidgetProvider.requestUpdate(this@MainActivity)
+                        closeAsConfigure()
+                    }
                 } else {
                     isEnabled = false
                     onBackPressedDispatcher.onBackPressed()
