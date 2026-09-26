@@ -220,3 +220,9 @@
 (در سپتامبر ۲۰۲۶ باید 36 باشد)، معماری سرویس زنده‌ی طولانی، کلید امضای عمومی، نبود
 AAB انتشار، updater بیرون از Play و نبود Privacy Policy/Data safety آماده است. تحلیل و
 نقشه‌ی اقدام کامل در [`STORE_READINESS_fa.md`](STORE_READINESS_fa.md) ثبت شده است.
+
+### اعتبارسنجی نهایی ممیزی دوم
+
+Commit عملکردی `de89bc565ebe79ae02fa41de2ed6dc152b52aa03` در GitHub Actions با موفقیت
+اعتبارسنجی شد: `assembleDebug`، همه‌ی unit testها، `lintDebug` و بررسی امضای APK
+همگی سبز بودند. ران: [36223816914](https://github.com/sargoliwork101-ui/analysis-trades-/actions/runs/36223816914).
