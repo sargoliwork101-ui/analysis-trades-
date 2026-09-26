@@ -407,7 +407,7 @@ object ConfigStore {
 
     // ───────────── بکاپ و بازگردانی ─────────────
 
-    /** ساخت فایل بکاپ JSON از همه‌ی تنظیمات (ویجت‌ها + الگو + منابع دلخواه + نمادهای بورس) */
+    /** بکاپ تنظیمات، منابع، نمادهای بورس، واچ‌لیست‌ها و تاریخچه‌ی هشدارها */
     suspend fun exportAll(context: Context): String {
         awaitAllPending()
         val prefs = context.dataStore.data.first()

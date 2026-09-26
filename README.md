@@ -20,7 +20,8 @@ An Android home-screen widget that shows **live market prices** — Tehran Stock
 - **Row count control** — how many symbols (1–6) each widget shows.
 
 ### Alerts 🔔
-- Conditions: above / below / %gain / %loss; per-alert schedule (time window + weekdays, overnight windows supported) and anti-spam cooldown.
+- Conditions: above / below / %gain / %loss / **volume spike versus the previous sample**; per-alert schedule and anti-spam cooldown.
+- **Alert history** — up to 200 delivered events with timestamp and observed value, stored locally and included in backups.
 - **Snooze** — silence alerts for 15/30/60 minutes with one tap.
 - Notifications use a **single subtle vibration** (70 ms).
 
@@ -35,11 +36,15 @@ An Android home-screen widget that shows **live market prices** — Tehran Stock
 - **Scheduled refresh window** — updates (and mobile data) only during chosen hours; manual refresh always works. Overnight windows supported.
 
 ### Settings UI
-- Clean sectioned design (landing menu → each section its own page), live widget preview, color-swatch theme picker, unified dialogs (TSE symbol search, add alert, add source).
-- **Backup & restore** — export/import the full configuration as one JSON file.
+- The Persian interface is forced to **RTL** regardless of the phone language.
+- Clean sectioned design (landing menu → each section its own page), live widget preview, color-swatch theme picker and unified dialogs.
+- **Named watchlists** — save the current symbol/source set by name and apply it to another widget.
+- **Backup & restore** — export/import configuration, watchlists and alert history as one JSON file.
 - **In-app updater** — checks the latest GitHub release, shows the **APK SHA-256 fingerprint**, and installs the new APK *over* the current app (nothing is wiped).
 
 ### Data sources
+- **Source health & automatic fallback** — view last success/error, latency, active host and fallback use; a failed endpoint temporarily moves to the back of the queue and is retried later.
+- **Abnormal-price detection** — an unexplained 40%+ jump is quarantined for one sample while the last healthy price remains visible; a second matching sample confirms it.
 - Built-ins: **TSE (TSETMC)** + market index, **CoinGecko** (crypto), **TGJU** (free-market USD, gold & coins, plus the **global gold/silver ounce**), and **TradingView** (gold, silver, oil, dollar index, crypto).
 - **Custom sources** — any JSON API (dot-path, batch template, scale/unit — plus a per-symbol unit with `@`, e.g. `ons:Gold@$`) or an HTML page (CSS selector); TSE symbol search by name or TSETMC page link.
 - 📡 Porting the fetching layer elsewhere? See **[SOURCES_SPEC_fa.md](SOURCES_SPEC_fa.md)** (Persian).
@@ -78,6 +83,7 @@ Two built-in ways; both give the **USD** price of one troy ounce:
 - ⚠️ Versions 1.0–1.3 were signed with the CI runner's throwaway key; installing **1.4** over them needs one uninstall/reinstall. After 1.4 that is no longer needed.
 
 **Version history**
+- **1.15** — forced RTL Persian UI, alert history, volume-spike alerts, source health with smarter fallback, abnormal-price quarantine, and named watchlists.
 - **1.14** — security/engineering audit (internal widget token, response size caps, URL validation, stricter updater) + global gold + TradingView source + crypto-pumps section + unit tests in CI. Details: [AUDIT_fa.md](AUDIT_fa.md)
 - **1.13** — five edge cases around source deletion + periodic-worker battery leak.
 - **1.12** — only healthy built-in sources + gold/FX from TGJU's official API.
