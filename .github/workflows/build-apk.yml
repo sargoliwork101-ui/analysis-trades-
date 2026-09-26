@@ -57,8 +57,8 @@ jobs:
 
       # تست‌های واحد منطق خالص (JsonPath/Num/نسخه/امتیاز پامپ) — سریع و بدون شبیه‌ساز.
       # خرابی‌شان یعنی احتمال شکستن داده‌خوانی؛ پس ران را قرمز می‌کنند.
-      - name: Run unit tests
-        run: ./gradlew test --no-daemon --stacktrace
+      - name: Run unit tests and Android lint
+        run: ./gradlew test lintDebug --no-daemon --stacktrace
 
       - name: Rename APK for Easy Download
         run: |
