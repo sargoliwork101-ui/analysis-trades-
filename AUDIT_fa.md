@@ -242,7 +242,9 @@ AAB انتشار، updater بیرون از Play و نبود Privacy Policy/Data 
 
 ### اعتبارسنجی نسخه‌ی ۱٫۱۶
 
-نتیجه‌ی build، unit test، Android Lint و بررسی امضای APK پس از اجرای CI ثبت می‌شود.
+Commit نهایی قابلیت‌ها `7b91e67f7e7dfcaa6ea49436dac944ae532b5268` در GitHub Actions با
+`assembleDebug`، همه‌ی unit testها، `lintDebug` و بررسی امضای ثابت APK با موفقیت عبور کرد.
+ران: [36231778773](https://github.com/sargoliwork101-ui/analysis-trades-/actions/runs/36231778773).
 
 ### اعتبارسنجی نسخه‌ی ۱٫۱۵
 
