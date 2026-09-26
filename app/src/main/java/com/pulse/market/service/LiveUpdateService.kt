@@ -74,9 +74,9 @@ class LiveUpdateService : Service() {
         val manager = getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
-                CHANNEL_ID, "به‌روزرسانی زنده‌ی قیمت‌ها", NotificationManager.IMPORTANCE_MIN
+                CHANNEL_ID, "\u200Fبه‌روزرسانی زنده‌ی قیمت‌ها", NotificationManager.IMPORTANCE_MIN
             ).apply {
-                description = "سرویس پس‌زمینه‌ی ویجت نبض بازار"
+                description = "\u200Fسرویس پس‌زمینه‌ی ویجت نبض بازار"
                 setShowBadge(false)
                 enableLights(false)
                 enableVibration(false)
@@ -92,8 +92,8 @@ class LiveUpdateService : Service() {
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_pulse)
-            .setContentTitle("نبض بازار")
-            .setContentText(text)
+            .setContentTitle("\u200Fنبض بازار")
+            .setContentText("\u200F$text")
             .setOngoing(true)
             .setSilent(true)
             .setOnlyAlertOnce(true)

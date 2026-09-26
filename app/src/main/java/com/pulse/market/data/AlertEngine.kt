@@ -265,9 +265,9 @@ object AlertEngine {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
         if (manager.getNotificationChannel(CHANNEL_ID) != null) return
         val channel = NotificationChannel(
-            CHANNEL_ID, "هشدار قیمت", NotificationManager.IMPORTANCE_HIGH
+            CHANNEL_ID, "\u200Fهشدار قیمت", NotificationManager.IMPORTANCE_HIGH
         ).apply {
-            description = "وقتی نماد به حدی که تعیین کرده‌ای رسید"
+            description = "\u200Fوقتی نماد به حدی که تعیین کرده‌ای رسید"
             enableVibration(true)
             vibrationPattern = VIBRATION_PATTERN
         }

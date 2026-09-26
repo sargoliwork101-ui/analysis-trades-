@@ -35,6 +35,8 @@
             android:maxWidth="150dp"
             android:maxLines="1"
             android:text="نبض بازار"
+            android:textDirection="rtl"
+            android:textAlignment="viewStart"
             android:textColor="#F1F5F9"
             android:textSize="12sp"
             android:textStyle="bold" />
@@ -51,6 +53,8 @@
             android:maxLines="1"
             android:ellipsize="end"
             android:text="--:--"
+            android:textDirection="rtl"
+            android:textAlignment="viewStart"
             android:textColor="#8B9AB1"
             android:textSize="10sp" />
 
@@ -88,6 +92,8 @@
         android:maxLines="1"
         android:ellipsize="end"
         android:text="در حال آماده‌سازی…"
+        android:textDirection="rtl"
+        android:textAlignment="viewStart"
         android:textColor="#8B9AB1"
         android:textSize="9sp" />
 </LinearLayout>
