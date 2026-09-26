@@ -185,12 +185,12 @@ object PumpScanner {
             val o = arr.optJSONObject(i) ?: continue
             val id = o.optString("id").trim()
             if (id.isEmpty()) continue
-            val price: Double? = o.optDouble("current_price").takeIf { !it.isNaN() }
-            val cap: Double? = o.optDouble("market_cap").takeIf { !it.isNaN() }
-            val volume: Double? = o.optDouble("total_volume").takeIf { !it.isNaN() }
-            val change24: Double? = o.optDouble("price_change_percentage_24h").takeIf { !it.isNaN() }
-            val change1: Double? = o.optDouble("price_change_percentage_1h_in_currency").takeIf { !it.isNaN() }
-            val change7: Double? = o.optDouble("price_change_percentage_7d_in_currency").takeIf { !it.isNaN() }
+            val price: Double? = o.optDouble("current_price").takeIf { it.isFinite() }
+            val cap: Double? = o.optDouble("market_cap").takeIf { it.isFinite() }
+            val volume: Double? = o.optDouble("total_volume").takeIf { it.isFinite() }
+            val change24: Double? = o.optDouble("price_change_percentage_24h").takeIf { it.isFinite() }
+            val change1: Double? = o.optDouble("price_change_percentage_1h_in_currency").takeIf { it.isFinite() }
+            val change7: Double? = o.optDouble("price_change_percentage_7d_in_currency").takeIf { it.isFinite() }
             out += PumpCoin(
                 id = id,
                 symbol = o.optString("symbol"),
@@ -220,11 +220,13 @@ object PumpScanner {
      * turnover = حجم ۲۴ ساعته ÷ ارزش بازار (سقف ۱ تا یک کوین کل بازار را قبضه نکند).
      */
     fun score(change1h: Double?, change24h: Double?, volume: Double?, marketCap: Double?): Double {
-        val ch1 = change1h ?: 0.0
-        val ch24 = change24h ?: 0.0
-        val turnover = if (volume != null && marketCap != null && marketCap > 0.0) {
-            (volume / marketCap).coerceIn(0.0, 1.0)
+        val ch1 = change1h?.takeIf { it.isFinite() } ?: 0.0
+        val ch24 = change24h?.takeIf { it.isFinite() } ?: 0.0
+        val safeVolume = volume?.takeIf { it.isFinite() && it >= 0.0 }
+        val safeCap = marketCap?.takeIf { it.isFinite() && it > 0.0 }
+        val turnover = if (safeVolume != null && safeCap != null) {
+            (safeVolume / safeCap).coerceIn(0.0, 1.0)
         } else 0.0
-        return ch24 + 2.0 * ch1 + 50.0 * turnover
+        return (ch24 + 2.0 * ch1 + 50.0 * turnover).takeIf { it.isFinite() } ?: 0.0
     }
 }

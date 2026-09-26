@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -136,6 +137,10 @@ fun SettingsScreen(
     var alertDialogOpen by remember { mutableStateOf(false) }
     var editingAlert by remember { mutableStateOf<AlertRule?>(null) }
 
+    // دکمه‌ی Back در زیرصفحه‌ها باید اول به منوی تنظیمات برگردد؛ در جریان افزودن
+    // ویجت، فقط Back از خودِ منوی اصلی پایان موفق پیکربندی را اعلام می‌کند.
+    BackHandler(enabled = section != null) { section = null }
+
     // ─── بکاپ و خواب موقت هشدارها ───
     var backupResult by remember { mutableStateOf("") }
     var snoozeUntil by remember { mutableStateOf(AlertEngine.snoozeUntil(context)) }
@@ -173,8 +178,10 @@ fun SettingsScreen(
     val notifPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { }
-    LaunchedEffect(Unit) {
-        if (Build.VERSION.SDK_INT >= 33) {
+    // درخواست مجوز فقط وقتی کاربر وارد بخش هشدارها می‌شود؛ درخواست ناگهانی در
+    // اولین اجرای برنامه هم نرخ رد شدن را بالا می‌برد و هم با سیاست فروشگاه‌ها ناسازگار است.
+    LaunchedEffect(section) {
+        if (section == SettingsSection.ALERTS && Build.VERSION.SDK_INT >= 33) {
             val granted = ContextCompat.checkSelfPermission(
                 context, Manifest.permission.POST_NOTIFICATIONS
             ) == PackageManager.PERMISSION_GRANTED
@@ -353,7 +360,7 @@ fun SettingsScreen(
                         onDelete = { src ->
                             scope.launch {
                                 val list = customSources.filterNot { it.id == src.id }
-                                ConfigStore.saveCustomSourcesAsync(context, list)
+                                ConfigStore.saveCustomSources(context, list)
                                 customSources = list
                                 if (src.id in cfg.activeSourceIds) {
                                     val ids = cfg.activeSourceIds.filterNot { it == src.id }
@@ -402,7 +409,7 @@ fun SettingsScreen(
                                 ) {
                                     scope.launch {
                                         val updated = tseCustomSymbols.filterNot { it.code == removed.code }
-                                        ConfigStore.saveTseSymbolsAsync(context, updated)
+                                        ConfigStore.saveTseSymbols(context, updated)
                                         tseCustomSymbols = updated
                                     }
                                 }
@@ -419,7 +426,7 @@ fun SettingsScreen(
                         onDeleteTseSymbol = { sym ->
                             scope.launch {
                                 val updated = tseCustomSymbols.filterNot { it.code == sym.code }
-                                ConfigStore.saveTseSymbolsAsync(context, updated)
+                                ConfigStore.saveTseSymbols(context, updated)
                                 tseCustomSymbols = updated
                                 // اگر در نمادهای این ویجت بود، از آنجا هم حذف می‌شود
                                 val list = cfg.symbols.filterNot {
@@ -617,7 +624,7 @@ fun SettingsScreen(
             onSave = { newSource ->
                 scope.launch {
                     val list = customSources + newSource
-                    ConfigStore.saveCustomSourcesAsync(context, list)
+                    ConfigStore.saveCustomSources(context, list)
                     customSources = list
                     // منبع تازه خودکار روشن و نمادهایش انتخاب شود
                     val ids = (cfg.activeSourceIds + newSource.id).distinct()
@@ -648,7 +655,7 @@ fun SettingsScreen(
                 if (marketKindOf(newSym.sourceId) == MarketKind.TSE) {
                     scope.launch {
                         val updatedCustom = (tseCustomSymbols + newSym).distinctBy { it.code }
-                        ConfigStore.saveTseSymbolsAsync(context, updatedCustom)
+                        ConfigStore.saveTseSymbols(context, updatedCustom)
                         tseCustomSymbols = updatedCustom
                         addSymbol(newSym)
                     }
@@ -665,7 +672,7 @@ fun SettingsScreen(
             onDeleteTseCustomSymbol = { sym ->
                 scope.launch {
                     val updated = tseCustomSymbols.filterNot { it.code == sym.code }
-                    ConfigStore.saveTseSymbolsAsync(context, updated)
+                    ConfigStore.saveTseSymbols(context, updated)
                     tseCustomSymbols = updated
                     val list = cfg.symbols.filterNot {
                         it.code == sym.code && marketKindOf(it.sourceId) == MarketKind.TSE

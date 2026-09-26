@@ -1,5 +1,6 @@
 package com.pulse.market.data
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -45,5 +46,17 @@ class AlertLogicTest {
         val currentMetric = AlertLogic.metric(pctRule, price = 101_000.0, changePct = 6.0)!!
         assertFalse(AlertLogic.isTriggered(pctRule, previousMetric))
         assertTrue(AlertLogic.isTriggered(pctRule, currentMetric))
+    }
+
+    @Test
+    fun percentThresholdUsesMagnitude() {
+        assertTrue(AlertLogic.isTriggered(rule(condition = AlertCondition.PCT_UP, threshold = -5.0), 6.0))
+        assertTrue(AlertLogic.isTriggered(rule(condition = AlertCondition.PCT_DOWN, threshold = -5.0), -6.0))
+    }
+
+    @Test
+    fun persianScheduleTextActuallyUsesPersianDigits() {
+        val scheduled = rule(from = 9 * 60, to = 12 * 60 + 30)
+        assertEquals("هر روز، ۰۹:۰۰ تا ۱۲:۳۰", scheduled.scheduleText(persian = true))
     }
 }

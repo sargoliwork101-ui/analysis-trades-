@@ -8,12 +8,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 /**
- * هر بار پروسه‌ی برنامه بالا بیاید (باز کردن اپ، آپدیت، اجرای Worker، بوت گوشی)
- * سرویس زنده و ویجت‌ها با تنظیمات واقعی همگام می‌شوند.
- *
- * چرا مهم است: بعد از آپدیت برنامه یا کشته‌شدن پروسه، هیچ‌چیز سرویس زنده را
- * برنمی‌گرداند و ویجت‌ها فریز می‌مانند. این همگام‌سازی «هر پروسه‌ی تازه» آن را
- * تضمین می‌کند — بی‌خطر است: اگر ویجتی حالت زنده نخواهد، سرویس متوقف می‌شود.
+ * هر بار پروسه‌ی برنامه بالا بیاید، Worker دوره‌ای با تنظیمات واقعی ویجت‌ها
+ * همگام می‌شود. اینجا عمداً ForegroundService یا درخواست شبکه شروع نمی‌شود، چون
+ * ممکن است پروسه را یک Worker/رسیور در پس‌زمینه ساخته باشد؛ شروع سرویس زنده فقط
+ * پس از بازشدن Activity یا اقدام مستقیم کاربر انجام می‌شود.
  */
 class App : Application() {
 
@@ -23,8 +21,10 @@ class App : Application() {
         super.onCreate()
         appScope.launch {
             runCatching {
-                StockWidgetProvider.syncLiveService(this@App)
-                StockWidgetProvider.refreshAll(this@App)
+                // بالا آمدن پروسه ممکن است از Worker/رسیورِ پس‌زمینه باشد؛ در آن حالت
+                // شروع ForegroundService مجاز نیست. اینجا فقط Worker را همگام می‌کنیم؛
+                // سرویس زنده هنگام باز شدن Activity یا اقدام مستقیم کاربر شروع می‌شود.
+                StockWidgetProvider.syncLiveService(this@App, startForeground = false)
             }
         }
     }

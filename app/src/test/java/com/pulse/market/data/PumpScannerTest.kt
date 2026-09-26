@@ -26,6 +26,7 @@ class PumpScannerTest {
         assertEquals(0.0, PumpScanner.score(null, null, null, null), 1e-9)
         // ارزش بازار صفر نباید تقسیم بر صفر بسازد
         assertEquals(0.0, PumpScanner.score(null, null, 100.0, 0.0), 1e-9)
+        assertEquals(0.0, PumpScanner.score(Double.NaN, Double.POSITIVE_INFINITY, 100.0, 0.0), 1e-9)
     }
 
     @Test

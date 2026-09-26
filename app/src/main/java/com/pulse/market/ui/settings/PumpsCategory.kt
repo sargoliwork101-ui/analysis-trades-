@@ -95,7 +95,10 @@ fun PumpsCategory(
     }
 
     val room = (MAX_SYMBOLS - cfg.symbols.size).coerceAtLeast(0)
-    val shown = scan?.matches.orEmpty()
+    // تغییر آستانه یک فیلتر محلی است و نباید تا اسکن شبکه‌ی بعدی بی‌اثر بماند.
+    val shown = scan?.coins.orEmpty().filter {
+        (it.change24h ?: Double.NEGATIVE_INFINITY) >= cfg.pumpMinChange
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
 
@@ -216,12 +219,12 @@ fun PumpsCategory(
         val summary = when {
             scan == null -> "برای دیدن نتیجه، «اسکن تازه» را بزن."
             shown.isEmpty() -> "الان در ${Format.toPersianDigits("${scan!!.universe}")} کوین برتر، هیچ کوینی " +
-                    "بیشتر از ${Format.toPersianDigits("${scan!!.minChange.toInt()}")}٪ رشد ۲۴ ساعته ندارد — " +
+                    "بیشتر از ${Format.toPersianDigits("${cfg.pumpMinChange.toInt()}")}٪ رشد ۲۴ ساعته ندارد — " +
                     "یعنی بازار فعلاً پامپ‌دار نیست (خودش یک خبر خوب است)."
 
             else -> "${Format.toPersianDigits("${shown.size}")} کوین از " +
                     "${Format.toPersianDigits("${scan!!.coins.size}")} کوین بررسی‌شده، بالای " +
-                    "${Format.toPersianDigits("${scan!!.minChange.toInt()}")}٪ رشد ۲۴ ساعته‌اند."
+                    "${Format.toPersianDigits("${cfg.pumpMinChange.toInt()}")}٪ رشد ۲۴ ساعته‌اند."
         }
         SectionHeader("نتیجه", summary)
 

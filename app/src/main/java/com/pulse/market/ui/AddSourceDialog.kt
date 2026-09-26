@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pulse.market.data.ChangeMode
 import com.pulse.market.data.FetchKind
+import com.pulse.market.data.Num
 import com.pulse.market.data.SourceDef
 import com.pulse.market.data.SymbolDef
 import com.pulse.market.ui.settings.DialogActionsRow
@@ -69,7 +70,8 @@ fun AddSourceDialog(
 
     val cleanUrl = url.trim()
     val validUrl = cleanUrl.startsWith("https://") || cleanUrl.startsWith("http://")
-    val canSave = title.isNotBlank() && validUrl &&
+    val parsedScale = Num.parse(scale)?.takeIf { it > 0.0 }
+    val canSave = title.isNotBlank() && validUrl && parsedScale != null &&
             (if (kind == FetchKind.JSON_REST) pricePath.isNotBlank() else cssSelector.isNotBlank())
 
     DialogShell(
@@ -290,7 +292,7 @@ fun AddSourceDialog(
                         changeMode = changeMode,
                         cssSelector = cssSelector.takeIf { it.isNotBlank() },
                         cssAttr = cssAttr.takeIf { it.isNotBlank() },
-                        scale = scale.trim().toDoubleOrNull()?.takeIf { it.isFinite() } ?: 1.0,
+                        scale = parsedScale ?: 1.0,
                         unit = unit.trim(),
                         symbols = syms,
                         builtIn = false

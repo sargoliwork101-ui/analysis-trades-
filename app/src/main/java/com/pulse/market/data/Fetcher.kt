@@ -94,7 +94,6 @@ object Fetcher {
     }
 
     private suspend fun fetchTse(source: SourceDef, sym: SymbolDef): Quote {
-        val started = System.currentTimeMillis()
         return try {
             val inst = TseService.fetchQuote(sym.code)
             val price = inst.closePrice ?: inst.lastPrice
@@ -106,17 +105,16 @@ object Fetcher {
                 volume = inst.volume,
                 unit = unitOf(source, sym),
                 error = if (price == null) "قیمت پیدا نشد" else null,
-                ts = started
+                ts = System.currentTimeMillis()
             )
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Exception) {
-            errorQuote(source, sym, failure, started)
+            errorQuote(source, sym, failure)
         }
     }
 
     private fun fetchHtml(source: SourceDef, sym: SymbolDef): Quote {
-        val started = System.currentTimeMillis()
         return try {
             val urls = singleUrls(source, sym.code)
             val body = getAny(urls, source)
@@ -134,10 +132,10 @@ object Fetcher {
                 code = sym.code, sourceId = source.id, label = sym.label, price = scaled,
                 unit = unitOf(source, sym),
                 error = if (scaled == null) "«$raw» عدد نبود" else null,
-                ts = started
+                ts = System.currentTimeMillis()
             )
         } catch (failure: Exception) {
-            errorQuote(source, sym, failure, started)
+            errorQuote(source, sym, failure)
         }
     }
 
@@ -170,10 +168,11 @@ object Fetcher {
     /** حجم معاملات/حجم ۲۴ ساعت — عدد یا آرایه‌ی میله‌ها (که جمع زده می‌شود) */
     private fun readVolume(json: Any, source: SourceDef, sym: SymbolDef): Double? {
         val path = source.volumePath?.replace("{symbol}", sym.code) ?: return null
-        val scale = scaleOf(source, sym)
-        JsonPath.readDouble(json, path)?.let { return it * scale }
-        val list = JsonPath.readDoubleList(json, path)
-        return if (list.isEmpty()) null else list.sum() * scale
+        // scale برای تبدیل واحد «قیمت» است (ریال→تومان، سنت→دلار)؛ حجم تعداد/ارزش
+        // معامله است و ضرب‌کردنش در ضریب قیمت، حجم را بی‌دلیل ده برابر کم‌وزیاد می‌کند.
+        JsonPath.readDouble(json, path)?.takeIf { it.isFinite() }?.let { return it }
+        val list = JsonPath.readDoubleList(json, path).filter { it.isFinite() }
+        return if (list.isEmpty()) null else list.sum().takeIf { it.isFinite() }
     }
 
     /** تبدیل عدد «تغییر» سایت به درصد، بر اساس حالت انتخاب‌شده */
@@ -222,7 +221,7 @@ object Fetcher {
 
     /** ضریب این نماد — اول ضریب خودِ نماد، بعد ضریب منبع */
     fun scaleOf(source: SourceDef, sym: SymbolDef): Double =
-        (sym.scale ?: source.scale).takeIf { it.isFinite() } ?: 1.0
+        (sym.scale ?: source.scale).takeIf { it.isFinite() && it > 0.0 } ?: 1.0
 
     // ───────────────────── ابزارهای HTTP ─────────────────────
 

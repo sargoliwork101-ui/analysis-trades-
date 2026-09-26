@@ -55,7 +55,8 @@ data class AlertRule(
             else -> days.sorted().joinToString("،") { AlertRule.dayName(it) }
         }
         val window = if (noTimeLimit) "شبانه‌روز" else "${hhmm(fromMinute)} تا ${hhmm(toMinute)}"
-        return "$daysText، $window"
+        val text = "$daysText، $window"
+        return if (persian) com.pulse.market.ui.Format.toPersianDigits(text) else text
     }
 
     val noTimeLimit: Boolean
@@ -74,8 +75,8 @@ data class AlertRule(
             return when (condition) {
                 AlertCondition.ABOVE -> "قیمت ≥ $t $unit"
                 AlertCondition.BELOW -> "قیمت ≤ $t $unit"
-                AlertCondition.PCT_UP -> "رشد ≥ $t٪"
-                AlertCondition.PCT_DOWN -> "افت ≥ $t٪"
+                AlertCondition.PCT_UP -> "رشد ≥ ${com.pulse.market.ui.Format.price(abs(threshold), persian)}٪"
+                AlertCondition.PCT_DOWN -> "افت ≥ ${com.pulse.market.ui.Format.price(abs(threshold), persian)}٪"
             }
         }
     }

@@ -1,8 +1,10 @@
 package com.pulse.market.data
 
 import android.content.Context
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.CoroutineScope
@@ -20,7 +22,11 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 
-private val Context.dataStore by preferencesDataStore(name = "pulse_settings")
+private val Context.dataStore by preferencesDataStore(
+    name = "pulse_settings",
+    // خرابی فایل تنظیمات نباید کل برنامه/ویجت را برای همیشه از کار بیندازد.
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() }
+)
 
 /** فایل تنظیمات: الگوی پیش‌فرض + پیکربندی مستقل هر ویجت */
 @Serializable
@@ -97,7 +103,7 @@ object ConfigStore {
                     label = s.label.trim().ifBlank { s.code.trim() }.take(200),
                     sourceId = sid.take(200),
                     unit = s.unit.trim().take(40),
-                    scale = s.scale?.takeIf { it.isFinite() }
+                    scale = s.scale?.takeIf { it.isFinite() && it > 0.0 }
                 )
             }
             .distinctBy { it.sourceId to it.code }
@@ -111,6 +117,10 @@ object ConfigStore {
                     symbolCode = rule.symbolCode.trim().take(200),
                     symbolLabel = rule.symbolLabel.trim().ifBlank { rule.symbolCode.trim() }.take(200),
                     sourceId = rule.sourceId.trim().ifBlank { ids.first() }.take(200),
+                    threshold = when (rule.condition) {
+                        AlertCondition.PCT_UP, AlertCondition.PCT_DOWN -> kotlin.math.abs(rule.threshold)
+                        else -> rule.threshold
+                    },
                     fromMinute = rule.fromMinute.coerceIn(0, 1439),
                     toMinute = rule.toMinute.coerceIn(0, 1439),
                     days = rule.days.filterTo(mutableSetOf()) { it in 0..6 },
@@ -207,6 +217,16 @@ object ConfigStore {
         }
     }
 
+    /** صبر تا همه‌ی ذخیره‌های debounce شده؛ خروجی بکاپ نباید آخرین تغییر را جا بیندازد. */
+    private suspend fun awaitAllPending() {
+        while (true) {
+            val snapshot = pendingSaves.values.toList()
+            if (snapshot.isEmpty()) return
+            snapshot.forEach { it.join() }
+            if (pendingSaves.isEmpty()) return
+        }
+    }
+
     /** پاک کردن تنظیمات ویجتِ حذف‌شده از صفحه */
     suspend fun deleteWidget(context: Context, widgetId: Int) {
         cancelPending(widgetId)
@@ -228,11 +248,13 @@ object ConfigStore {
 
     fun customSourcesFlow(context: Context): Flow<List<SourceDef>> =
         context.dataStore.data.map { prefs ->
-            prefs[KEY_CUSTOM_SOURCES]?.let {
+            val decoded = prefs[KEY_CUSTOM_SOURCES]?.let {
                 runCatching {
                     json.decodeFromString(ListSerializer(SourceDef.serializer()), it)
                 }.getOrNull()
             } ?: emptyList()
+            // داده‌ی نسخه‌های قدیمی هم هنگام خواندن امن و محدود شود، نه فقط ذخیره‌ی تازه.
+            sanitizeCustom(decoded)
         }
 
     suspend fun currentCustomSources(context: Context): List<SourceDef> = customSourcesFlow(context).first()
@@ -267,7 +289,7 @@ object ConfigStore {
                         ?.takeIf(::isWebUrl),
                     urlFallbacks = source.urlFallbacks.map { it.trim().take(4096) }
                         .filter(::isWebUrl).distinct().take(5),
-                    scale = source.scale.takeIf { it.isFinite() } ?: 1.0,
+                    scale = source.scale.takeIf { it.isFinite() && it > 0.0 } ?: 1.0,
                     unit = source.unit.trim().take(40),
                     symbols = source.symbols.asSequence()
                         .filter { it.code.isNotBlank() }
@@ -277,7 +299,7 @@ object ConfigStore {
                                 label = symbol.label.trim().ifBlank { symbol.code.trim() }.take(200),
                                 sourceId = "",
                                 unit = symbol.unit.trim().take(40),
-                                scale = symbol.scale?.takeIf { it.isFinite() }
+                                scale = symbol.scale?.takeIf { it.isFinite() && it > 0.0 }
                             )
                         }
                         .distinctBy { it.code }
@@ -298,11 +320,6 @@ object ConfigStore {
         return clean.startsWith("https://") || clean.startsWith("http://")
     }
 
-    /** ذخیره‌ی منابع دلخواه بدون نیاز به زنده ماندن صفحه */
-    fun saveCustomSourcesAsync(context: Context, list: List<SourceDef>) {
-        ioScope.launch { saveCustomSources(context, list) }
-    }
-
     fun tseSymbolsFlow(context: Context): Flow<List<SymbolDef>> =
         context.dataStore.data.map { prefs ->
             prefs[KEY_TSE_SYMBOLS]?.let {
@@ -320,11 +337,6 @@ object ConfigStore {
         }
     }
 
-    /** ذخیره‌ی نمادهای دلخواه بورس بدون نیاز به زنده ماندن صفحه */
-    fun saveTseSymbolsAsync(context: Context, list: List<SymbolDef>) {
-        ioScope.launch { saveTseSymbols(context, list) }
-    }
-
     @Synchronized
     private fun cancelPending(widgetId: Int) {
         pendingSaves.remove(widgetId)?.cancel()
@@ -340,6 +352,7 @@ object ConfigStore {
 
     /** ساخت فایل بکاپ JSON از همه‌ی تنظیمات (ویجت‌ها + الگو + منابع دلخواه + نمادهای بورس) */
     suspend fun exportAll(context: Context): String {
+        awaitAllPending()
         val prefs = context.dataStore.data.first()
         val dump = BackupDump(
             exportedAt = System.currentTimeMillis(),
@@ -384,7 +397,7 @@ object ConfigStore {
                     label = it.label.trim().ifBlank { it.code.trim() }.take(200),
                     sourceId = "tse_tsetmc",
                     unit = it.unit.trim().take(40),
-                    scale = it.scale?.takeIf { value -> value.isFinite() }
+                    scale = it.scale?.takeIf { value -> value.isFinite() && value > 0.0 }
                 )
             }
             .distinctBy { it.code }

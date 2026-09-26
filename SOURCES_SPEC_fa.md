@@ -57,7 +57,7 @@ SourceDef (تعریف منبع: آدرس + مسیرها + نمادها)
 | `volumePath` | string? | مسیر حجم (عدد یا آرایه — آرایه جمع زده می‌شود) |
 | `cssSelector` | string? | برای `HTML_CSS`: سلکتور CSS (می‌تواند چند سلکتور با `,` باشد — اولین تطبیق) |
 | `cssAttr` | string? | اگر پر باشد مقدار از attribute خوانده می‌شود، وگرنه text المنط |
-| `scale` | double | ضریب قیمت/حجم/نمودار (پیش‌فرض `1.0`) |
+| `scale` | double | ضریب تبدیل قیمت و نمودار (پیش‌فرض `1.0`)؛ روی حجم اعمال نمی‌شود |
 | `unit` | string | واحد نمایشی (تومان، ریال، $، …) |
 | `symbols` | SymbolDef[] | نمادهای آماده‌ی منبع |
 | `headers` | map | هدرهای HTTP اضافه برای این منبع |
@@ -86,7 +86,7 @@ SourceDef (تعریف منبع: آدرس + مسیرها + نمادها)
 | `volume` | double? | حجم معاملات / حجم ۲۴ ساعت |
 | `unit` | string | واحد منبع |
 | `error` | string? | پیام خطا (حداکثر ~۸۰ کاراکتر) — فقط وقتی قیمت هم نیامده نمایش داده می‌شود |
-| `ts` | long | زمان شروع درخواست (میلی‌ثانیه) |
+| `ts` | long | زمان دریافت/ساخت نتیجه (میلی‌ثانیه) |
 | `stale` | bool | قیمت، آخرین مقدار سالم است ولی تازه نشده (چراغ قرمز) |
 | `spark` | double[] | سری نمودار (اگر منبع بدهد؛ وگرنه از تاریخچه‌ی محلی) |
 | `sourceId` | string | منبع |
@@ -192,7 +192,7 @@ result[0][2]                    ← چند ایندکس پشت‌سرهم
     rawPrice = readDouble(json, pricePath["{symbol}" ← code])
     price    = rawPrice * scale
     change   = تبدیل تغییر طبق changeMode (زیربخش ۶.۳)
-    volume   = readDouble(volumePath) * scale  یا  sum(readDoubleList(volumePath)) * scale
+    volume   = readDouble(volumePath)  یا  sum(readDoubleList(volumePath)) // بدون scale قیمت
     spark    = readDoubleList(sparkPath) * scale    // فقط اگر ≥۳ نقطه داشت؛ نگه‌داشتن ۲۴۰ نقطه‌ی آخر
 
     error = (price == null) ? "قیمت در پاسخ پیدا نشد" : null

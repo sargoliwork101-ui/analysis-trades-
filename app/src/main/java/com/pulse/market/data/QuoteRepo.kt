@@ -142,8 +142,14 @@ object QuoteRepo {
      */
     suspend fun wantedFor(context: Context, cfg: WidgetConfig): List<Pair<String, SymbolDef>> {
         val sourceIds = cfg.activeSourceIds
+        val hasExplicitSelection = cfg.symbols.isNotEmpty()
         return sourceIds.flatMap { sid ->
-            val syms = cfg.symbolsOf(sid).ifEmpty {
+            val selected = cfg.symbolsOf(sid)
+            val syms = if (selected.isNotEmpty() || hasExplicitSelection) {
+                selected
+            } else {
+                // فقط پیکربندی کاملاً خالی (نصب/ویجت تازه) پیش‌فرض نشان می‌دهد؛
+                // منبعی که کاربر عمداً بدون نماد گذاشته نباید نماد مخفی نمایش دهد.
                 ConfigStore.resolveSource(context, sid)
                     ?.symbols?.take(maxOf(1, MAX_SYMBOLS / sourceIds.size))
                     ?: emptyList()

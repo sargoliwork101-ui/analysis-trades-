@@ -21,7 +21,7 @@ import kotlin.math.abs
  * هر بار که قیمت‌ها تازه می‌شوند (سرویس زنده، رفرش دستی یا Worker) این موتور صدا زده می‌شود و
  * بررسی می‌کند کدام قانون‌ها «الان» و «در بازه‌ی زمانی خودشان» برقرار شده‌اند و نوتیف می‌فرستد.
  *
- * منطق ضد‌اسپم: هر قانون یک «آخرین قیمت دیده‌شده» و «آخرین زمان نوتیف» دارد؛
+ * منطق ضد‌اسپم: هر قانون یک «آخرین مقدار دیده‌شده» و «آخرین زمان نوتیف» دارد؛
  * به‌صورت پیش‌فرض فقط لحظه‌ی عبور از حد نوتیف می‌رود و بین دو نوتیف حداقل cooldownMin فاصله است.
  */
 object AlertEngine {
@@ -41,6 +41,13 @@ object AlertEngine {
 
     suspend fun evaluate(context: Context, cfg: WidgetConfig, quotes: List<Quote>) {
         if (!cfg.showNotification) return
+        // اگر کاربر مجوز/اعلان‌های برنامه را بسته، عبور از حد را «تحویل‌شده» ثبت نکن؛
+        // بعد از فعال‌کردن اعلان‌ها باید هشدار جاری امکان نمایش داشته باشد.
+        val manager = context.getSystemService(NotificationManager::class.java)
+        if (!manager.areNotificationsEnabled()) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            manager.getNotificationChannel(CHANNEL_ID)?.importance == NotificationManager.IMPORTANCE_NONE
+        ) return
         evaluateMutex.withLock { evaluateLocked(context, cfg, quotes) }
     }
 
@@ -92,7 +99,9 @@ object AlertEngine {
             }
 
             if (shouldNotify) {
-                notify(context, cfg, rule, quote)
+                // فقط اعلان واقعاً تحویل‌داده‌شده را ثبت کن. در خطای مجوز/سیستم، مقدار
+                // قبلی هم حفظ می‌شود تا نوبت بعد دوباره امکان تلاش وجود داشته باشد.
+                if (!notify(context, cfg, rule, quote)) continue
                 editor.putLong(keyNotified, now)
             }
             editor.putString(keyMetric, metric.toString())
@@ -135,7 +144,7 @@ object AlertEngine {
 
     // ─────────────────────── نوتیف ───────────────────────
 
-    fun notify(context: Context, cfg: WidgetConfig, rule: AlertRule, quote: Quote) {
+    fun notify(context: Context, cfg: WidgetConfig, rule: AlertRule, quote: Quote): Boolean {
         ensureChannel(context)
 
         val priceText = Format.price(quote.price, cfg.persianDigits)
@@ -176,10 +185,10 @@ object AlertEngine {
             .setContentIntent(open)
             .build()
 
-        runCatching {
+        return runCatching {
             context.getSystemService(NotificationManager::class.java)
                 .notify(rule.id.hashCode(), notification)
-        }
+        }.isSuccess
     }
 
     /** برای دکمه‌ی «تست هشدار» در تنظیمات */

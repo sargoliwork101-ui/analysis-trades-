@@ -10,11 +10,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 /**
- * بعد از «راه‌اندازی مجدد گوشی» و «آپدیت برنامه»، ویجت‌ها و سرویس زنده دوباره وصل می‌شوند.
- *
- * چرا MY_PACKAGE_REPLACED لازم است: هنگام آپدیت، اندروید پروسه‌ی برنامه را می‌کُشد؛
- * سرویس زنده و Worker می‌میرند و BOOT_COMPLETED هم دیگر نمی‌آید. بدون این رسیور،
- * ویجت‌های صفحه‌ی اصلی تا ری‌استارت بعدی گوشی با آخرین داده‌ی قبل از آپدیت فریز می‌مانند.
+ * بعد از «راه‌اندازی مجدد گوشی» و «آپدیت برنامه»، Worker ویجت‌ها دوباره زمان‌بندی
+ * می‌شود و یک رفرش مجاز در صف قرار می‌گیرد. سرویس زنده از بوت شروع نمی‌شود، چون
+ * Android 15+ شروع dataSync ForegroundService از BOOT_COMPLETED را ممنوع کرده است.
  */
 class BootReceiver : BroadcastReceiver() {
 
@@ -26,10 +24,13 @@ class BootReceiver : BroadcastReceiver() {
         val pending = goAsync()
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
-                // هم سرویس زنده و هم Worker مطابق تنظیمات واقعی ویجت‌ها
-                // (روشن/خاموش بودن به‌روزرسانی خودکار هر ویجت) همگام می‌شوند
-                StockWidgetProvider.syncLiveService(context)
-                StockWidgetProvider.refreshAll(context, force = true)
+                // Android 15+ شروع dataSync ForegroundService از BOOT_COMPLETED را
+                // ممنوع کرده است. پس هنگام بوت فقط Worker را همگام و یک کار فوری
+                // صف می‌کنیم؛ سرویس زنده با اقدام مستقیم کاربر دوباره شروع می‌شود.
+                StockWidgetProvider.syncLiveService(context, startForeground = false)
+                if (StockWidgetProvider.anyLiveWidget(context)) {
+                    LiveUpdateWorker.enqueueNow(context)
+                }
             } finally {
                 pending.finish()
             }

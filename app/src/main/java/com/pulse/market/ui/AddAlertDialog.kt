@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pulse.market.data.AlertCondition
 import com.pulse.market.data.AlertRule
+import com.pulse.market.data.Num
 import com.pulse.market.data.SourceDef
 import com.pulse.market.data.SymbolDef
 import com.pulse.market.ui.settings.DialogActionsRow
@@ -93,8 +94,9 @@ fun AddAlertDialog(
     var cooldown by remember { mutableStateOf(existing?.cooldownMin ?: 30) }
     var onlyOnCross by remember { mutableStateOf(existing?.onlyOnCross ?: true) }
 
+    val thresholdValue = Num.parse(threshold)
     val canSave = (if (manualMode) manualCode.isNotBlank() else symbolCode.isNotBlank()) &&
-            (threshold.replace(",", "").toDoubleOrNull() != null)
+            thresholdValue != null
 
     // واحدِ خود نماد بر واحد منبع مقدم است (مثلاً «انس طلا» داخل TGJU دلار است،
     // در حالی که بقیه‌ی نمادهای همان منبع تومان‌اند).
@@ -231,7 +233,7 @@ fun AddAlertDialog(
                                 color = MaterialTheme.colorScheme.secondary
                             )
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedButton(onClick = { fromMinute = 9 * 60; toMinute = 12 * 60 + 30; days = setOf(0, 1, 2, 3, 4, 5) }) {
+                                OutlinedButton(onClick = { fromMinute = 9 * 60; toMinute = 12 * 60 + 30; days = setOf(0, 1, 2, 3, 4) }) {
                                     Text("ساعات بورس تهران", fontSize = 11.sp)
                                 }
                                 OutlinedButton(onClick = { fromMinute = 0; toMinute = 0; days = setOf(0, 1, 2, 3, 4, 5, 6) }) {
@@ -268,7 +270,7 @@ fun AddAlertDialog(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf(1 to "هر بار", 5 to "۵ دقیقه", 15 to "۱۵ دقیقه", 30 to "۳۰ دقیقه", 60 to "۱ ساعت", 180 to "۳ ساعت")
+                            listOf(1 to "۱ دقیقه", 5 to "۵ دقیقه", 15 to "۱۵ دقیقه", 30 to "۳۰ دقیقه", 60 to "۱ ساعت", 180 to "۳ ساعت")
                                 .forEach { (m, label) ->
                                     FilterChip(
                                         selected = cooldown == m,
@@ -314,7 +316,10 @@ fun AddAlertDialog(
                         symbolLabel = cleanLabel,
                         sourceId = cleanSource,
                         condition = condition,
-                        threshold = threshold.replace(",", "").toDoubleOrNull() ?: 0.0,
+                        threshold = when (condition) {
+                            AlertCondition.PCT_UP, AlertCondition.PCT_DOWN -> kotlin.math.abs(thresholdValue ?: 0.0)
+                            else -> thresholdValue ?: 0.0
+                        },
                         scheduleEnabled = scheduleEnabled,
                         fromMinute = fromMinute,
                         toMinute = toMinute,

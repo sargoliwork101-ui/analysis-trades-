@@ -56,4 +56,10 @@ class FetcherUnitsTest {
         // و سکه امامی: عدد ریالی TGJU (۲۳۵٬۵۱۰٬۰۰۰) با ضریب ۰٫۱ تومانی می‌شود
         assertEquals(23_551_000.0, 235_510_000.0 * Fetcher.scaleOf(tgju, sekke), 1e-3)
     }
+
+    @Test
+    fun invalidScaleFallsBackToOne() {
+        assertEquals(1.0, Fetcher.scaleOf(tgju.copy(scale = 0.0), sekke), 1e-9)
+        assertEquals(1.0, Fetcher.scaleOf(tgju, sekke.copy(scale = Double.NaN)), 1e-9)
+    }
 }

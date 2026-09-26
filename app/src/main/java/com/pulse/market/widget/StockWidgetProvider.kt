@@ -107,7 +107,7 @@ open class StockWidgetProvider : AppWidgetProvider() {
                 // هم سرویس زنده و هم Worker دوره‌ای مطابق ویجت‌های باقی‌مانده همگام شوند —
                 // حذفِ آخرین ویجت باید هر دو را خاموش کند (وگرنه Worker هر ۱۵ دقیقه
                 // تا همیشه بی‌دلیل بیدار می‌شد و باتری می‌سوزاند)
-                syncLiveService(context)
+                syncLiveService(context, startForeground = false)
             } finally {
                 pending.finish()
             }
@@ -311,10 +311,16 @@ open class StockWidgetProvider : AppWidgetProvider() {
                 ?: 15
         }
 
-        /** سرویس زنده فقط وقتی لازم است که ویجتِ واقعیِ زنده‌ای روی صفحه باشد */
-        suspend fun syncLiveService(context: Context) {
+        /**
+         * سرویس/Worker فقط وقتی لازم‌اند که ویجت زنده‌ای روی صفحه باشد.
+         *
+         * [startForeground] باید فقط پس از اقدام مستقیم کاربر true باشد. بوت، Worker و
+         * ساخت پس‌زمینه‌ی پروسه حق شروع dataSync ForegroundService را در Android 15+
+         * ندارند؛ در آن مسیرها فقط WorkManager زمان‌بندی می‌شود.
+         */
+        suspend fun syncLiveService(context: Context, startForeground: Boolean = true) {
             if (anyLiveWidget(context)) {
-                LiveUpdateService.start(context)
+                if (startForeground) LiveUpdateService.start(context)
                 LiveUpdateWorker.schedule(context)
             } else {
                 LiveUpdateService.stop(context)

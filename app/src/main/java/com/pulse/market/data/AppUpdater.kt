@@ -1,5 +1,6 @@
 package com.pulse.market.data
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -48,7 +49,7 @@ object AppUpdater {
      * - null = خطای شبکه/API
      */
     suspend fun fetchLatest(): LatestRelease? = withContext(Dispatchers.IO) {
-        runCatching {
+        try {
             val body = try {
                 Http.getText(
                     url = "https://api.github.com/repos/$REPO/releases/latest",
@@ -57,7 +58,7 @@ object AppUpdater {
                 )
             } catch (e: Http.HttpException) {
                 // ۴۰۴ یعنی هنوز ریلیزی منتشر نشده — خطای شبکه نیست
-                if (e.code == 404) return@runCatching LatestRelease("", emptyList(), null, "", "")
+                if (e.code == 404) return@withContext LatestRelease("", emptyList(), null, "", "")
                 throw e
             }
 
@@ -72,7 +73,11 @@ object AppUpdater {
                 publishedAt = obj.optString("published_at"),
                 apkSha256 = apk?.second
             )
-        }.getOrNull()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        }
     }
 
     /**

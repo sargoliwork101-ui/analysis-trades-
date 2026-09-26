@@ -67,6 +67,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        // این مسیر با باز کردن مستقیم برنامه/تنظیمات توسط کاربر اجرا می‌شود؛ بنابراین
+        // شروع سرویس زنده (برخلاف BOOT_COMPLETED یا Worker) مجاز و قابل مشاهده است.
+        lifecycleScope.launch { StockWidgetProvider.syncLiveService(this@MainActivity) }
+    }
+
     /** با singleTop ممکن است اکتیویتی زنده بماند و ویجت بعدی از onNewIntent بیاید */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)

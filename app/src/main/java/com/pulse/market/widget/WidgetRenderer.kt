@@ -140,13 +140,14 @@ object WidgetRenderer {
                 MarketStatus.headerFor(cfg.activeSourceIds, short = sizeW < 280)
             else ""
         // ساعت و وضعیت بازار مستقل از هم خاموش/روشن می‌شوند
-        val headerText = listOf(updText, marketText)
+        val timeText = if (cfg.showTime) updText else ""
+        val headerText = listOf(timeText, marketText)
             .filter { it.isNotEmpty() }
             .joinToString(" • ")
         views.setTextViewText(R.id.txt_time, text(headerText, cfg))
         views.setViewVisibility(
             R.id.txt_time,
-            if (cfg.showTime || marketText.isNotEmpty()) View.VISIBLE else View.GONE
+            if (headerText.isNotEmpty()) View.VISIBLE else View.GONE
         )
         // متن ساعت/وضعیت با چند بازار طولانی می‌شود — سقف عرض تا از سرصفحه بیرون نزند
         runCatching {
