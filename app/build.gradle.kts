@@ -13,8 +13,8 @@ android {
         applicationId = "com.pulse.market"
         minSdk = 23          // اندروید ۶ به بالا
         targetSdk = 36
-        versionCode = 21
-        versionName = "1.20"
+        versionCode = 22
+        versionName = "1.21"
     }
 
     /**
@@ -54,7 +54,10 @@ android {
         }
 
         release {
-            isMinifyEnabled = false
+            // فایل قابل‌نصب کاربر باید واقعاً سبک باشد: R8 کد/آیکون‌های استفاده‌نشده
+            // را حذف می‌کند و resource shrinker منابع بدون مصرف را کنار می‌گذارد.
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = stable ?: signingConfigs.getByName("debug")
         }
@@ -85,7 +88,6 @@ android {
 
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
-    implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
     implementation("androidx.activity:activity-compose:1.9.2")
 
@@ -95,8 +97,6 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
-    implementation("androidx.compose.ui:ui-tooling-preview")
-    debugImplementation("androidx.compose.ui:ui-tooling")
 
     // شبکه و پارس کردن داده
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

@@ -112,6 +112,7 @@ open class StockWidgetProvider : AppWidgetProvider() {
             try {
                 safely {
                     appWidgetIds.forEach { ConfigStore.deleteWidget(context, it) }
+                    pruneCacheForInstalledWidgets(context, appWidgetIds.toSet())
                     // هم سرویس زنده و هم Worker دوره‌ای مطابق ویجت‌های باقی‌مانده همگام شوند —
                     // حذفِ آخرین ویجت باید هر دو را خاموش کند (وگرنه Worker هر ۱۵ دقیقه
                     // تا همیشه بی‌دلیل بیدار می‌شد و باتری می‌سوزاند)
@@ -179,6 +180,10 @@ open class StockWidgetProvider : AppWidgetProvider() {
             // فقط «گرفتن از شبکه» به تنظیمات هر ویجت احترام می‌گذارد:
             // بیرون از بازه‌ی ساعتی یا ویجتِ «دستی» (به‌روزرسانی خودکار خاموش) این نوبت شبکه نمی‌خواهد
             val wantedAll = cfgs.map { (_, cfg) -> QuoteRepo.wantedFor(context, cfg) }
+            // کش فقط برای نمادهایی بماند که واقعاً در یک ویجت یا هشدار فعال استفاده
+            // می‌شوند؛ تعویض مکرر نمادها نباید حافظه و SharedPreferences را تا ابد بزرگ کند.
+            QuoteRepo.pruneUnused(context, retainedKeysFor(cfgs, wantedAll))
+
             val wantedNet = cfgs.mapIndexed { i, (_, cfg) ->
                 val skip = respectSchedule && (!cfg.liveService || !inRefreshWindow(cfg))
                 when {
@@ -330,6 +335,35 @@ open class StockWidgetProvider : AppWidgetProvider() {
             val cal = java.util.Calendar.getInstance()
             val minute = cal.get(java.util.Calendar.HOUR_OF_DAY) * 60 + cal.get(java.util.Calendar.MINUTE)
             return if (from < to) minute in from..to else (minute >= from || minute <= to)
+        }
+
+        private suspend fun pruneCacheForInstalledWidgets(
+            context: Context,
+            excludedIds: Set<Int> = emptySet()
+        ) {
+            val ids = WidgetRenderer.allWidgetIds(context).filterNot { it in excludedIds }
+            val cfgs = ids.map { it to ConfigStore.current(context, it) }
+            val wanted = cfgs.map { (_, cfg) -> QuoteRepo.wantedFor(context, cfg) }
+            QuoteRepo.pruneUnused(context, retainedKeysFor(cfgs, wanted))
+        }
+
+        private fun retainedKeysFor(
+            cfgs: List<Pair<Int, WidgetConfig>>,
+            wantedAll: List<List<Pair<String, SymbolDef>>>
+        ): Set<String> = buildSet {
+            wantedAll.flatten().forEach { (sourceId, symbol) ->
+                add(QuoteRepo.key(sourceId, symbol.code))
+            }
+            cfgs.forEach { (_, cfg) ->
+                cfg.alerts.filter { it.enabled }.forEach { rule ->
+                    val sourceId = rule.sourceId.ifBlank {
+                        cfg.activeSourceIds.firstOrNull().orEmpty()
+                    }
+                    if (sourceId.isNotBlank() && rule.symbolCode.isNotBlank()) {
+                        add(QuoteRepo.key(sourceId, rule.symbolCode))
+                    }
+                }
+            }
         }
 
         /**

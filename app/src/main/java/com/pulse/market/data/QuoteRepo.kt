@@ -37,6 +37,8 @@ object QuoteRepo {
     private const val KEY_HISTORY = "price_history"
     private const val KEY_ANOMALY_CANDIDATES = "price_anomaly_candidates"
     private const val KEY_TS = "ts"
+    private const val MAX_CACHED_SYMBOLS = 500
+    private const val DISK_WRITE_INTERVAL_MS = 30_000L
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val historySerializer =
@@ -47,6 +49,18 @@ object QuoteRepo {
     /** کش در حافظه — منبع اصلی خواندن در طول عمر پروسه */
     @Volatile
     private var memQuotes: Map<String, Quote>? = null
+
+    /** زمان تازه‌ترین داده‌ی سالم؛ برای جلوگیری از خواندن SharedPreferences در هر دور سرویس. */
+    @Volatile
+    private var memLastUpdated: Long = Long.MIN_VALUE
+
+    /** آخرین flush واقعی روی دیسک؛ داده‌ی زنده در حافظه فوری تازه می‌شود. */
+    @Volatile
+    private var lastDiskWriteAt: Long = 0L
+
+    /** آخرین مجموعه‌ی فعال؛ پاک‌سازی JSON فقط بعد از تغییر واقعی ویجت/هشدار انجام شود. */
+    @Volatile
+    private var lastRetainedKeys: Set<String>? = null
 
     /** یک‌پارچه نگه داشتن fetch/merge/history در برابر رفرش‌های هم‌زمان. */
     private val refreshMutex = Mutex()
@@ -70,7 +84,11 @@ object QuoteRepo {
         val list = if (raw == null) emptyList() else runCatching {
             json.decodeFromString(ListSerializer(Quote.serializer()), raw)
         }.getOrDefault(emptyList())
-        val map = list.associateBy { key(it.sourceId, it.code) }
+        val map = list.asSequence()
+            .filter { it.sourceId.isNotBlank() && it.code.isNotBlank() && it.price?.isFinite() == true }
+            .sortedByDescending { it.ts }
+            .take(MAX_CACHED_SYMBOLS)
+            .associateBy { key(it.sourceId, it.code) }
         memQuotes = map
         return map
     }
@@ -81,18 +99,47 @@ object QuoteRepo {
      */
     @Synchronized
     private fun persist(context: Context, healthy: List<Quote>, history: Map<String, List<Double>>) {
+        val now = System.currentTimeMillis()
         val merged = loadCachedMap(context).toMutableMap()
         healthy.forEach { merged[key(it.sourceId, it.code)] = it }
-        memQuotes = merged
+        val bounded = merged.values.asSequence()
+            .sortedByDescending { it.ts }
+            .take(MAX_CACHED_SYMBOLS)
+            .associateBy { key(it.sourceId, it.code) }
+        memQuotes = bounded
         memHistory = history
-        prefs(context).edit()
-            .putString(KEY_QUOTES, json.encodeToString(ListSerializer(Quote.serializer()), merged.values.toList()))
-            .putString(KEY_HISTORY, json.encodeToString(historySerializer, history))
-            .putLong(KEY_TS, System.currentTimeMillis())
-            .apply()
+        memLastUpdated = now
+
+        // حالت زنده می‌تواند هر ۵ ثانیه اجرا شود؛ نوشتن دو JSON کامل در هر دور هم
+        // باتری و هم فلش گوشی را بی‌دلیل مصرف می‌کرد. حافظه فوری تازه است و دیسک
+        // حداکثر هر ۳۰ ثانیه flush می‌شود؛ در بسته‌شدن ناگهانی فقط چند نقطه‌ی اخیر
+        // نمودار از دست می‌رود، نه تنظیمات یا آخرین کش پایدار.
+        if (shouldFlushToDisk(lastDiskWriteAt, now)) {
+            prefs(context).edit()
+                .putString(
+                    KEY_QUOTES,
+                    json.encodeToString(ListSerializer(Quote.serializer()), bounded.values.toList())
+                )
+                .putString(KEY_HISTORY, json.encodeToString(historySerializer, history))
+                .putLong(KEY_TS, now)
+                .apply()
+            lastDiskWriteAt = now
+        }
     }
 
-    fun lastUpdated(context: Context): Long = prefs(context).getLong(KEY_TS, 0L)
+    fun lastUpdated(context: Context): Long {
+        val memory = memLastUpdated
+        if (memory != Long.MIN_VALUE) return memory
+        return prefs(context).getLong(KEY_TS, 0L).also { memLastUpdated = it }
+    }
+
+    /** سیاست خالصِ flush؛ rollback ساعت نیز باید یک نوشتن تازه را مجاز کند. */
+    internal fun shouldFlushToDisk(lastWriteAt: Long, now: Long): Boolean =
+        lastWriteAt == 0L || now < lastWriteAt || now - lastWriteAt >= DISK_WRITE_INTERVAL_MS
+
+    /** سیاست خالص پاک‌سازی که با تست JVM پوشش داده می‌شود. */
+    internal fun <T> retainActive(values: Map<String, T>, retainedKeys: Set<String>): Map<String, T> =
+        values.filterKeys { it in retainedKeys }
 
     // ───────────── تاریخچه‌ی قیمت برای نمودار مینیاتوری ─────────────
 
@@ -100,11 +147,61 @@ object QuoteRepo {
     private fun loadHistory(context: Context): Map<String, List<Double>> {
         memHistory?.let { return it }
         val raw = prefs(context).getString(KEY_HISTORY, null)
-        val map = if (raw == null) emptyMap() else runCatching {
+        val decoded = if (raw == null) emptyMap() else runCatching {
             json.decodeFromString(historySerializer, raw)
         }.getOrDefault(emptyMap())
+        val map = decoded.asSequence()
+            .filter { (key, _) -> key.isNotBlank() }
+            .take(MAX_CACHED_SYMBOLS)
+            .associate { (key, values) ->
+                key.take(500) to values
+                    .filter(Double::isFinite)
+                    .takeLast(SPARK_HISTORY_MAX)
+            }
         memHistory = map
         return map
+    }
+
+    /**
+     * کش و تاریخچه‌ی نمادهایی که دیگر در هیچ ویجت یا هشدار فعالی نیستند حذف می‌شود.
+     * پیش از این، عوض‌کردن مداوم نمادها باعث رشد همیشگی JSON و مصرف حافظه/فلش می‌شد.
+     * این تابع فقط وقتی چیزی واقعاً حذف شده باشد روی دیسک می‌نویسد.
+     */
+    @Synchronized
+    fun pruneUnused(context: Context, retainedKeys: Set<String>) {
+        val keep = retainedKeys.filterTo(mutableSetOf()) { it.isNotBlank() }
+        if (lastRetainedKeys == keep) return
+        val currentQuotes = loadCachedMap(context)
+        val currentHistory = loadHistory(context)
+        val keptQuotes = retainActive(currentQuotes, keep)
+        val keptHistory = retainActive(currentHistory, keep)
+
+        val store = prefs(context)
+        val rawCandidates = store.getString(KEY_ANOMALY_CANDIDATES, null)
+        val candidates = rawCandidates?.let { raw ->
+            runCatching { json.decodeFromString(anomalySerializer, raw) }.getOrNull()
+        }.orEmpty()
+        val keptCandidates = retainActive(candidates, keep)
+
+        val changed = keptQuotes.size != currentQuotes.size ||
+                keptHistory.size != currentHistory.size ||
+                keptCandidates.size != candidates.size
+        if (!changed) {
+            lastRetainedKeys = keep.toSet()
+            return
+        }
+
+        memQuotes = keptQuotes
+        memHistory = keptHistory
+        store.edit()
+            .putString(
+                KEY_QUOTES,
+                json.encodeToString(ListSerializer(Quote.serializer()), keptQuotes.values.toList())
+            )
+            .putString(KEY_HISTORY, json.encodeToString(historySerializer, keptHistory))
+            .putString(KEY_ANOMALY_CANDIDATES, json.encodeToString(anomalySerializer, keptCandidates))
+            .apply()
+        lastRetainedKeys = keep.toSet()
     }
 
     /**

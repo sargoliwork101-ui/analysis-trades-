@@ -81,11 +81,12 @@ Two built-in ways; both give the **USD** price of one troy ounce:
 - **Every change**, including small fixes and documentation updates, must bump both `versionCode` and `versionName`; no change set is recorded without a new version. Published versions use a GitHub Release (`v*` tag) so the in-app updater can pick them up.
 - CI builds the APK on every push: [Actions tab](https://github.com/sargoliwork101-ui/analysis-trades-/actions).
   - The installable file lands in that run's **Artifacts** as `PulseMarket-Android-APK` (containing `PulseMarket-vX.Y.apk`).
-  - Since 1.14 CI also **runs unit tests** (`./gradlew test`) and verifies the APK signature.
+  - Since 1.21 CI builds the optimized **release APK**, runs unit tests and release lint, verifies its signature, and rejects APKs larger than 15 MiB.
 - **Every version is signed with one stable key** (`app/ci-debug.keystore`) so a new APK installs *over* the existing app and the in-app updater works. This is a debug/sideload key, not a Play Store key.
 - ⚠️ Versions 1.0–1.3 were signed with the CI runner's throwaway key; installing **1.4** over them needs one uninstall/reinstall. After 1.4 that is no longer needed.
 
 **Version history**
+- **1.21** — lightweight audit: optimized R8/resource-shrunk release APK, unused UI dependencies removed, bounded active-symbol cache, stale-history cleanup and throttled disk writes in live mode.
 - **1.20** — 1h/1d/1w/1m pump changes, period sorting, five-result preview with “show more”, clearer in-app help, responsive spacing, watchlist guidance, bulk TSE fetching and Android 6+ support.
 - **1.19** — security/reliability audit: API 36, Android-Keystore encryption for the AI key, no credentials over HTTP/redirects, per-widget alert isolation, clock-rollback handling and input/error sanitization.
 - **1.18** — optional AI second opinion for pumps using a user-selected API/model, with reason, confidence and provider-powered related-news search.
@@ -99,8 +100,8 @@ Two built-in ways; both give the **USD** price of one troy ounce:
 
 ## 🛠 Build
 ```bash
-./gradlew assembleDebug    # APK → app/build/outputs/apk/debug/
-./gradlew test             # JVM unit tests (no device needed)
+./gradlew assembleRelease  # optimized APK → app/build/outputs/apk/release/
+./gradlew test lintRelease # JVM unit tests + release lint
 ```
 Kotlin 2.0 · AGP 8.9 · compile/target API 36 · minSdk 23 (Android 6+) · Gradle wrapper included.
 

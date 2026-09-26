@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   build:
-    name: Build Debug APK
+    name: Build optimized APK
     runs-on: ubuntu-24.04
 
     steps:
@@ -79,10 +79,10 @@ jobs:
           fi
           echo "keystore sha256: $(sha256sum app/ci-debug.keystore | awk '{print $1}')"
 
-      - name: Build Debug APK
+      - name: Build optimized release APK
         run: |
           set +e
-          ./gradlew assembleDebug --no-daemon --stacktrace > build.log 2>&1
+          ./gradlew assembleRelease --no-daemon --stacktrace > build.log 2>&1
           code=$?
           tail -n 40 build.log
           if [ "$code" -ne 0 ]; then
@@ -98,7 +98,7 @@ jobs:
       - name: Run unit tests and Android lint
         run: |
           set +e
-          ./gradlew test lintDebug --no-daemon --stacktrace > verification.log 2>&1
+          ./gradlew test lintRelease --no-daemon --stacktrace > verification.log 2>&1
           code=$?
           tail -n 120 verification.log
           if [ "$code" -ne 0 ]; then
@@ -107,8 +107,8 @@ jobs:
               | tail -n 30 | while IFS= read -r line; do emit "$line"; done
             find app/build/test-results -type f -name '*.xml' -exec grep -H -E '<failure|<error' {} + 2>/dev/null \
               | head -n 20 | while IFS= read -r line; do emit "$line"; done
-            if [ -f app/build/reports/lint-results-debug.txt ]; then
-              tail -n 160 app/build/reports/lint-results-debug.txt
+            if [ -f app/build/reports/lint-results-release.txt ]; then
+              tail -n 160 app/build/reports/lint-results-release.txt
             fi
           fi
           exit "$code"
@@ -125,13 +125,21 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-      - name: Rename APK for Easy Download
+      - name: Rename and size-check APK for easy download
         run: |
           VER=$(grep -o 'versionName = "[^"]*"' app/build.gradle.kts | cut -d'"' -f2)
           mkdir -p build-output
-          cp app/build/outputs/apk/debug/app-debug.apk "build-output/PulseMarket-v${VER}.apk"
-          ls -la build-output/
-          sha256sum build-output/*.apk
+          cp app/build/outputs/apk/release/app-release.apk "build-output/PulseMarket-v${VER}.apk"
+          APK="build-output/PulseMarket-v${VER}.apk"
+          BYTES=$(stat -c%s "$APK")
+          MAX_BYTES=$((15 * 1024 * 1024))
+          ls -lh build-output/
+          sha256sum "$APK"
+          echo "optimized APK size: $BYTES bytes (limit: $MAX_BYTES)"
+          if [ "$BYTES" -gt "$MAX_BYTES" ]; then
+            echo "::error::APK از سقف سبک‌بودن ۱۵ MiB بزرگ‌تر شده است ($BYTES bytes)"
+            exit 1
+          fi
           echo "APK_NAME=PulseMarket-v${VER}.apk" >> "$GITHUB_ENV"
 
       # هر بیلد باید با همان کلیدِ ثابت امضا شود؛ وگرنه اندروید نصب روی نسخه‌ی قبلی را رد می‌کند
