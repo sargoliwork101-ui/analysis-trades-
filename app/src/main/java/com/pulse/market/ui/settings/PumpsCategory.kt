@@ -88,6 +88,7 @@ fun PumpsCategory(
     var aiBusyIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var aiReviews by remember { mutableStateOf<Map<String, PumpAiReviewer.Review>>(emptyMap()) }
     var aiErrors by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var aiStorageError by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         aiConfig = PumpAiConfigStore.load(context)
@@ -99,7 +100,7 @@ fun PumpsCategory(
             aiErrors = emptyMap()
         }
         aiConfig = new
-        PumpAiConfigStore.save(context, new)
+        aiStorageError = !PumpAiConfigStore.save(context, new)
     }
 
     fun runAiReview(coin: PumpScanner.PumpCoin) {
@@ -340,11 +341,19 @@ fun PumpsCategory(
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
-                    if (aiConfig.endpoint.startsWith("http://")) {
-                        Hint("⚠️ این آدرس رمزنگاری نشده است و ممکن است کلید API در مسیر شبکه دیده شود؛ HTTPS استفاده کن.")
+                    if (aiConfig.insecureKeyTransport) {
+                        Hint("⚠️ برای امنیت، API Key روی HTTP ارسال نمی‌شود؛ آدرس HTTPS بگذار یا کلید را خالی کن.")
+                    } else if (aiConfig.endpoint.startsWith("http://", ignoreCase = true)) {
+                        Hint("⚠️ پاسخ HTTP رمزنگاری نشده و قابل دست‌کاری است؛ در صورت امکان HTTPS استفاده کن.")
+                    }
+                    if (aiConfig.endpoint.isNotBlank() && !aiConfig.endpointValid) {
+                        Hint("آدرس باید HTTP(S) معتبر، بدون نام کاربری، query یا fragment باشد.")
+                    }
+                    if (aiStorageError) {
+                        Hint("⚠️ Android Keystore کلید را ذخیره نکرد؛ برای امنیت، کلید روی دیسک نوشته نشد.")
                     }
                     Hint(
-                        "کلید فقط در فضای خصوصی برنامه نگه‌داری می‌شود و وارد بکاپ دستی نمی‌شود. " +
+                        "کلید با Android Keystore رمزگذاری می‌شود و وارد بکاپ دستی نمی‌شود. " +
                                 "با زدن دکمه، نام کوین و داده‌های قیمت/حجم/ریسک برای همین API فرستاده می‌شود. " +
                                 "برای خبر، جست‌وجوی وب خود سرویس درخواست می‌شود؛ این قابلیت باید توسط مدل/API پشتیبانی شود."
                     )
@@ -658,8 +667,9 @@ private fun PumpRow(
                                     TextButton(onClick = { onOpenNews(news.url) }) {
                                         Column(modifier = Modifier.fillMaxWidth()) {
                                             Text(news.title, fontSize = 10.5.sp)
-                                            val meta = listOf(news.source, news.publishedAt)
+                                            val meta = listOf(news.host, news.source, news.publishedAt)
                                                 .filter { it.isNotBlank() }
+                                                .distinct()
                                                 .joinToString(" • ")
                                             if (meta.isNotBlank()) {
                                                 Text(

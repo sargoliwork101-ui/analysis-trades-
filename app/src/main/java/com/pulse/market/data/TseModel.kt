@@ -35,7 +35,7 @@ object TseUrlParser {
      * استخراج کد شناسه (insCode یا ISIN یا کلمه جستجو) از متن یا لینک ورودی کاربر
      */
     fun parse(input: String): ParsedTseInput {
-        val trimmed = input.trim()
+        val trimmed = input.trim().take(2048)
 
         // ۱. آیا لینک TSETMC قدیمی است؟ loader.aspx?ParTree=...&i=46348633615832441
         val insMatcher = INS_CODE_PATTERN.matcher(trimmed)
@@ -160,7 +160,7 @@ object TseService {
      */
     suspend fun search(rawInput: String): List<TseInstrument> = withContext(Dispatchers.IO) {
         val parsed = TseUrlParser.parse(rawInput)
-        val query = parsed.rawQuery.trim()
+        val query = parsed.rawQuery.trim().take(200)
         if (query.isBlank() && parsed.insCode == null) return@withContext emptyList()
 
         val results = mutableListOf<TseInstrument>()
@@ -343,7 +343,8 @@ object TseService {
                 else -> null
             }
             Closing(close, last, pct, volume)
-        } catch (_: Throwable) {
+        } catch (_: Exception) {
+            // Errorهای جدی JVM (OOM و مانند آن) نباید به‌عنوان «بدون قیمت» بلعیده شوند.
             Closing(null, null, null, null)
         }
     }

@@ -20,11 +20,15 @@ class App : Application() {
     override fun onCreate() {
         super.onCreate()
         appScope.launch {
-            runCatching {
+            try {
                 // بالا آمدن پروسه ممکن است از Worker/رسیورِ پس‌زمینه باشد؛ در آن حالت
                 // شروع ForegroundService مجاز نیست. اینجا فقط Worker را همگام می‌کنیم؛
                 // سرویس زنده هنگام باز شدن Activity یا اقدام مستقیم کاربر شروع می‌شود.
                 StockWidgetProvider.syncLiveService(this@App, startForeground = false)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // WorkManager در ورود بعدی دوباره همگام می‌شود.
             }
         }
     }

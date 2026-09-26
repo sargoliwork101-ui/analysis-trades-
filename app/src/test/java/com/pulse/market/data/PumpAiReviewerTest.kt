@@ -43,6 +43,7 @@ class PumpAiReviewerTest {
         assertEquals(84, review.confidence)
         assertEquals(1, review.news.size)
         assertEquals("https://news.example/item", review.news.single().url)
+        assertEquals("news.example", review.news.single().host)
     }
 
     @Test

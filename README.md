@@ -86,6 +86,7 @@ Two built-in ways; both give the **USD** price of one troy ounce:
 - ⚠️ Versions 1.0–1.3 were signed with the CI runner's throwaway key; installing **1.4** over them needs one uninstall/reinstall. After 1.4 that is no longer needed.
 
 **Version history**
+- **1.19** — security/reliability audit: API 36, Android-Keystore encryption for the AI key, no credentials over HTTP/redirects, per-widget alert isolation, clock-rollback handling and input/error sanitization.
 - **1.18** — optional AI second opinion for pumps using a user-selected API/model, with reason, confidence and provider-powered related-news search.
 - **1.17** — added the mandatory “every change gets a version” rule to the repository rules and architecture checklist.
 - **1.16** — anti-spam pump alerts plus an explainable cautionary suggestion and reason for every detected pump and notification.
@@ -100,12 +101,13 @@ Two built-in ways; both give the **USD** price of one troy ounce:
 ./gradlew assembleDebug    # APK → app/build/outputs/apk/debug/
 ./gradlew test             # JVM unit tests (no device needed)
 ```
-Kotlin 2.0 · AGP 8.5 · minSdk 26 · Gradle wrapper included.
+Kotlin 2.0 · AGP 8.9 · compile/target API 36 · minSdk 26 · Gradle wrapper included.
 
 ## 🔐 Notes
 - Settings live only on the device (DataStore/SharedPreferences); no accounts, no secrets in code.
 - Plain-HTTP custom sources are fetched only when the user explicitly configures them, and the dialog warns about the risk.
-- All network reads go through the `Http` module: http/https only, with a hard response-size cap.
+- All network reads go through `Http`: HTTP(S) only, hard response-size caps, bounded redirects, and sensitive headers stripped on cleartext or cross-origin hops.
+- The AI API key is AES-GCM encrypted with Android Keystore and is never sent over HTTP.
 - Widget-internal broadcasts are signed with a private token so other apps cannot force refreshes or toggle live mode.
 - The remaining signing-key recommendation is described in [AUDIT_fa.md](AUDIT_fa.md).
 

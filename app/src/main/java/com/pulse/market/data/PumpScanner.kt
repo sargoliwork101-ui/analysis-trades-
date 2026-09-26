@@ -123,6 +123,13 @@ object PumpScanner {
     fun cached(context: Context): PumpScan? {
         val raw = prefs(context).getString(KEY_LAST, null) ?: return null
         return runCatching { json.decodeFromString(PumpScan.serializer(), raw) }.getOrNull()
+            ?.let { scan ->
+                scan.copy(
+                    universe = scan.universe.coerceIn(10, 250),
+                    minChange = scan.minChange.takeIf { it.isFinite() }?.coerceIn(0.0, 100.0) ?: 8.0,
+                    coins = scan.coins.take(MAX_RESULTS).mapNotNull(::sanitizeCoin)
+                )
+            }
             ?.takeIf { it.coins.isNotEmpty() }
     }
 
@@ -144,7 +151,7 @@ object PumpScanner {
 
         if (!force) {
             cached(context)?.let { old ->
-                val fresh = System.currentTimeMillis() - old.at < 120_000L
+                val fresh = TimePolicy.isFresh(System.currentTimeMillis(), old.at, 120_000L)
                 if (fresh && old.universe == size) {
                     return@withContext old.copy(minChange = threshold)
                 }
@@ -174,16 +181,18 @@ object PumpScanner {
             onFailure = { t ->
                 // خطای شبکه: نتیجه‌ی قبلیِ کش را با پیام خطا برمی‌گردانیم (صفحه خالی نمی‌شود)
                 val old = cached(context)
+                val safeError = SensitiveText.redact(t.message.orEmpty(), 160)
+                    .ifBlank { "خطای شبکه" }
                 if (old != null) old.copy(
                     minChange = threshold,
-                    error = t.message ?: "خطای شبکه"
+                    error = safeError
                 )
                 else PumpScan(
                     at = System.currentTimeMillis(),
                     universe = size,
                     minChange = threshold,
                     coins = emptyList(),
-                    error = t.message ?: "خطای شبکه"
+                    error = safeError
                 )
             }
         )
@@ -195,7 +204,7 @@ object PumpScanner {
         val out = ArrayList<PumpCoin>(arr.length())
         for (i in 0 until arr.length()) {
             val o = arr.optJSONObject(i) ?: continue
-            val id = o.optString("id").trim()
+            val id = safeRemoteText(o.optString("id"), 200)
             if (id.isEmpty()) continue
             val price: Double? = o.optDouble("current_price").takeIf { it.isFinite() }
             val cap: Double? = o.optDouble("market_cap").takeIf { it.isFinite() }
@@ -203,19 +212,21 @@ object PumpScanner {
             val change24: Double? = o.optDouble("price_change_percentage_24h").takeIf { it.isFinite() }
             val change1: Double? = o.optDouble("price_change_percentage_1h_in_currency").takeIf { it.isFinite() }
             val change7: Double? = o.optDouble("price_change_percentage_7d_in_currency").takeIf { it.isFinite() }
-            out += PumpCoin(
-                id = id,
-                symbol = o.optString("symbol"),
-                name = o.optString("name").ifBlank { id },
-                price = price,
-                change1h = change1,
-                change24h = change24,
-                change7d = change7,
-                volume = volume,
-                marketCap = cap,
-                rank = o.optInt("market_cap_rank", 0),
-                score = score(change1, change24, volume, cap)
-            )
+            sanitizeCoin(
+                PumpCoin(
+                    id = id,
+                    symbol = safeRemoteText(o.optString("symbol"), 30),
+                    name = safeRemoteText(o.optString("name"), 120).ifBlank { id },
+                    price = price,
+                    change1h = change1,
+                    change24h = change24,
+                    change7d = change7,
+                    volume = volume,
+                    marketCap = cap,
+                    rank = o.optInt("market_cap_rank", 0),
+                    score = score(change1, change24, volume, cap)
+                )
+            )?.let(out::add)
         }
         val sorted = out.sortedByDescending { it.score }.take(MAX_RESULTS)
         return PumpScan(
@@ -262,6 +273,37 @@ object PumpScanner {
             )
         }
     }
+
+    private fun sanitizeCoin(coin: PumpCoin): PumpCoin? {
+        val id = safeRemoteText(coin.id, 200).takeIf { it.isNotBlank() } ?: return null
+        val price = coin.price?.takeIf { it.isFinite() && it >= 0.0 }
+        val volume = coin.volume?.takeIf { it.isFinite() && it >= 0.0 }
+        val cap = coin.marketCap?.takeIf { it.isFinite() && it >= 0.0 }
+        val ch1 = coin.change1h?.takeIf { it.isFinite() }
+        val ch24 = coin.change24h?.takeIf { it.isFinite() }
+        return coin.copy(
+            id = id,
+            symbol = safeRemoteText(coin.symbol, 30),
+            name = safeRemoteText(coin.name, 120).ifBlank { id },
+            price = price,
+            change1h = ch1,
+            change24h = ch24,
+            change7d = coin.change7d?.takeIf { it.isFinite() },
+            volume = volume,
+            marketCap = cap,
+            rank = coin.rank.coerceIn(0, 1_000_000),
+            score = score(ch1, ch24, volume, cap)
+        )
+    }
+
+    internal fun safeRemoteText(value: String, maxLength: Int): String = value
+        .filter { char ->
+            !Character.isISOControl(char) && char != '\u061C' &&
+                    char !in '\u200E'..'\u200F' && char !in '\u202A'..'\u202E' &&
+                    char !in '\u2066'..'\u2069'
+        }
+        .trim()
+        .take(maxLength.coerceIn(0, 500))
 
     fun turnover(volume: Double?, marketCap: Double?): Double {
         val safeVolume = volume?.takeIf { it.isFinite() && it >= 0.0 }

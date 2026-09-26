@@ -309,7 +309,7 @@ object Fetcher {
     ): Quote = Quote(
         code = sym.code, sourceId = source.id,
         label = sym.label,
-        error = t.message?.take(80) ?: "خطای شبکه",
+        error = SensitiveText.redact(t.message.orEmpty(), 80).ifBlank { "خطای شبکه" },
         unit = unitOf(source, sym),
         ts = started
     )

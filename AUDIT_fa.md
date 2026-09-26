@@ -216,8 +216,8 @@
 
 ### نتیجه‌ی فروشگاه
 
-نسخه‌ی فعلی برای Google Play هنوز **آماده‌ی ارسال نیست**. موانع اصلی: Target API 34
-(در سپتامبر ۲۰۲۶ باید 36 باشد)، معماری سرویس زنده‌ی طولانی، کلید امضای عمومی، نبود
+نسخه‌ی فعلی برای Google Play هنوز **آماده‌ی ارسال نیست**. Target API در نسخه‌ی ۱٫۱۹
+به ۳۶ ارتقا یافت، اما موانع باقی‌مانده شامل معماری سرویس زنده‌ی طولانی، کلید امضای عمومی، نبود
 AAB انتشار، updater بیرون از Play و نبود Privacy Policy/Data safety آماده است. تحلیل و
 نقشه‌ی اقدام کامل در [`STORE_READINESS_fa.md`](STORE_READINESS_fa.md) ثبت شده است.
 
@@ -274,3 +274,36 @@ Commit عملکردی `de89bc565ebe79ae02fa41de2ed6dc152b52aa03` در GitHub Act
 - API Key در SharedPreferences خصوصی جدا از `WidgetConfig` نگه‌داری می‌شود، وارد بکاپ دستی نیست و با `allowBackup=false` وارد بکاپ خودکار اندروید نیز نمی‌شود.
 - parser پاسخ، محدودسازی لینک‌ها، رد توصیه‌ی مستقیم و ساخت آدرس endpoint با unit test پوشش داده شدند.
 - نسخه به `1.18` و `versionCode=19` افزایش یافت.
+
+## ۱۱) ممیزی امنیت و پایداری نسخه‌ی ۱٫۱۹
+
+### اصلاحات اعمال‌شده
+
+- `compileSdk` و `targetSdk` به API 36، AGP به 8.9.1، Gradle به 8.11.1 و WorkManager به 2.11.2 ارتقا یافتند؛ CI نصب صریح Android 16 SDK را انجام می‌دهد.
+- `LiveUpdateService.onTimeout` اضافه شد تا پایان سهمیه‌ی `dataSync` در Android 15+ به crash منجر نشود.
+- API Key هوش مصنوعی از plaintext به AES-GCM با کلید Android Keystore مهاجرت کرد؛ plaintext قدیمی پس از خواندن حذف می‌شود و کلید روی HTTP ارسال نمی‌شود.
+- redirect خودکار OkHttp حذف شد: فقط GET تا سه مرحله دنبال می‌شود، downgrade از HTTPS به HTTP رد می‌شود، POST دارای بدنه redirect نمی‌شود و credential در تغییر origin حذف می‌شود.
+- هدرهای Authorization، Cookie، API key، token، password و secret برای منابع HTTP حذف می‌شوند و credential در user-info/query HTTP رد می‌شود؛ cleartext فقط برای داده‌ی عمومیِ انتخاب‌شده‌ی کاربر باقی ماند.
+- پاک‌سازی متمرکز URL/credential به خطاهای شبکه، سلامت منبع، خطای ویجت و اسکن پامپ اعمال شد؛ حالت `Authorization: Bearer …` و JSON key/value نیز پوشش داده شد.
+- وضعیت crossing و cooldown هشدار قیمت با شناسه‌ی ویجت namespace شد؛ rule کپی‌شده در دو ویجت دیگر اعلان‌های یکدیگر را خاموش یا جایگزین نمی‌کند.
+- عقب‌کشیدن ساعت گوشی دیگر کش و cooldown قیمت/پامپ را برای مدت نامحدود قفل نمی‌کند.
+- endpoint هوش مصنوعی query، fragment و user-info را رد می‌کند؛ خبر فقط با HTTPS پذیرفته و میزبان واقعی لینک مستقل از ادعای مدل نمایش داده می‌شود.
+- خروجی AI به verdictهای مجاز محدود و control/bidi override حذف شد؛ توصیه‌ی مستقیم خرید و سود تضمینی سخت‌گیرانه‌تر رد می‌شود.
+- متن CoinGecko، نمادهای سفارشی TSE و ورودی جست‌وجو محدود/پاک‌سازی شدند؛ `Throwable` دیگر در مسیر TSE به‌طور عمومی بلعیده نمی‌شود و cancellation در refresh/service/backup حفظ می‌شود.
+- `BootReceiver` غیرexported شد و Activity فقط شناسه‌ی واقعی یکی از ویجت‌های همین برنامه را می‌پذیرد.
+- CI قانون «هر تغییر، یک نسخه» را با مقایسه‌ی `versionCode` و `versionName` با commit والد enforce می‌کند.
+- تست‌های خالص برای redaction، هدر HTTP، rollback ساعت، اعتبارسنجی endpoint، متن remote و سخت‌گیری پاسخ AI افزوده شد.
+- نسخه به `1.19` و `versionCode=20` افزایش یافت.
+
+### ریسک‌های باقی‌مانده
+
+- کلید امضای APK مستقل/GitHub همچنان عمومی است و برای انتشار فروشگاهی باید با upload key خصوصی و secretهای CI جایگزین شود.
+- سرویس زنده‌ی چندثانیه‌ای با وجود `onTimeout` برای سیاست Google Play باید جلسه‌ای/محدود شود یا پایش لحظه‌ای به backend و FCM منتقل شود.
+- build فروشگاهیِ AAB، flavor بدون updater خارجی، Privacy Policy عمومی، Data Safety و declarationهای مالی/FGS هنوز آماده نشده‌اند.
+- HTTP دلخواه بدون credential هنوز ذاتاً قابل دست‌کاری است؛ UI هشدار می‌دهد و HTTPS توصیه می‌شود.
+
+### اعتبارسنجی نسخه‌ی ۱٫۱۹
+
+Commit عملکردی `ff5e478c607542709a5219b1df087882ae908151` در GitHub Actions با نصب SDK 36،
+کنترل افزایش نسخه، `assembleDebug`، همه‌ی unit testها، `lintDebug` و بررسی امضای ثابت APK
+با موفقیت عبور کرد. ران: [36238080502](https://github.com/sargoliwork101-ui/analysis-trades-/actions/runs/36238080502).

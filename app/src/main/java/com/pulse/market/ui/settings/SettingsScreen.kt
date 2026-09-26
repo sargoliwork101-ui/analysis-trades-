@@ -93,6 +93,7 @@ import com.pulse.market.ui.Format
 import com.pulse.market.ui.QuoteText
 import com.pulse.market.ui.SymbolSearchDialog
 import com.pulse.market.widget.StockWidgetProvider
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
@@ -223,11 +224,11 @@ fun SettingsScreen(
         if (uri != null) {
             scope.launch {
                 busy = true
-                val text = runCatching { ConfigStore.exportAll(context) }.getOrNull()
+                val text = runSuspendCatching { ConfigStore.exportAll(context) }.getOrNull()
                 if (text == null) {
                     backupResult = "❌ خواندن تنظیمات برای خروجی ممکن نشد"
                 } else {
-                    runCatching {
+                    runSuspendCatching {
                         withContext(Dispatchers.IO) {
                             context.contentResolver.openOutputStream(uri)?.use { out ->
                                 out.write(text.toByteArray(Charsets.UTF_8))
@@ -250,7 +251,7 @@ fun SettingsScreen(
         if (uri != null) {
             scope.launch {
                 busy = true
-                val text = runCatching {
+                val text = runSuspendCatching {
                     withContext(Dispatchers.IO) {
                         context.contentResolver.openInputStream(uri)?.use { inp ->
                             inp.readUtf8Capped(MAX_BACKUP_BYTES)
@@ -260,7 +261,7 @@ fun SettingsScreen(
                 if (text == null) {
                     backupResult = "❌ خواندن فایل ممکن نشد"
                 } else {
-                    val imported = runCatching { ConfigStore.importAll(context, text) }.getOrNull()
+                    val imported = runSuspendCatching { ConfigStore.importAll(context, text) }.getOrNull()
                     if (imported == null) {
                         backupResult = "❌ این فایل، بکاپ نبض بازار نیست یا خراب است"
                     } else {
@@ -1149,6 +1150,14 @@ private fun AboutCategory() {
 
 /** سقف فایل بازیابی؛ تنظیمات عادی چند کیلوبایت‌اند و فایل غول‌آسا نباید حافظه را پر کند. */
 private const val MAX_BACKUP_BYTES = 2 * 1024 * 1024
+
+private suspend fun <T> runSuspendCatching(block: suspend () -> T): Result<T> = try {
+    Result.success(block())
+} catch (cancelled: CancellationException) {
+    throw cancelled
+} catch (failure: Exception) {
+    Result.failure(failure)
+}
 
 private fun InputStream.readUtf8Capped(maxBytes: Int): String {
     val output = ByteArrayOutputStream(minOf(maxBytes, 32 * 1024))

@@ -21,9 +21,13 @@ import java.util.concurrent.TimeUnit
  *  ۱) فقط http/https — آدرس‌های دیگر (file، content، intent…) رد می‌شوند.
  *  ۲) سقف حجم پاسخ — پاسخ چندصد مگابایتی، حافظه‌ی برنامه را نمی‌خورد.
  *  ۳) هدر User-Agent/Accept همیشه ست می‌شود (بعضی سایت‌ها بدون آن ۴۰۳ می‌دهند).
+ *  ۴) redirect محدود است؛ downgrade رد و credential هنگام تغییر origin حذف می‌شود.
+ *  ۵) هدر حساس هیچ‌گاه روی HTTP cleartext ارسال نمی‌شود.
  * ─────────────────────────────────────────────────────────────────────────
  */
 object Http {
+
+    private const val MAX_REDIRECTS = 3
 
     /** مرورگر موبایل — برای API هایی که به UA حساس‌اند (TSETMC، TGJU) */
     const val UA_MOBILE =
@@ -50,6 +54,10 @@ object Http {
             .readTimeout(15, TimeUnit.SECONDS)
             .callTimeout(25, TimeUnit.SECONDS)
             .retryOnConnectionFailure(true)
+            // redirect خودکار می‌تواند هدر سفارشی مثل X-API-Key را به میزبان دیگری
+            // ببرد. redirectهای GET را پایین‌تر خودمان، محدود و بدون credential دنبال می‌کنیم.
+            .followRedirects(false)
+            .followSslRedirects(false)
             .build()
     }
 
@@ -60,8 +68,35 @@ object Http {
      * اجرای یک Request دلخواه با سقف حجم.
      * برای کدهایی که Request خودشان را می‌سازند (مثل TSETMC).
      */
-    fun execute(request: Request, maxBytes: Long = MAX_JSON_BYTES): String =
-        client.newCall(request).execute().use { resp -> readCapped(resp, maxBytes) }
+    fun execute(request: Request, maxBytes: Long = MAX_JSON_BYTES): String {
+        rejectSensitiveCleartext(request)
+        var current = request
+        repeat(MAX_REDIRECTS + 1) { redirectCount ->
+            client.newCall(current).execute().use { response ->
+                if (!response.isRedirect) return readCapped(response, maxBytes)
+                if (redirectCount >= MAX_REDIRECTS) error("تعداد تغییر مسیر پاسخ بیش از حد مجاز است")
+                // POST هوش مصنوعی یا هر بدنه‌ی حساس نباید خودکار به مقصد دیگری فرستاده شود.
+                if (current.body != null) error("تغییر مسیر برای درخواست دارای بدنه مجاز نیست")
+                val location = response.header("Location")
+                    ?: error("پاسخ تغییر مسیر، مقصد معتبر ندارد")
+                val next = current.url.resolve(location)
+                    ?: error("مقصد تغییر مسیر نامعتبر است")
+                if (current.url.isHttps && !next.isHttps) {
+                    error("تغییر مسیر ناامن از HTTPS به HTTP رد شد")
+                }
+                val sameOrigin = current.url.scheme == next.scheme &&
+                        current.url.host == next.host && current.url.port == next.port
+                current = current.newBuilder().url(next).apply {
+                    if (!sameOrigin) {
+                        current.headers.names().filter(::isSensitiveHeader)
+                            .forEach { name -> removeHeader(name) }
+                    }
+                }.build()
+                rejectSensitiveCleartext(current)
+            }
+        }
+        error("تغییر مسیر پاسخ کامل نشد")
+    }
 
     /**
      * GET متنی با سقف حجم و بررسی کد پاسخ.
@@ -88,7 +123,9 @@ object Http {
         maxBytes: Long = MAX_JSON_BYTES
     ): String {
         // فقط http/https — جلوی آدرس‌های عجیب (file://، intent://) را می‌گیرد
-        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+        if (!url.startsWith("http://", ignoreCase = true) &&
+            !url.startsWith("https://", ignoreCase = true)
+        ) {
             error("آدرس نامعتبر — فقط http و https")
         }
         val request = Request.Builder()
@@ -96,10 +133,43 @@ object Http {
             .header("User-Agent", userAgent)
             .header("Accept-Language", "fa,en;q=0.8")
             .header("Accept", accept)
-            .apply { headers.forEach { (k, v) -> header(k, v) } }
+            .apply { safeHeadersForUrl(url, headers).forEach { (k, v) -> header(k, v) } }
             .build()
 
-        return client.newCall(request).execute().use { resp -> readCapped(resp, maxBytes) }
+        return execute(request, maxBytes)
+    }
+
+    /** روی HTTP هیچ credentialای ارسال نمی‌شود؛ داده‌ی قیمت عمومی همچنان قابل خواندن است. */
+    fun safeHeadersForUrl(url: String, headers: Map<String, String>): Map<String, String> {
+        if (!url.trim().startsWith("http://", ignoreCase = true)) return headers
+        return headers.filterKeys { !isSensitiveHeader(it) }
+    }
+
+    fun isSensitiveHeader(name: String): Boolean {
+        val key = name.trim().lowercase()
+        return key == "authorization" || key == "proxy-authorization" ||
+                key == "cookie" || key == "x-api-key" || key == "api-key" ||
+                key.endsWith("api-key") || key.endsWith("api_key") || key.endsWith("apikey") ||
+                key.endsWith("subscription-key") || key == "x-auth-token" ||
+                key == "access-token" || key == "token" ||
+                key.endsWith("-token") || key.endsWith("_token") ||
+                key.contains("password") || key.contains("secret")
+    }
+
+    private fun rejectSensitiveCleartext(request: Request) {
+        if (request.url.isHttps) return
+        val credentialsInUrl = request.url.username.isNotEmpty() || request.url.password.isNotEmpty() ||
+                request.url.queryParameterNames.any(::isSensitiveQueryName)
+        if (credentialsInUrl || request.headers.names().any(::isSensitiveHeader)) {
+            error("ارسال کلید یا اعتبارنامه روی HTTP ناامن مجاز نیست")
+        }
+    }
+
+    internal fun isSensitiveQueryName(name: String): Boolean {
+        val key = name.trim().lowercase().replace('-', '_')
+        return key == "key" || key == "authorization" || key == "auth" ||
+                key.contains("api_key") || key.contains("apikey") ||
+                key.contains("token") || key.contains("password") || key.contains("secret")
     }
 
     /** خواندن بدنه با سقف حجم + پیام خطای فارسیِ خوانا */
@@ -120,7 +190,9 @@ object Http {
             }
         }
         if (!resp.isSuccessful) {
-            val detail = if (text.isNotBlank()) " — ${text.trim().take(60)}" else ""
+            val detail = if (text.isNotBlank()) {
+                " — ${SensitiveText.redact(text.trim(), 60)}"
+            } else ""
             throw HttpException(resp.code, "HTTP ${resp.code}$detail")
         }
         return text

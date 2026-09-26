@@ -113,7 +113,7 @@ fun AddSourceDialog(
                         if (url.trim().startsWith("http://")) {
                             Hint(
                                 "⚠️ آدرس http رمزنگاری نشده است؛ هر کسی در مسیر شبکه می‌تواند " +
-                                        "مقدار قیمت را عوض کند. اگر سایت https دارد، حتماً https بگذار."
+                                        "مقدار قیمت را عوض کند. credential روی HTTP ارسال نمی‌شود؛ اگر سایت https دارد، حتماً https بگذار."
                             )
                         }
                     }

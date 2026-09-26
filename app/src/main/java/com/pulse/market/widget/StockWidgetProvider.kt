@@ -14,6 +14,7 @@ import com.pulse.market.data.Quote
 import com.pulse.market.data.QuoteRepo
 import com.pulse.market.data.SymbolDef
 import com.pulse.market.data.SymbolSort
+import com.pulse.market.data.TimePolicy
 import com.pulse.market.data.WidgetConfig
 import com.pulse.market.service.LiveUpdateService
 import com.pulse.market.service.LiveUpdateWorker
@@ -83,8 +84,10 @@ open class StockWidgetProvider : AppWidgetProvider() {
                 val pending = goAsync()
                 scope.launch {
                     try {
-                        // هر ویجت حالت زنده‌ی خودش را کنترل می‌کند
+                        // هر ویجت حالت زنده‌ی خودش را کنترل می‌کند؛ PendingIntent کهنه‌ی
+                        // ویجت حذف‌شده نباید دوباره برای یک id نامعتبر تنظیمات بسازد.
                         val wId = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, 0)
+                        if (wId !in WidgetRenderer.allWidgetIds(context)) return@launch
                         val cfg = ConfigStore.current(context, wId)
                         val newState = !cfg.liveService
                         ConfigStore.save(context, cfg.copy(liveService = newState), wId)
@@ -189,8 +192,11 @@ open class StockWidgetProvider : AppWidgetProvider() {
             val minInterval = (cfgs.filterIndexed { i, _ -> wantedNet[i].isNotEmpty() }
                 .minOfOrNull { it.second.intervalSec } ?: cfgs.minOf { it.second.intervalSec })
                 .coerceIn(5, 3600)
-            val stale =
-                System.currentTimeMillis() - QuoteRepo.lastUpdated(context) > minInterval * 1000L
+            val stale = !TimePolicy.isFresh(
+                System.currentTimeMillis(),
+                QuoteRepo.lastUpdated(context),
+                minInterval * 1000L
+            )
             val missing = wantedNet.flatten().any { QuoteRepo.key(it.first, it.second.code) !in cached }
             val needNetwork =
                 (force || cached.isEmpty() || stale || missing) && wantedNet.flatten().isNotEmpty()
@@ -210,7 +216,13 @@ open class StockWidgetProvider : AppWidgetProvider() {
                         quoteMap[QuoteRepo.key(sid, rule.symbolCode)]
                             ?.takeIf { !it.stale && it.error == null && it.price != null }
                     }.distinctBy { QuoteRepo.key(it.sourceId, it.code) }
-                    runCatching { AlertEngine.evaluate(context, cfg, alertQuotes) }
+                    try {
+                        AlertEngine.evaluate(context, "widget_$id", cfg, alertQuotes)
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        // خطای یک موتور هشدار نباید رندر ویجت‌های دیگر را متوقف کند.
+                    }
                 }
             }
 
@@ -219,7 +231,13 @@ open class StockWidgetProvider : AppWidgetProvider() {
             val pumpConfigs = cfgs.filter { (_, cfg) ->
                 !respectSchedule || inRefreshWindow(cfg)
             }
-            runCatching { PumpAlertEngine.evaluateConfigured(context, pumpConfigs) }
+            try {
+                PumpAlertEngine.evaluateConfigured(context, pumpConfigs)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // خطای CoinGecko/اعلان نباید رندر قیمت‌های اصلی را خراب کند.
+            }
         }
 
         /** رندر یک ویجت از روی کش — برای تغییر اندازه بدون شبکه */

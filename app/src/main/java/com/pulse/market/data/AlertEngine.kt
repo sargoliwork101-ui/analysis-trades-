@@ -39,7 +39,12 @@ object AlertEngine {
     /** جلوگیری از دو نوتیف تکراری وقتی سرویس، Worker و رسیور هم‌زمان ارزیابی می‌کنند. */
     private val evaluateMutex = Mutex()
 
-    suspend fun evaluate(context: Context, cfg: WidgetConfig, quotes: List<Quote>) {
+    suspend fun evaluate(
+        context: Context,
+        ownerKey: String,
+        cfg: WidgetConfig,
+        quotes: List<Quote>
+    ) {
         if (!cfg.showNotification) return
         // اگر کاربر مجوز/اعلان‌های برنامه را بسته، عبور از حد را «تحویل‌شده» ثبت نکن؛
         // بعد از فعال‌کردن اعلان‌ها باید هشدار جاری امکان نمایش داشته باشد.
@@ -48,14 +53,21 @@ object AlertEngine {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
             manager.getNotificationChannel(CHANNEL_ID)?.importance == NotificationManager.IMPORTANCE_NONE
         ) return
-        evaluateMutex.withLock { evaluateLocked(context, cfg, quotes) }
+        evaluateMutex.withLock { evaluateLocked(context, ownerKey, cfg, quotes) }
     }
 
-    private fun evaluateLocked(context: Context, cfg: WidgetConfig, quotes: List<Quote>) {
+    private fun evaluateLocked(
+        context: Context,
+        ownerKey: String,
+        cfg: WidgetConfig,
+        quotes: List<Quote>
+    ) {
         val rules = cfg.alerts.filter { it.enabled }
         if (rules.isEmpty() || quotes.isEmpty()) return
 
         val now = System.currentTimeMillis()
+        val safeOwner = ownerKey.filter { it.isLetterOrDigit() || it == '_' || it == '-' }.take(80)
+            .ifBlank { "default" }
         val snoozed = isSnoozed(context)
         val cal = Calendar.getInstance().apply { timeInMillis = now }
         val minuteOfDay = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
@@ -72,8 +84,10 @@ object AlertEngine {
                         (rule.sourceId.isEmpty() || it.sourceId.isEmpty() || it.sourceId == rule.sourceId)
             } ?: continue
             val price = quote.price?.takeIf { it.isFinite() } ?: continue
-            val keyMetric = "last_metric_${rule.id}_${rule.condition.name}"
-            val keyNotified = "last_notified_${rule.id}"
+            // ruleهای کپی‌شده از template در چند ویجت id یکسان دارند؛ owner باید
+            // بخشی از کلید باشد تا crossing/cooldown دو ویجت روی هم اثر نگذارند.
+            val keyMetric = "last_metric_${safeOwner}_${rule.id}_${rule.condition.name}"
+            val keyNotified = "last_notified_${safeOwner}_${rule.id}"
             val previous = store.getString(keyMetric, null)?.toDoubleOrNull()
                 ?.takeIf { it.isFinite() }
 
@@ -109,13 +123,17 @@ object AlertEngine {
             }
             if (shouldNotify) {
                 val lastNotified = store.getLong(keyNotified, 0L)
-                shouldNotify = now - lastNotified >= rule.cooldownMin.coerceAtLeast(1) * 60_000L
+                shouldNotify = TimePolicy.cooldownElapsed(
+                    now,
+                    lastNotified,
+                    rule.cooldownMin.coerceAtLeast(1) * 60_000L
+                )
             }
 
             if (shouldNotify) {
                 // فقط اعلان واقعاً تحویل‌داده‌شده ثبت می‌شود. در خطای مجوز/سیستم،
                 // metric قبلی حفظ می‌شود تا نوبت بعد امکان تلاش دوباره وجود داشته باشد.
-                if (!notify(context, cfg, rule, quote, observed)) {
+                if (!notify(context, safeOwner, cfg, rule, quote, observed)) {
                     if (previous == null) editor.remove(keyMetric)
                     else editor.putString(keyMetric, previous.toString())
                     continue
@@ -178,8 +196,9 @@ object AlertEngine {
 
     // ─────────────────────── نوتیف ───────────────────────
 
-    fun notify(
+    private fun notify(
         context: Context,
+        ownerKey: String,
         cfg: WidgetConfig,
         rule: AlertRule,
         quote: Quote,
@@ -210,8 +229,9 @@ object AlertEngine {
                         "(حد: ${Format.price(abs(rule.threshold), cfg.persianDigits)}٪)"
         }
 
+        val notificationId = "$ownerKey|${rule.id}".hashCode()
         val open = PendingIntent.getActivity(
-            context, rule.id.hashCode(),
+            context, notificationId,
             Intent(context, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -234,7 +254,7 @@ object AlertEngine {
 
         return runCatching {
             context.getSystemService(NotificationManager::class.java)
-                .notify(rule.id.hashCode(), notification)
+                .notify(notificationId, notification)
         }.isSuccess
     }
 

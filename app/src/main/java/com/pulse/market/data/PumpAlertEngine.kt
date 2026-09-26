@@ -34,7 +34,8 @@ object PumpAlertEngine {
             val appContext = context.applicationContext
             val now = System.currentTimeMillis()
             val store = prefs(appContext)
-            if (now - store.getLong(LAST_BACKGROUND_CHECK, 0L) < MIN_SCAN_INTERVAL_MS) return@withLock
+            val lastCheck = store.getLong(LAST_BACKGROUND_CHECK, 0L)
+            if (!TimePolicy.cooldownElapsed(now, lastCheck, MIN_SCAN_INTERVAL_MS)) return@withLock
             // حتی در خطای شبکه زمان تلاش ثبت می‌شود تا سرویس هر چند ثانیه CoinGecko را نکوبد.
             store.edit().putLong(LAST_BACKGROUND_CHECK, now).apply()
 
@@ -87,7 +88,7 @@ object PumpAlertEngine {
 
         val now = System.currentTimeMillis()
         val cooldownMs = cfg.pumpAlertCooldownMin.coerceIn(15, 24 * 60) * 60_000L
-        if (now - store.getLong(keyNotified, 0L) < cooldownMs) return false
+        if (!TimePolicy.cooldownElapsed(now, store.getLong(keyNotified, 0L), cooldownMs)) return false
 
         val delivered = notify(context, safeKey, cfg, top, matches.size)
         if (delivered) store.edit().putLong(keyNotified, now).apply()

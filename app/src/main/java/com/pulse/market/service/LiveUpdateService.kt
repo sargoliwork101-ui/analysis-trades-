@@ -50,11 +50,23 @@ class LiveUpdateService : Service() {
                 stopSelf()
                 return
             }
-            runCatching { StockWidgetProvider.refreshAll(this, force = true, respectSchedule = true) }
+            try {
+                StockWidgetProvider.refreshAll(this, force = true, respectSchedule = true)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // آخرین داده‌ی سالم روی ویجت می‌ماند؛ حلقه در نوبت بعد دوباره تلاش می‌کند.
+            }
             val sec = StockWidgetProvider.liveInterval(this)
             updateNotification("قیمت‌ها هر $sec ثانیه تازه می‌شوند")
             delay(sec * 1000L)
         }
+    }
+
+    /** Android 15+ پس از سهمیه‌ی dataSync این callback را می‌زند؛ توقف فوری مانع crash می‌شود. */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        loopJob?.cancel()
+        stopSelf(startId)
     }
 
     override fun onDestroy() {

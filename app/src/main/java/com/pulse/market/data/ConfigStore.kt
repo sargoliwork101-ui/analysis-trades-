@@ -308,9 +308,12 @@ object ConfigStore {
                         .distinctBy { it.code }
                         .take(500)
                         .toList(),
-                    headers = source.headers.entries.take(30).associate {
-                        it.key.take(200) to it.value.take(2000)
-                    },
+                    headers = source.headers.entries.asSequence()
+                        .map { it.key.trim() to sanitizeHeaderValue(it.value) }
+                        .filter { (name, _) -> isSafeCustomHeaderName(name) }
+                        .distinctBy { it.first.lowercase() }
+                        .take(30)
+                        .associate { it.first to it.second },
                     builtIn = false
                 )
             }
@@ -323,22 +326,50 @@ object ConfigStore {
         return clean.startsWith("https://") || clean.startsWith("http://")
     }
 
+    private fun isSafeCustomHeaderName(name: String): Boolean {
+        val reserved = setOf("connection", "content-length", "host", "transfer-encoding")
+        return name.length in 1..100 && name.lowercase() !in reserved &&
+                name.all { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' ||
+                        it in "!#$%&'*+-.^_`|~" }
+    }
+
+    private fun sanitizeHeaderValue(value: String): String = value
+        .filter { it == '\t' || it in ' '..'~' }
+        .take(2000)
+
     fun tseSymbolsFlow(context: Context): Flow<List<SymbolDef>> =
         context.dataStore.data.map { prefs ->
-            prefs[KEY_TSE_SYMBOLS]?.let {
+            val decoded = prefs[KEY_TSE_SYMBOLS]?.let {
                 runCatching {
                     json.decodeFromString(ListSerializer(SymbolDef.serializer()), it)
                 }.getOrNull()
             } ?: emptyList()
+            sanitizeTseSymbols(decoded)
         }
 
     suspend fun currentTseSymbols(context: Context): List<SymbolDef> = tseSymbolsFlow(context).first()
 
     suspend fun saveTseSymbols(context: Context, list: List<SymbolDef>) {
+        val safe = sanitizeTseSymbols(list)
         context.dataStore.edit {
-            it[KEY_TSE_SYMBOLS] = json.encodeToString(ListSerializer(SymbolDef.serializer()), list)
+            it[KEY_TSE_SYMBOLS] = json.encodeToString(ListSerializer(SymbolDef.serializer()), safe)
         }
     }
+
+    private fun sanitizeTseSymbols(list: List<SymbolDef>): List<SymbolDef> = list.asSequence()
+        .filter { it.code.isNotBlank() }
+        .map {
+            it.copy(
+                code = it.code.trim().take(200),
+                label = it.label.trim().ifBlank { it.code.trim() }.take(200),
+                sourceId = "tse_tsetmc",
+                unit = it.unit.trim().take(40),
+                scale = it.scale?.takeIf { value -> value.isFinite() && value > 0.0 }
+            )
+        }
+        .distinctBy { it.code }
+        .take(500)
+        .toList()
 
     // ───────────── واچ‌لیست‌های نام‌دار (سراسری) ─────────────
 
@@ -454,20 +485,7 @@ object ConfigStore {
                 .associate { (key, value) -> key to migrate(value) }
         )
         val safeWatchlists = sanitizeWatchlists(dump.watchlists)
-        val safeTseSymbols = dump.tseSymbols.asSequence()
-            .filter { it.code.isNotBlank() }
-            .map {
-                it.copy(
-                    code = it.code.trim().take(200),
-                    label = it.label.trim().ifBlank { it.code.trim() }.take(200),
-                    sourceId = "tse_tsetmc",
-                    unit = it.unit.trim().take(40),
-                    scale = it.scale?.takeIf { value -> value.isFinite() && value > 0.0 }
-                )
-            }
-            .distinctBy { it.code }
-            .take(500)
-            .toList()
+        val safeTseSymbols = sanitizeTseSymbols(dump.tseSymbols)
         context.dataStore.edit { prefs ->
             prefs[KEY_WIDGETS] = json.encodeToString(WidgetsFile.serializer(), safeWidgets)
             prefs[KEY_CUSTOM_SOURCES] =

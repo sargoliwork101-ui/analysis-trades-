@@ -12,6 +12,7 @@ import com.pulse.market.R
 import com.pulse.market.data.InternalGuard
 import com.pulse.market.data.Quote
 import com.pulse.market.data.MarketStatus
+import com.pulse.market.data.TimePolicy
 import com.pulse.market.data.WidgetConfig
 import com.pulse.market.data.WidgetTheme
 import com.pulse.market.ui.MainActivity
@@ -109,8 +110,11 @@ object WidgetRenderer {
         // چشمک LED: با هر به‌روزرسانی، فاز روشن/کم‌نور عوض می‌شود (مثل چشمک زدن)
         val blinkOn = (updatedAt / 1000L) % 2 == 0L
         // اگر مدت زیادی از آخرین به‌روزرسانی سالم گذشته، همه‌ی LEDها قرمز می‌شوند
-        val dataStale = updatedAt > 0 &&
-                System.currentTimeMillis() - updatedAt > (cfg.intervalSec * 2 + 45) * 1000L
+        val dataStale = updatedAt > 0 && !TimePolicy.isFresh(
+            System.currentTimeMillis(),
+            updatedAt,
+            (cfg.intervalSec * 2 + 45) * 1000L
+        )
 
         // ── پوسته بر اساس تم ──
         views.setInt(R.id.widget_root, "setBackgroundResource", pal.bgRes)

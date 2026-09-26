@@ -7,7 +7,11 @@ import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.CompositionLocalProvider
@@ -20,6 +24,7 @@ import androidx.lifecycle.lifecycleScope
 import com.pulse.market.data.ConfigStore
 import com.pulse.market.ui.settings.SettingsScreen
 import com.pulse.market.widget.StockWidgetProvider
+import com.pulse.market.widget.WidgetRenderer
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -61,13 +66,20 @@ class MainActivity : ComponentActivity() {
             CompositionLocalProvider(LocalLayoutDirection provides Rtl) {
                 PulseTheme {
                     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                        // با تغییر ویجت (افزودن دومی در حالت singleTop) کل صفحه از نو ساخته می‌شود
-                        key(widgetIdState.value) {
-                            SettingsScreen(
-                                widgetId = widgetIdState.value,
-                                isAddFlow = intent?.action == AppWidgetManager.ACTION_APPWIDGET_CONFIGURE,
-                                onApply = { finishConfigure() }
-                            )
+                        // target 36 نمایش edge-to-edge را اجباری می‌کند؛ همان چیدمان قبلی را
+                        // داخل ناحیه‌ی امن نگه می‌داریم تا زیر status/navigation bar نرود.
+                        Box(
+                            modifier = Modifier.fillMaxSize()
+                                .windowInsetsPadding(WindowInsets.safeDrawing)
+                        ) {
+                            // با تغییر ویجت (افزودن دومی در حالت singleTop) کل صفحه از نو ساخته می‌شود
+                            key(widgetIdState.value) {
+                                SettingsScreen(
+                                    widgetId = widgetIdState.value,
+                                    isAddFlow = intent?.action == AppWidgetManager.ACTION_APPWIDGET_CONFIGURE,
+                                    onApply = { finishConfigure() }
+                                )
+                            }
                         }
                     }
                 }
@@ -90,7 +102,12 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun readWidgetId(intent: Intent?) {
-        widgetIdState.value = intent?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, 0) ?: 0
+        val requested = intent?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, 0) ?: 0
+        // Activity برای APPWIDGET_CONFIGURE باید exported باشد؛ ورودی برنامه‌ی دیگر
+        // نباید بتواند یک id جعلی بسازد و تنظیمات بی‌مصرف را در DataStore انباشته کند.
+        widgetIdState.value = requested.takeIf {
+            it > 0 && WidgetRenderer.allWidgetIds(this).contains(it)
+        } ?: 0
     }
 
     /**

@@ -7,14 +7,14 @@ plugins {
 
 android {
     namespace = "com.pulse.market"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.pulse.market"
         minSdk = 26          // اندروید ۸ به بالا
-        targetSdk = 34
-        versionCode = 19
-        versionName = "1.18"
+        targetSdk = 36
+        versionCode = 20
+        versionName = "1.19"
     }
 
     /**
@@ -107,7 +107,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.1")
 
     // به‌روزرسانی پس‌زمینه
-    implementation("androidx.work:work-runtime-ktx:2.9.1")
+    implementation("androidx.work:work-runtime-ktx:2.11.2")
 
     // تست‌های واحد روی JVM (اجرای `./gradlew test` — بدون نیاز به گوشی/شبیه‌ساز)
     testImplementation("junit:junit:4.13.2")
