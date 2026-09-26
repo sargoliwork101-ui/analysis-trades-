@@ -30,6 +30,7 @@ An Android home-screen widget that shows **live market prices** — Tehran Stock
 - **Live scanner** — top CoinGecko coins are scored (24h change + 2× 1h change + volume/market-cap turnover) to surface coins currently being pumped; scan range (top 50/100/250) and threshold (3–25%) are configurable.
 - **Explainable, cautious suggestion** for every result, based on risk, 1h momentum, 24h change and volume/market-cap turnover. It only says watch, wait or avoid chasing — never buy.
 - **Opt-in pump alerts** with a configurable anti-spam cooldown; background scans are at least 15 minutes apart, each scan is evaluated once, and notifications include the suggestion and its reason.
+- **Optional AI second opinion** — the user supplies any OpenAI-compatible endpoint, model name and API key; AI reviews the built-in suggestion with a reason and confidence, and requests linked related news when the provider supports web search. It runs only when the user taps a coin and never replaces the cautious built-in analysis.
 - **Risk badge** per coin and a “widget” button to add that coin to your widget and watch it.
 - **Caution rules** on the page — this is a monitor, not a buy signal.
 
@@ -85,6 +86,7 @@ Two built-in ways; both give the **USD** price of one troy ounce:
 - ⚠️ Versions 1.0–1.3 were signed with the CI runner's throwaway key; installing **1.4** over them needs one uninstall/reinstall. After 1.4 that is no longer needed.
 
 **Version history**
+- **1.18** — optional AI second opinion for pumps using a user-selected API/model, with reason, confidence and provider-powered related-news search.
 - **1.17** — added the mandatory “every change gets a version” rule to the repository rules and architecture checklist.
 - **1.16** — anti-spam pump alerts plus an explainable cautionary suggestion and reason for every detected pump and notification.
 - **1.15** — forced RTL Persian UI, alert history, volume-spike alerts, source health with smarter fallback, abnormal-price quarantine, and named watchlists.

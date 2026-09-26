@@ -1,5 +1,7 @@
 package com.pulse.market.ui.settings
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.TrendingUp
@@ -26,7 +29,9 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -39,9 +44,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pulse.market.data.MAX_SYMBOLS
+import com.pulse.market.data.PumpAiConfig
+import com.pulse.market.data.PumpAiConfigStore
+import com.pulse.market.data.PumpAiReviewer
 import com.pulse.market.data.PumpAlertEngine
 import com.pulse.market.data.PumpScanner
 import com.pulse.market.data.SymbolDef
@@ -75,6 +84,36 @@ fun PumpsCategory(
     var scan by remember { mutableStateOf<PumpScanner.PumpScan?>(null) }
     var busy by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf("") }
+    var aiConfig by remember { mutableStateOf(PumpAiConfig()) }
+    var aiBusyIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var aiReviews by remember { mutableStateOf<Map<String, PumpAiReviewer.Review>>(emptyMap()) }
+    var aiErrors by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+
+    LaunchedEffect(Unit) {
+        aiConfig = PumpAiConfigStore.load(context)
+    }
+
+    fun saveAiConfig(new: PumpAiConfig) {
+        if (new != aiConfig) {
+            aiReviews = emptyMap()
+            aiErrors = emptyMap()
+        }
+        aiConfig = new
+        PumpAiConfigStore.save(context, new)
+    }
+
+    fun runAiReview(coin: PumpScanner.PumpCoin) {
+        val config = aiConfig
+        if (!config.isReady || coin.id in aiBusyIds) return
+        aiBusyIds = aiBusyIds + coin.id
+        aiErrors = aiErrors - coin.id
+        scope.launch {
+            val outcome = PumpAiReviewer.review(config, coin)
+            outcome.review?.let { aiReviews = aiReviews + (coin.id to it) }
+            outcome.error?.let { aiErrors = aiErrors + (coin.id to it) }
+            aiBusyIds = aiBusyIds - coin.id
+        }
+    }
 
     // فهرست قبلی (ذخیره‌شده روی گوشی) فوراً نشان داده می‌شود؛ اگر نبود یک بار اسکن می‌کنیم
     LaunchedEffect(Unit) {
@@ -260,7 +299,67 @@ fun PumpsCategory(
 
         if (note.isNotEmpty()) InfoCard(note)
 
-        // ── ۳) نتیجه ──
+        // ── ۳) نظر دوم هوش مصنوعی ──
+        SectionHeader(
+            "نظر دوم هوش مصنوعی",
+            "اختیاری و مستقل از مدل — API سازگار، نام مدل و کلید را خودت تعیین می‌کنی"
+        )
+        RowsCard {
+            SwitchRow(
+                "بررسی با AI",
+                if (aiConfig.enabled)
+                    "برای هر کوین با دکمه اجرا می‌شود و پیشنهاد پایه را تغییر نمی‌دهد"
+                else "خاموش؛ هیچ داده‌ای برای سرویس هوش مصنوعی فرستاده نمی‌شود",
+                aiConfig.enabled
+            ) { saveAiConfig(aiConfig.copy(enabled = it)) }
+
+            if (aiConfig.enabled) {
+                RowDivider()
+                InnerRow {
+                    OutlinedTextField(
+                        value = aiConfig.endpoint,
+                        onValueChange = { saveAiConfig(aiConfig.copy(endpoint = it)) },
+                        label = { Text("آدرس API سازگار") },
+                        placeholder = { Text("https://example.com/v1") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = aiConfig.model,
+                        onValueChange = { saveAiConfig(aiConfig.copy(model = it)) },
+                        label = { Text("نام مدل") },
+                        placeholder = { Text("نام مدل سرویس") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = aiConfig.apiKey,
+                        onValueChange = { saveAiConfig(aiConfig.copy(apiKey = it)) },
+                        label = { Text("API Key (اگر سرویس لازم دارد)") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    if (aiConfig.endpoint.startsWith("http://")) {
+                        Hint("⚠️ این آدرس رمزنگاری نشده است و ممکن است کلید API در مسیر شبکه دیده شود؛ HTTPS استفاده کن.")
+                    }
+                    Hint(
+                        "کلید فقط در فضای خصوصی برنامه نگه‌داری می‌شود و وارد بکاپ دستی نمی‌شود. " +
+                                "با زدن دکمه، نام کوین و داده‌های قیمت/حجم/ریسک برای همین API فرستاده می‌شود. " +
+                                "برای خبر، جست‌وجوی وب خود سرویس درخواست می‌شود؛ این قابلیت باید توسط مدل/API پشتیبانی شود."
+                    )
+                }
+            }
+        }
+
+        if (aiConfig.enabled) {
+            InfoCard(
+                "هوش مصنوعی فقط نظر دوم است و ممکن است اشتباه کند. لینک خبرها را پیش از تصمیم باز کن؛ " +
+                        "نبود خبر معتبر یا اختلاف نظر، دلیل خرید نیست."
+            )
+        }
+
+        // ── ۴) نتیجه ──
         val summary = when {
             scan == null -> "برای دیدن نتیجه، «اسکن تازه» را بزن."
             shown.isEmpty() -> "الان در ${Format.toPersianDigits("${scan!!.universe}")} کوین برتر، هیچ کوینی " +
@@ -282,6 +381,17 @@ fun PumpsCategory(
                         persian = cfg.persianDigits,
                         canAdd = cfg.symbols.none { it.code == coin.id } && room > 0,
                         alreadyAdded = cfg.symbols.any { it.code == coin.id },
+                        aiEnabled = aiConfig.enabled,
+                        aiReady = aiConfig.isReady,
+                        aiBusy = coin.id in aiBusyIds,
+                        aiReview = aiReviews[coin.id],
+                        aiError = aiErrors[coin.id],
+                        onAiReview = { runAiReview(coin) },
+                        onOpenNews = { url ->
+                            runCatching {
+                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                            }
+                        },
                         onAdd = { onAddSymbol(coin.toSymbolDef()) }
                     )
                 }
@@ -380,6 +490,13 @@ private fun PumpRow(
     persian: Boolean,
     canAdd: Boolean,
     alreadyAdded: Boolean,
+    aiEnabled: Boolean,
+    aiReady: Boolean,
+    aiBusy: Boolean,
+    aiReview: PumpAiReviewer.Review?,
+    aiError: String?,
+    onAiReview: () -> Unit,
+    onOpenNews: (String) -> Unit,
     onAdd: () -> Unit
 ) {
     val riskColor = when (coin.risk) {
@@ -454,6 +571,118 @@ private fun PumpRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 2.dp)
             )
+
+            if (aiEnabled) {
+                OutlinedButton(
+                    onClick = onAiReview,
+                    enabled = aiReady && !aiBusy,
+                    modifier = Modifier.padding(top = 7.dp)
+                ) {
+                    Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(5.dp))
+                    Text(
+                        when {
+                            aiBusy -> "در حال بررسی و جست‌وجوی خبر…"
+                            aiReview != null -> "بررسی دوباره با AI"
+                            else -> "بررسی با AI"
+                        },
+                        fontSize = 11.sp
+                    )
+                }
+                if (!aiReady) {
+                    Text(
+                        "برای بررسی، آدرس API و نام مدل را بالای صفحه کامل کن.",
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 3.dp)
+                    )
+                }
+                if (!aiError.isNullOrBlank()) {
+                    Text(
+                        "خطای AI: $aiError",
+                        fontSize = 10.5.sp,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+                aiReview?.let { review ->
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 7.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                "نظر AI: ${review.recommendation}",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            val confidence = review.confidence?.let {
+                                val n = if (persian) Format.toPersianDigits(it.toString()) else it.toString()
+                                " • اطمینان $n٪"
+                            }.orEmpty()
+                            Text(
+                                "وضعیت: ${review.verdict}$confidence",
+                                fontSize = 10.5.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                "دلیل AI: ${review.reason}",
+                                fontSize = 10.5.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            if (review.news.isEmpty()) {
+                                Text(
+                                    if (review.providerSearchRequested)
+                                        "خبر مرتبطِ دارای لینک از پاسخ سرویس دریافت نشد."
+                                    else "جست‌وجوی خبر درخواست نشده بود.",
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            } else {
+                                Text(
+                                    "خبرهای مرتبط گزارش‌شده توسط سرویس:",
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                review.news.forEach { news ->
+                                    TextButton(onClick = { onOpenNews(news.url) }) {
+                                        Column(modifier = Modifier.fillMaxWidth()) {
+                                            Text(news.title, fontSize = 10.5.sp)
+                                            val meta = listOf(news.source, news.publishedAt)
+                                                .filter { it.isNotBlank() }
+                                                .joinToString(" • ")
+                                            if (meta.isNotBlank()) {
+                                                Text(
+                                                    meta,
+                                                    fontSize = 9.5.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                            if (news.relation.isNotBlank()) {
+                                                Text(
+                                                    news.relation,
+                                                    fontSize = 9.5.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
         Spacer(Modifier.width(8.dp))
         if (alreadyAdded) {
