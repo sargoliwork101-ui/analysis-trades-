@@ -18,7 +18,7 @@ permissions:
 jobs:
   attach:
     name: Attach APK to release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Parse attach tag
