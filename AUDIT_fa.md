@@ -231,6 +231,12 @@ AAB انتشار، updater بیرون از Play و نبود Privacy Policy/Data 
 - واچ‌لیست‌های نام‌دار سراسری اضافه شد و همراه بکاپ ذخیره/بازیابی می‌شود.
 - نسخه به `1.15` و `versionCode=16` افزایش یافت.
 
+### اعتبارسنجی نسخه‌ی ۱٫۱۵
+
+Commit نهایی قابلیت‌ها `668d3126609781fbc0065a26148f3a0c7664a2d7` در GitHub Actions با
+`assembleDebug`، همه‌ی unit testها، `lintDebug` و بررسی امضای APK با موفقیت عبور کرد.
+ران: [36230722907](https://github.com/sargoliwork101-ui/analysis-trades-/actions/runs/36230722907).
+
 ### اعتبارسنجی نهایی ممیزی دوم
 
 Commit عملکردی `de89bc565ebe79ae02fa41de2ed6dc152b52aa03` در GitHub Actions با موفقیت
