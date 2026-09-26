@@ -77,7 +77,7 @@ Two built-in ways; both give the **USD** price of one troy ounce:
 ---
 
 ## 🔁 Releases & versioning
-- Every meaningful change ships with a **version bump** and a GitHub Release (`v*` tag) so the in-app updater can pick it up.
+- **Every change**, including small fixes and documentation updates, must bump both `versionCode` and `versionName`; no change set is recorded without a new version. Published versions use a GitHub Release (`v*` tag) so the in-app updater can pick them up.
 - CI builds the APK on every push: [Actions tab](https://github.com/sargoliwork101-ui/analysis-trades-/actions).
   - The installable file lands in that run's **Artifacts** as `PulseMarket-Android-APK` (containing `PulseMarket-vX.Y.apk`).
   - Since 1.14 CI also **runs unit tests** (`./gradlew test`) and verifies the APK signature.
@@ -85,6 +85,7 @@ Two built-in ways; both give the **USD** price of one troy ounce:
 - ⚠️ Versions 1.0–1.3 were signed with the CI runner's throwaway key; installing **1.4** over them needs one uninstall/reinstall. After 1.4 that is no longer needed.
 
 **Version history**
+- **1.17** — added the mandatory “every change gets a version” rule to the repository rules and architecture checklist.
 - **1.16** — anti-spam pump alerts plus an explainable cautionary suggestion and reason for every detected pump and notification.
 - **1.15** — forced RTL Persian UI, alert history, volume-spike alerts, source health with smarter fallback, abnormal-price quarantine, and named watchlists.
 - **1.14** — security/engineering audit (internal widget token, response size caps, URL validation, stricter updater) + global gold + TradingView source + crypto-pumps section + unit tests in CI. Details: [AUDIT_fa.md](AUDIT_fa.md)
