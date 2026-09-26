@@ -55,7 +55,7 @@ object SourceHealthStore {
         val map = load(context).associateBy { it.sourceId }.toMutableMap()
         val old = map[sourceId] ?: SourceHealth(sourceId)
         val success = quotes.count { it.price?.isFinite() == true && it.error == null }
-        val error = quotes.firstOrNull { it.error != null }?.error.orEmpty().take(160)
+        val error = safeError(quotes.firstOrNull { it.error != null }?.error.orEmpty())
         map[sourceId] = old.copy(
             lastCheckedAt = now,
             lastSuccessAt = if (success > 0) now else old.lastSuccessAt,
@@ -100,6 +100,11 @@ object SourceHealthStore {
     fun clear(context: Context) {
         context.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit().remove(KEY).apply()
     }
+
+    private fun safeError(message: String): String = message
+        .replace(Regex("https?://\\S+", RegexOption.IGNORE_CASE), "[آدرس حذف شد]")
+        .replace(Regex("(?i)(token|api[_-]?key|authorization)\\s*[:=]\\s*\\S+"), "\$1=[حذف شد]")
+        .take(160)
 
     private fun save(context: Context, values: List<SourceHealth>) {
         val safe = values.sortedByDescending { it.lastCheckedAt }.take(MAX_SOURCES)
