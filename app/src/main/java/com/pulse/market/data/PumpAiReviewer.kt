@@ -49,44 +49,84 @@ object PumpAiReviewer {
 
     data class Outcome(val review: Review? = null, val error: String? = null)
 
+    /** یک مسیر قابل امتحان: آدرس نهایی، بدنه و اینکه پاسخ به سبک Gemini خوانده شود یا OpenAI. */
+    internal data class Route(
+        val endpoint: String,
+        val payload: JsonObject,
+        val nativeGemini: Boolean,
+        val label: String
+    )
+
+    /**
+     * مسیرهای موجود برای این پیکربندی، به‌ترتیب اولویت — هیچ مسیری جایگزین دیگری نشده:
+     * مسیر بومی Gemini و مسیر سازگار با OpenAI هر دو نگه داشته شده‌اند و اگر اولی
+     * پاسخ بی‌متن (مثل MALFORMED_FUNCTION_CALL) بدهد، همان درخواست از مسیر دوم می‌رود.
+     */
+    internal fun reviewRoutes(config: PumpAiConfig, coin: PumpScanner.PumpCoin): List<Route> {
+        val system = systemPrompt()
+        val user = userPrompt(coin)
+        if (isGeminiNative(config.endpoint)) {
+            val native = geminiEndpoint(config.endpoint, config.model)
+            val compat = geminiCompatEndpoint()
+            return listOf(
+                Route(native, geminiBody(system, user, 4096, jsonOutput = true), true, "Gemini بومی"),
+                Route(native, geminiBody(system, user, 4096), true, "Gemini بومی (متن ساده)"),
+                Route(compat, requestBody(config, coin, compat), false, "Gemini سازگار OpenAI")
+            )
+        }
+        val chat = chatCompletionsEndpoint(config.endpoint)
+        val routes = mutableListOf(Route(chat, requestBody(config, coin, chat), false, "سرویس"))
+        if (isGoogleHost(config.endpoint)) {
+            // آدرس سازگار با OpenAI گوگل داده شده؛ مسیر بومی به‌عنوان پشتیبان می‌ماند.
+            val native = geminiEndpoint(GOOGLE_BASE, config.model)
+            routes += Route(native, geminiBody(system, user, 4096, jsonOutput = true), true, "Gemini بومی")
+        }
+        return routes
+    }
+
     suspend fun review(
         config: PumpAiConfig,
         coin: PumpScanner.PumpCoin
     ): Outcome = withContext(Dispatchers.IO) {
         if (!config.enabled) return@withContext Outcome(error = "بررسی هوش مصنوعی خاموش است")
         if (!config.isReady) return@withContext Outcome(error = "آدرس API و نام مدل را کامل کن")
-        try {
-            val gemini = isGeminiNative(config.endpoint)
-            val endpoint = if (gemini) geminiEndpoint(config.endpoint, config.model)
-            else chatCompletionsEndpoint(config.endpoint)
-            fun payloadFor(structured: Boolean): JsonObject =
-                if (gemini) geminiBody(systemPrompt(), userPrompt(coin), 4096, jsonOutput = structured)
-                else requestBody(config, coin, endpoint)
-
-            fun call(structured: Boolean): String = Http.execute(
-                buildRequest(config, endpoint, payloadFor(structured)),
-                maxBytes = 512L * 1024,
-                // جست‌وجوی وب و مدل‌های کند گاهی بیش از ۲۵ ثانیه‌ی پیش‌فرض طول می‌کشند.
-                callTimeoutSeconds = REQUEST_TIMEOUT_SECONDS
-            )
-
-            var outer = call(gemini)
-            var content = if (gemini) extractGeminiContent(outer) else extractAssistantContent(outer)
-            // اگر مدل به‌جای متن یک فراخوانی تابعِ خراب ساخت، یک بار در حالت متن ساده تکرار می‌کنیم.
-            if (content == null && gemini && isRetryableEmptyAnswer(outer)) {
-                outer = call(false)
-                content = extractGeminiContent(outer)
-            }
-            if (content == null) return@withContext Outcome(error = emptyContentReason(outer))
-            Outcome(review = parseReview(content, config.providerSearch))
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (http: Http.HttpException) {
-            Outcome(error = httpErrorText(http))
-        } catch (failure: Exception) {
-            Outcome(error = networkErrorText(failure))
+        val routes = try {
+            reviewRoutes(config, coin)
+        } catch (invalid: IllegalArgumentException) {
+            return@withContext Outcome(error = invalid.message ?: "آدرس یا نام مدل نامعتبر است")
         }
+        var lastError: String? = null
+        for (route in routes) {
+            val raw = try {
+                Http.execute(
+                    buildRequest(config, route.endpoint, route.payload),
+                    maxBytes = 512L * 1024,
+                    // جست‌وجوی وب و مدل‌های کند گاهی بیش از ۲۵ ثانیه‌ی پیش‌فرض طول می‌کشند.
+                    callTimeoutSeconds = REQUEST_TIMEOUT_SECONDS
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (http: Http.HttpException) {
+                lastError = httpErrorText(http)
+                // خطای کلید/دسترسی/مسدودی با مسیر دیگر هم درست نمی‌شود.
+                if (isFatalServiceError(http, lastError)) return@withContext Outcome(error = lastError)
+                continue
+            } catch (failure: Exception) {
+                lastError = networkErrorText(failure)
+                continue
+            }
+            val content =
+                if (route.nativeGemini) extractGeminiContent(raw) else extractAssistantContent(raw)
+            if (content != null) return@withContext Outcome(review = parseReview(content, config.providerSearch))
+            lastError = emptyContentReason(raw)
+        }
+        Outcome(error = lastError ?: "ارتباط با سرویس AI یا خواندن پاسخ ممکن نشد")
     }
+
+    /** خطایی که امتحان مسیر دیگر هم آن را حل نمی‌کند. */
+    internal fun isFatalServiceError(http: Http.HttpException, message: String): Boolean =
+        http.code == 401 || http.code == 403 || http.code == 429 ||
+                message.contains("محدودیت جغرافیایی")
 
     /** آدرس پایه یا آدرس کامل هر دو پذیرفته می‌شوند. */
     fun chatCompletionsEndpoint(raw: String): String {
@@ -137,6 +177,15 @@ object PumpAiReviewer {
                 !endpoint.contains("/openai", ignoreCase = true)
 
     private val MODEL_SAFE = Regex("[^A-Za-z0-9._-]")
+
+    /** آدرس پایه‌ی رسمی Gemini؛ برای ساختن مسیر پشتیبان استفاده می‌شود. */
+    internal const val GOOGLE_BASE = "https://generativelanguage.googleapis.com/v1beta"
+
+    internal fun isGoogleHost(endpoint: String): Boolean =
+        hostOf(endpoint).endsWith("generativelanguage.googleapis.com")
+
+    /** مسیر سازگار با OpenAI گوگل — همان چیزی که پیش‌تر هم پشتیبانی می‌شد. */
+    internal fun geminiCompatEndpoint(): String = "$GOOGLE_BASE/openai/chat/completions"
 
     /** ساخت آدرس نهایی مسیر بومی Gemini از روی آدرس پایه و نام مدل. */
     internal fun geminiEndpoint(raw: String, model: String): String {
@@ -385,49 +434,79 @@ object PumpAiReviewer {
                 "روی آدرس HTTP کلید فرستاده نمی‌شود؛ آدرس HTTPS بگذار"
             )
         }
-        val gemini = isGeminiNative(config.endpoint)
-        val endpoint = runCatching {
-            if (gemini) geminiEndpoint(config.endpoint, config.model)
-            else chatCompletionsEndpoint(config.endpoint)
-        }.getOrNull()
-            ?: return@withContext TestResult(false, "ساختن آدرس نهایی از روی این آدرس ممکن نشد")
-        val payload = if (gemini) {
-            geminiBody("Answer with one short word.", "Reply with exactly: OK", 512)
-        } else buildJsonObject {
+        val routes = try {
+            testRoutes(config)
+        } catch (invalid: IllegalArgumentException) {
+            return@withContext TestResult(false, "❌ " + (invalid.message ?: "آدرس یا نام مدل نامعتبر است"))
+        }
+        var lastMessage = "❌ ارتباط با سرویس AI ممکن نشد"
+        for (route in routes) {
+            val raw = try {
+                Http.execute(
+                    buildRequest(config, route.endpoint, route.payload),
+                    maxBytes = 64L * 1024,
+                    callTimeoutSeconds = 45
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (http: Http.HttpException) {
+                val message = httpErrorText(http)
+                lastMessage = "❌ $message"
+                if (isFatalServiceError(http, message)) return@withContext TestResult(false, lastMessage)
+                continue
+            } catch (failure: Exception) {
+                lastMessage = "❌ " + networkErrorText(failure)
+                continue
+            }
+            val content =
+                (if (route.nativeGemini) extractGeminiContent(raw) else extractAssistantContent(raw))
+                    ?.trim().orEmpty()
+            if (content.isNotBlank()) {
+                return@withContext TestResult(
+                    true,
+                    "✅ اتصال برقرار شد — مدل «${config.model}» از مسیر ${route.label} پاسخ داد: " +
+                            content.take(40)
+                )
+            }
+            lastMessage = "⚠️ " + emptyContentReason(raw)
+        }
+        TestResult(false, lastMessage)
+    }
+
+    /** همان مسیرهای بررسی، ولی با یک پیام خیلی کوتاه و بدون داده‌ی کوین. */
+    internal fun testRoutes(config: PumpAiConfig): List<Route> {
+        val system = "Answer with one short word."
+        val user = "Reply with exactly: OK"
+        fun chatPayload(): JsonObject = buildJsonObject {
             put("model", config.model)
             put("max_tokens", 16)
             put("temperature", 0.0)
             put("messages", buildJsonArray {
-                add(buildJsonObject {
-                    put("role", "user")
-                    put("content", "Reply with exactly: OK")
-                })
+                add(buildJsonObject { put("role", "user"); put("content", user) })
             })
         }
-        try {
-            val raw = Http.execute(
-                buildRequest(config, endpoint, payload),
-                maxBytes = 64L * 1024,
-                callTimeoutSeconds = 45
+        if (isGeminiNative(config.endpoint)) {
+            return listOf(
+                Route(
+                    geminiEndpoint(config.endpoint, config.model),
+                    geminiBody(system, user, 512),
+                    true,
+                    "Gemini بومی"
+                ),
+                Route(geminiCompatEndpoint(), chatPayload(), false, "Gemini سازگار OpenAI")
             )
-            val content = (if (gemini) extractGeminiContent(raw) else extractAssistantContent(raw))
-                ?.trim().orEmpty()
-            val shown = content.take(40).ifBlank { "(پاسخ متنی نداشت)" }
-            TestResult(
-                ok = content.isNotBlank(),
-                message = if (content.isNotBlank()) {
-                    "✅ اتصال برقرار شد — مدل «${config.model}» پاسخ داد: $shown"
-                } else {
-                    "⚠️ " + emptyContentReason(raw)
-                }
-            )
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (http: Http.HttpException) {
-            TestResult(false, "❌ " + httpErrorText(http))
-        } catch (failure: Exception) {
-            TestResult(false, "❌ " + networkErrorText(failure))
         }
+        val chat = chatCompletionsEndpoint(config.endpoint)
+        val routes = mutableListOf(Route(chat, chatPayload(), false, "سازگار OpenAI"))
+        if (isGoogleHost(config.endpoint)) {
+            routes += Route(
+                geminiEndpoint(GOOGLE_BASE, config.model),
+                geminiBody(system, user, 512),
+                true,
+                "Gemini بومی"
+            )
+        }
+        return routes
     }
 
     /** متن نقش سیستم — بین مسیر OpenAI-compatible و مسیر بومی Gemini مشترک است. */
