@@ -141,4 +141,41 @@ class PumpScannerTest {
         )
         assertEquals(listOf("a", "b"), zeroThreshold.matches.map { it.id })
     }
+    @Test
+    fun downsampleKeepsBoundsAndLimit() {
+        val raw = (1..500).map { it.toDouble() }
+        val out = PumpScanner.downsample(raw, PumpScanner.SPARK_POINTS)
+        assertEquals(PumpScanner.SPARK_POINTS, out.size)
+        assertEquals(1.0, out.first(), 0.0001)
+        assertEquals(500.0, out.last(), 0.0001)
+        assertEquals(raw, PumpScanner.downsample(raw, 1000))
+    }
+
+    @Test
+    fun stageFollowsMomentum() {
+        val cooling = PumpScanner.PumpCoin(id = "a", symbol = "a", name = "A", change1h = -1.2, change24h = 14.0)
+        val saturated = PumpScanner.PumpCoin(id = "b", symbol = "b", name = "B", change1h = 2.0, change24h = 40.0)
+        val accelerating = PumpScanner.PumpCoin(id = "c", symbol = "c", name = "C", change1h = 3.0, change24h = 12.0)
+        assertEquals(PumpScanner.Stage.COOLING, cooling.stage)
+        assertEquals(PumpScanner.Stage.SATURATED, saturated.stage)
+        assertEquals(PumpScanner.Stage.ACCELERATING, accelerating.stage)
+    }
+
+    @Test
+    fun scorePartsSumToScoreAndRangePositionIsBounded() {
+        val coin = PumpScanner.PumpCoin(
+            id = "d", symbol = "d", name = "D",
+            price = 8.0, low24h = 4.0, high24h = 12.0,
+            change1h = 2.0, change24h = 10.0,
+            volume = 50.0, marketCap = 100.0
+        )
+        val parts = coin.scoreParts
+        assertEquals(
+            PumpScanner.score(coin.change1h, coin.change24h, coin.volume, coin.marketCap),
+            parts.total,
+            0.0001
+        )
+        assertEquals(0.5, coin.rangePosition24h ?: -1.0, 0.0001)
+        assertTrue(coin.thinMarket)
+    }
 }

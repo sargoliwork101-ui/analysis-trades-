@@ -7,6 +7,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import org.json.JSONArray
+import org.json.JSONObject
 import java.util.Locale
 
 /**
@@ -37,6 +38,7 @@ object PumpScanner {
 
     private const val PREF = "pulse_pumps"
     private const val KEY_LAST = "last_scan"
+    private const val KEY_PREV = "previous_ids"
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
@@ -57,7 +59,17 @@ object PumpScanner {
         val volume: Double? = null,
         val marketCap: Double? = null,
         val rank: Int = 0,
-        val score: Double = 0.0
+        val score: Double = 0.0,
+        /** سقف و کف ۲۴ ساعت اخیر — برای دیدن اینکه قیمت فعلی کجای دامنه است */
+        val high24h: Double? = null,
+        val low24h: Double? = null,
+        /** بالاترین قیمت تاریخ و فاصله‌ی فعلی تا آن (درصد منفی یعنی پایین‌تر از ATH) */
+        val ath: Double? = null,
+        val athChangePct: Double? = null,
+        val circulatingSupply: Double? = null,
+        val totalSupply: Double? = null,
+        /** نمودار ۷ روزه‌ی نمونه‌برداری‌شده (حداکثر ۴۰ نقطه تا کش سنگین نشود) */
+        val spark: List<Double> = emptyList()
     ) {
         /** «سولانا (SOL)» — نام نمایشی برای ویجت و فهرست‌ها */
         val displayName: String
@@ -81,6 +93,37 @@ object PumpScanner {
         /** پیشنهاد احتیاطی و دلیل آن؛ عمداً هیچ حالت «خرید» ندارد. */
         val advice: Advice
             get() = adviceFor(this)
+
+        /** نسبت حجم ۲۴ ساعته به ارزش بازار (۰ تا ۱) */
+        val turnover: Double
+            get() = turnover(volume, marketCap)
+
+        /** مرحله‌ی تقریبی حرکت قیمت — فقط توصیف وضعیت، نه سیگنال */
+        val stage: Stage
+            get() = stageFor(this)
+
+        /** بازار کم‌عمق: ارزش بازار کوچک همراه با گردش حجم بسیار بالا */
+        val thinMarket: Boolean
+            get() = (marketCap ?: 0.0) < 300_000_000.0 && turnover >= 0.35
+
+        /** جای فعلی قیمت در دامنه‌ی ۲۴ ساعته (۰ = کف، ۱ = سقف) */
+        val rangePosition24h: Double?
+            get() {
+                val low = low24h?.takeIf { it.isFinite() } ?: return null
+                val high = high24h?.takeIf { it.isFinite() } ?: return null
+                val now = price?.takeIf { it.isFinite() } ?: return null
+                val span = high - low
+                if (span <= 0.0) return null
+                return ((now - low) / span).coerceIn(0.0, 1.0)
+            }
+
+        /** تفکیک امتیاز پامپ به سه جزء سازنده‌اش */
+        val scoreParts: ScoreParts
+            get() = ScoreParts(
+                day = change24h?.takeIf { it.isFinite() } ?: 0.0,
+                hour = 2.0 * (change1h?.takeIf { it.isFinite() } ?: 0.0),
+                flow = 50.0 * turnover
+            )
     }
 
     /** سطح ریسکِ تقریبی — فقط برای نمایش رنگ و برچسب */
@@ -97,6 +140,38 @@ object PumpScanner {
     }
 
     data class Advice(val recommendation: Recommendation, val reason: String)
+
+    /** سهم هر جزء در امتیاز پامپ؛ مجموع آن دقیقاً همان [score] است. */
+    data class ScoreParts(val day: Double, val hour: Double, val flow: Double) {
+        val total: Double get() = day + hour + flow
+    }
+
+    /** مرحله‌ی حرکت قیمت — از مقایسه‌ی شتاب ۱ ساعته با رشد ۲۴ ساعته */
+    enum class Stage(val label: String, val note: String) {
+        ACCELERATING(
+            "در حال شتاب",
+            "رشد یک‌ساعته هنوز ادامه دارد؛ همین مرحله است که ورود احساسی بیشترین ریسک را دارد."
+        ),
+        SATURATED(
+            "اشباع",
+            "حرکت کند یا خیلی بزرگ شده است؛ احتمال استراحت یا اصلاح قیمت بالا می‌رود."
+        ),
+        COOLING(
+            "در حال برگشت",
+            "شتاب یک‌ساعته منفی شده و بخشی از رشد در حال پس‌داده‌شدن است."
+        )
+    }
+
+    fun stageFor(coin: PumpCoin): Stage {
+        val ch1 = coin.change1h?.takeIf { it.isFinite() } ?: 0.0
+        val ch24 = coin.change24h?.takeIf { it.isFinite() } ?: 0.0
+        return when {
+            ch1 < 0.0 -> Stage.COOLING
+            ch24 >= 25.0 || coin.turnover >= 0.5 -> Stage.SATURATED
+            ch1 >= 1.0 -> Stage.ACCELERATING
+            else -> Stage.SATURATED
+        }
+    }
 
     /** نتیجه‌ی یک اسکن */
     @Serializable
@@ -164,7 +239,7 @@ object PumpScanner {
 
         val url = "https://api.coingecko.com/api/v3/coins/markets" +
                 "?vs_currency=usd&order=market_cap_desc&per_page=$size&page=1" +
-                "&sparkline=false&price_change_percentage=1h,24h,7d,30d"
+                "&sparkline=true&price_change_percentage=1h,24h,7d,30d"
 
         val result = try {
             val body = Http.getText(url)
@@ -177,6 +252,9 @@ object PumpScanner {
 
         return@withContext result.fold(
             onSuccess = { scan ->
+                // اسکن قبلی به‌عنوان «تاریخچه‌ی کوتاه» نگه داشته می‌شود تا در جزئیات
+                // هر کوین معلوم شود قبلاً هم در فهرست پامپ بوده یا تازه آمده است.
+                rememberPrevious(context, cached(context))
                 prefs(context).edit()
                     .putString(KEY_LAST, json.encodeToString(PumpScan.serializer(), scan))
                     .apply()
@@ -200,6 +278,33 @@ object PumpScanner {
                 )
             }
         )
+    }
+
+    private fun rememberPrevious(context: Context, old: PumpScan?) {
+        if (old == null || old.at <= 0L) return
+        val ids = old.matches.asSequence().map { it.id }.take(MAX_RESULTS).toList()
+        if (ids.isEmpty()) return
+        val payload = JSONObject()
+            .put("at", old.at)
+            .put("ids", JSONArray(ids))
+            .toString()
+        prefs(context).edit().putString(KEY_PREV, payload).apply()
+    }
+
+    /** زمان و شناسه‌های اسکن قبلی (برای پاسخ به «قبلاً هم در فهرست بود؟») */
+    fun previousMatches(context: Context): Pair<Long, Set<String>>? {
+        val raw = prefs(context).getString(KEY_PREV, null) ?: return null
+        return runCatching {
+            val obj = JSONObject(raw)
+            val at = obj.optLong("at", 0L)
+            val arr = obj.optJSONArray("ids") ?: return@runCatching null
+            val ids = HashSet<String>(arr.length())
+            for (i in 0 until arr.length()) {
+                val id = safeRemoteText(arr.optString(i), 200)
+                if (id.isNotEmpty()) ids.add(id)
+            }
+            if (at <= 0L || ids.isEmpty()) null else at to (ids as Set<String>)
+        }.getOrNull()
     }
 
     /** خواندن پاسخ CoinGecko و ساختن امتیاز پامپ */
@@ -230,7 +335,14 @@ object PumpScanner {
                     volume = volume,
                     marketCap = cap,
                     rank = o.optInt("market_cap_rank", 0),
-                    score = score(change1, change24, volume, cap)
+                    score = score(change1, change24, volume, cap),
+                    high24h = o.optDouble("high_24h").takeIf { it.isFinite() },
+                    low24h = o.optDouble("low_24h").takeIf { it.isFinite() },
+                    ath = o.optDouble("ath").takeIf { it.isFinite() },
+                    athChangePct = o.optDouble("ath_change_percentage").takeIf { it.isFinite() },
+                    circulatingSupply = o.optDouble("circulating_supply").takeIf { it.isFinite() },
+                    totalSupply = o.optDouble("total_supply").takeIf { it.isFinite() },
+                    spark = sparkOf(o.optJSONObject("sparkline_in_7d"))
                 )
             )?.let(out::add)
         }
@@ -299,8 +411,41 @@ object PumpScanner {
             volume = volume,
             marketCap = cap,
             rank = coin.rank.coerceIn(0, 1_000_000),
-            score = score(ch1, ch24, volume, cap)
+            score = score(ch1, ch24, volume, cap),
+            high24h = coin.high24h?.takeIf { it.isFinite() && it >= 0.0 },
+            low24h = coin.low24h?.takeIf { it.isFinite() && it >= 0.0 },
+            ath = coin.ath?.takeIf { it.isFinite() && it >= 0.0 },
+            athChangePct = coin.athChangePct?.takeIf { it.isFinite() },
+            circulatingSupply = coin.circulatingSupply?.takeIf { it.isFinite() && it >= 0.0 },
+            totalSupply = coin.totalSupply?.takeIf { it.isFinite() && it >= 0.0 },
+            spark = coin.spark.filter { it.isFinite() && it > 0.0 }.take(SPARK_POINTS)
         )
+    }
+
+    /** حداکثر نقطه‌ی نمودار ذخیره‌شده برای هر کوین */
+    internal const val SPARK_POINTS = 40
+
+    /** خواندن آرایه‌ی ۷ روزه‌ی CoinGecko و نمونه‌برداری یکنواخت تا سقف [SPARK_POINTS]. */
+    internal fun sparkOf(node: org.json.JSONObject?): List<Double> {
+        val arr = node?.optJSONArray("price") ?: return emptyList()
+        val raw = ArrayList<Double>(arr.length())
+        for (i in 0 until arr.length()) {
+            val v = arr.optDouble(i)
+            if (v.isFinite() && v > 0.0) raw.add(v)
+        }
+        return downsample(raw, SPARK_POINTS)
+    }
+
+    /** نمونه‌برداری یکنواخت با حفظ نقطه‌ی اول و آخر. */
+    internal fun downsample(values: List<Double>, maxPoints: Int): List<Double> {
+        if (maxPoints < 2 || values.size <= maxPoints) return values
+        val out = ArrayList<Double>(maxPoints)
+        val step = (values.size - 1).toDouble() / (maxPoints - 1).toDouble()
+        for (i in 0 until maxPoints) {
+            val index = Math.round(i * step).toInt().coerceIn(0, values.size - 1)
+            out.add(values[index])
+        }
+        return out
     }
 
     internal fun safeRemoteText(value: String, maxLength: Int): String = value

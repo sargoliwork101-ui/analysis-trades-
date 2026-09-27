@@ -3,6 +3,7 @@ package com.pulse.market.ui.settings
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,8 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Refresh
@@ -33,7 +33,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -98,6 +97,9 @@ fun PumpsCategory(
     var aiEdited by remember { mutableStateOf(false) }
     var showHelp by remember { mutableStateOf(false) }
     var showAllResults by remember { mutableStateOf(false) }
+    var selectedCoinId by remember { mutableStateOf<String?>(null) }
+    var aiReviewAt by remember { mutableStateOf<Map<String, Long>>(emptyMap()) }
+    var previousMatches by remember { mutableStateOf<Pair<Long, Set<String>>?>(null) }
 
     LaunchedEffect(Unit) {
         val loaded = withContext(Dispatchers.IO) { PumpAiConfigStore.load(context) }
@@ -124,7 +126,10 @@ fun PumpsCategory(
         scope.launch {
             try {
                 val outcome = PumpAiReviewer.review(config, coin)
-                outcome.review?.let { aiReviews = aiReviews + (coin.id to it) }
+                outcome.review?.let {
+                    aiReviews = aiReviews + (coin.id to it)
+                    aiReviewAt = aiReviewAt + (coin.id to System.currentTimeMillis())
+                }
                 outcome.error?.let { aiErrors = aiErrors + (coin.id to it) }
             } finally {
                 aiBusyIds = aiBusyIds - coin.id
@@ -134,6 +139,7 @@ fun PumpsCategory(
 
     // فهرست قبلی (ذخیره‌شده روی گوشی) فوراً نشان داده می‌شود؛ اگر نبود یک بار اسکن می‌کنیم
     LaunchedEffect(Unit) {
+        previousMatches = withContext(Dispatchers.IO) { PumpScanner.previousMatches(context) }
         val cached = PumpScanner.cached(context)
         scan = cached
         if (cached == null) {
@@ -157,6 +163,7 @@ fun PumpsCategory(
             try {
                 val res = PumpScanner.scan(context, cfg.pumpUniverse, cfg.pumpMinChange, force = force)
                 scan = res
+                previousMatches = withContext(Dispatchers.IO) { PumpScanner.previousMatches(context) }
                 if (res.error == null) PumpAlertEngine.evaluateScan(context, alertOwnerKey, cfg, res)
                 note = res.error?.let {
                     "⚠️ اسکن تازه نگرفت — $it (فهرست قبلی نمایش داده می‌شود)"
@@ -469,24 +476,11 @@ fun PumpsCategory(
                     PumpRow(
                         coin = coin,
                         persian = cfg.persianDigits,
-                        canAdd = cfg.symbols.none {
-                            it.code == coin.id && it.sourceId == PumpScanner.CRYPTO_SOURCE_ID
-                        } && room > 0,
                         alreadyAdded = cfg.symbols.any {
                             it.code == coin.id && it.sourceId == PumpScanner.CRYPTO_SOURCE_ID
                         },
-                        aiEnabled = aiConfig.enabled,
-                        aiReady = aiConfig.isReady,
-                        aiBusy = coin.id in aiBusyIds,
-                        aiReview = aiReviews[coin.id],
-                        aiError = aiErrors[coin.id],
-                        onAiReview = { runAiReview(coin) },
-                        onOpenNews = { url ->
-                            runCatching {
-                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                            }
-                        },
-                        onAdd = { onAddSymbol(coin.toSymbolDef()) }
+                        aiReviewed = aiReviews[coin.id] != null,
+                        onClick = { selectedCoinId = coin.id }
                     )
                 }
             }
@@ -520,6 +514,34 @@ fun PumpsCategory(
             Spacer(Modifier.width(6.dp))
             Text(if (busy) "در حال اسکن…" else "اسکن تازه‌ی پامپ‌ها", fontSize = 12.5.sp)
         }
+    }
+
+    val selected = selectedCoinId?.let { id -> shown.firstOrNull { it.id == id } }
+    if (selected != null) {
+        PumpDetailSheet(
+            coin = selected,
+            persian = cfg.persianDigits,
+            scanAt = scan?.at ?: 0L,
+            previousMatches = previousMatches,
+            canAdd = room > 0 && cfg.symbols.none {
+                it.code == selected.id && it.sourceId == PumpScanner.CRYPTO_SOURCE_ID
+            },
+            alreadyAdded = cfg.symbols.any {
+                it.code == selected.id && it.sourceId == PumpScanner.CRYPTO_SOURCE_ID
+            },
+            aiEnabled = aiConfig.enabled,
+            aiReady = aiConfig.isReady,
+            aiBusy = selected.id in aiBusyIds,
+            aiReview = aiReviews[selected.id],
+            aiReviewAt = aiReviewAt[selected.id],
+            aiError = aiErrors[selected.id],
+            onAiReview = { runAiReview(selected) },
+            onOpenLink = { url ->
+                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+            },
+            onAdd = { onAddSymbol(selected.toSymbolDef()) },
+            onDismiss = { selectedCoinId = null }
+        )
     }
 }
 
@@ -651,7 +673,7 @@ private fun RuleLine(number: String, text: String) {
 }
 
 @Composable
-private fun PumpChangeBadge(label: String, value: Double?, persian: Boolean) {
+internal fun PumpChangeBadge(label: String, value: Double?, persian: Boolean) {
     val color = when {
         value == null -> MaterialTheme.colorScheme.onSurfaceVariant
         value > 0.0 -> Color(0xFF16A34A)
@@ -671,31 +693,21 @@ private fun PumpChangeBadge(label: String, value: Double?, persian: Boolean) {
     }
 }
 
-/** یک کوین در فهرست پامپ */
+/** یک کوین در فهرست پامپ — خلاصه؛ با کلیک، جزئیات کامل باز می‌شود. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun PumpRow(
     coin: PumpScanner.PumpCoin,
     persian: Boolean,
-    canAdd: Boolean,
     alreadyAdded: Boolean,
-    aiEnabled: Boolean,
-    aiReady: Boolean,
-    aiBusy: Boolean,
-    aiReview: PumpAiReviewer.Review?,
-    aiError: String?,
-    onAiReview: () -> Unit,
-    onOpenNews: (String) -> Unit,
-    onAdd: () -> Unit
+    aiReviewed: Boolean,
+    onClick: () -> Unit
 ) {
-    val riskColor = when (coin.risk) {
-        PumpScanner.Risk.LOW -> Color(0xFF22C55E)
-        PumpScanner.Risk.MEDIUM -> Color(0xFFF59E0B)
-        PumpScanner.Risk.HIGH -> Color(0xFFF43F5E)
-    }
+    val riskColor = riskColor(coin.risk)
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
@@ -718,6 +730,12 @@ private fun PumpRow(
             ) {
                 Text(coin.risk.label, fontSize = 10.sp, color = riskColor)
             }
+            Icon(
+                Icons.Default.ChevronLeft,
+                contentDescription = "جزئیات",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp)
+            )
         }
         Text(
             "قیمت ${QuoteText.priceWithUnit(coin.price, "$", persian)}",
@@ -734,166 +752,26 @@ private fun PumpRow(
             PumpChangeBadge("۱ ماه", coin.change30d, persian)
         }
         Text(
+            "مرحله: ${coin.stage.label} • نتیجه‌ی احتیاطی: ${coin.advice.recommendation.label}",
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = riskColor
+        )
+        Text(
             buildString {
-                if (coin.rank > 0) append("رتبه ${Format.toPersianDigits("${coin.rank}")}")
-                if (coin.volume != null) {
-                    if (isNotEmpty()) append(" • ")
-                    append("حجم ۲۴ساعته ${Format.volume(coin.volume, persian)}")
-                }
-                if (coin.marketCap != null) {
-                    if (isNotEmpty()) append(" • ")
-                    append("ارزش بازار ${Format.volume(coin.marketCap, persian)}")
-                }
+                append("برای جزئیات کامل، نمودار و نظر AI بزن")
+                if (alreadyAdded) append(" • ✓ در ویجت")
+                if (aiReviewed) append(" • نظر AI آماده است")
             },
             fontSize = 10.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        val advice = coin.advice
-        Text(
-                "نتیجه‌ی احتیاطی: ${advice.recommendation.label}",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                color = riskColor,
-                modifier = Modifier.padding(top = 2.dp)
-            )
-            Text(
-                "دلیل: ${advice.reason}",
-                fontSize = 10.5.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 2.dp)
-            )
-
-            if (aiEnabled) {
-                OutlinedButton(
-                    onClick = onAiReview,
-                    enabled = aiReady && !aiBusy,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 3.dp)
-                ) {
-                    Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(5.dp))
-                    Text(
-                        when {
-                            aiBusy -> "در حال بررسی و جست‌وجوی خبر…"
-                            aiReview != null -> "بررسی دوباره با AI"
-                            else -> "بررسی با AI"
-                        },
-                        fontSize = 11.sp
-                    )
-                }
-                if (!aiReady) {
-                    Text(
-                        "برای بررسی، آدرس API و نام مدل را بالای صفحه کامل کن.",
-                        fontSize = 10.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 3.dp)
-                    )
-                }
-                if (!aiError.isNullOrBlank()) {
-                    Text(
-                        "خطای AI: $aiError",
-                        fontSize = 10.5.sp,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.padding(top = 4.dp)
-                    )
-                }
-                aiReview?.let { review ->
-                    Card(
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
-                        ),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 7.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Text(
-                                "نظر AI: ${review.recommendation}",
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            val confidence = review.confidence?.let {
-                                val n = if (persian) Format.toPersianDigits(it.toString()) else it.toString()
-                                " • اطمینان $n٪"
-                            }.orEmpty()
-                            Text(
-                                "وضعیت: ${review.verdict}$confidence",
-                                fontSize = 10.5.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                "دلیل AI: ${review.reason}",
-                                fontSize = 10.5.sp,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            if (review.news.isEmpty()) {
-                                Text(
-                                    if (review.providerSearchRequested)
-                                        "خبر مرتبطِ دارای لینک از پاسخ سرویس دریافت نشد."
-                                    else "جست‌وجوی خبر درخواست نشده بود.",
-                                    fontSize = 10.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            } else {
-                                Text(
-                                    "خبرهای مرتبط گزارش‌شده توسط سرویس:",
-                                    fontSize = 10.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                for (news in review.news) {
-                                    TextButton(onClick = { onOpenNews(news.url) }) {
-                                        Column(modifier = Modifier.fillMaxWidth()) {
-                                            Text(news.title, fontSize = 10.5.sp)
-                                            val meta = listOf(news.host, news.source, news.publishedAt)
-                                                .filter { it.isNotBlank() }
-                                                .distinct()
-                                                .joinToString(" • ")
-                                            if (meta.isNotBlank()) {
-                                                Text(
-                                                    meta,
-                                                    fontSize = 9.5.sp,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
-                                            if (news.relation.isNotBlank()) {
-                                                Text(
-                                                    news.relation,
-                                                    fontSize = 9.5.sp,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        Spacer(Modifier.height(2.dp))
-        if (alreadyAdded) {
-            Text(
-                "✓ در ویجت",
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.primary
-            )
-        } else {
-            OutlinedButton(
-                onClick = onAdd,
-                enabled = canAdd,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(4.dp))
-                Text("ویجت", fontSize = 11.5.sp)
-            }
-        }
     }
+}
+
+/** رنگ ثابت هر سطح ریسک — در فهرست و صفحه‌ی جزئیات یکسان است. */
+internal fun riskColor(risk: PumpScanner.Risk): Color = when (risk) {
+    PumpScanner.Risk.LOW -> Color(0xFF22C55E)
+    PumpScanner.Risk.MEDIUM -> Color(0xFFF59E0B)
+    PumpScanner.Risk.HIGH -> Color(0xFFF43F5E)
 }

@@ -1,0 +1,546 @@
+package com.pulse.market.ui.settings
+
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.pulse.market.data.PumpAiReviewer
+import com.pulse.market.data.PumpScanner
+import com.pulse.market.ui.Format
+import com.pulse.market.ui.QuoteText
+import kotlin.math.abs
+
+/**
+ * صفحه‌ی جزئیات یک کوین پامپ — همه‌ی چیزی که برای تصمیم لازم است در یک جا:
+ * نمودار ۷ روزه، تغییرات همه‌ی بازه‌ها، حجم/ارزش بازار/گردش، فاصله تا ATH،
+ * جای قیمت در دامنه‌ی ۲۴ ساعته، تفکیک امتیاز پامپ، پیشنهاد احتیاطی برنامه و
+ * نظر دوم هوش مصنوعی همراه با خبرهای لینک‌دار.
+ *
+ * هیچ بخشی از این صفحه توصیه‌ی خرید نیست.
+ */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+fun PumpDetailSheet(
+    coin: PumpScanner.PumpCoin,
+    persian: Boolean,
+    scanAt: Long,
+    previousMatches: Pair<Long, Set<String>>?,
+    canAdd: Boolean,
+    alreadyAdded: Boolean,
+    aiEnabled: Boolean,
+    aiReady: Boolean,
+    aiBusy: Boolean,
+    aiReview: PumpAiReviewer.Review?,
+    aiReviewAt: Long?,
+    aiError: String?,
+    onAiReview: () -> Unit,
+    onOpenLink: (String) -> Unit,
+    onAdd: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val risk = riskColor(coin.risk)
+
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 26.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // ── هدر ──
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        coin.displayName,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        buildString {
+                            if (coin.rank > 0) append("رتبه ${Format.toPersianDigits("${coin.rank}")} بازار")
+                            if (scanAt > 0L) {
+                                if (isNotEmpty()) append(" • ")
+                                append("داده‌ی ساعت ${Format.time(scanAt)}")
+                            }
+                        },
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Chip(coin.risk.label, risk)
+            }
+
+            Text(
+                QuoteText.priceWithUnit(coin.price, "$", persian),
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            // ── نمودار ۷ روزه ──
+            if (coin.spark.size >= 3) {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            "روند ۷ روز اخیر",
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        PriceSparkline(
+                            values = coin.spark,
+                            rising = (coin.change7d ?: 0.0) >= 0.0,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(76.dp)
+                        )
+                    }
+                }
+            } else {
+                Hint("نمودار ۷ روزه برای این کوین در پاسخ منبع نبود؛ با «اسکن تازه» دوباره تلاش کن.")
+            }
+
+            // ── تغییرات ──
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                PumpChangeBadge("۱ ساعت", coin.change1h, persian)
+                PumpChangeBadge("۱ روز", coin.change24h, persian)
+                PumpChangeBadge("۱ هفته", coin.change7d, persian)
+                PumpChangeBadge("۱ ماه", coin.change30d, persian)
+            }
+
+            // ── مرحله‌ی حرکت ──
+            Card(
+                colors = CardDefaults.cardColors(containerColor = risk.copy(alpha = 0.12f)),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        "مرحله‌ی حرکت: ${coin.stage.label}",
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        coin.stage.note,
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            // ── داده‌های کلیدی ──
+            Section("داده‌های کلیدی")
+            StatRow("حجم ۲۴ ساعته", Format.volume(coin.volume, persian))
+            StatRow("ارزش بازار", Format.volume(coin.marketCap, persian))
+            StatRow(
+                "گردش حجم به ارزش بازار",
+                "${Format.price(coin.turnover * 100.0, persian)}٪"
+            )
+            StatRow("سقف ۲۴ ساعته", QuoteText.priceWithUnit(coin.high24h, "$", persian))
+            StatRow("کف ۲۴ ساعته", QuoteText.priceWithUnit(coin.low24h, "$", persian))
+            StatRow("بالاترین قیمت تاریخ (ATH)", QuoteText.priceWithUnit(coin.ath, "$", persian))
+            coin.athChangePct?.let {
+                StatRow("فاصله تا ATH", Format.pct(it, persian).ifBlank { "—" })
+            }
+            coin.circulatingSupply?.let {
+                StatRow("عرضه در گردش", Format.volume(it, persian))
+            }
+            coin.totalSupply?.let {
+                StatRow("کل عرضه", Format.volume(it, persian))
+            }
+
+            coin.rangePosition24h?.let { position ->
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        "جای قیمت در دامنه‌ی ۲۴ ساعته: " +
+                                "${Format.price(position * 100.0, persian)}٪",
+                        fontSize = 11.5.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    LinearProgressIndicator(
+                        progress = { position.toFloat() },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                    )
+                    Text(
+                        if (position >= 0.85) "قیمت نزدیک سقف ۲۴ ساعته است؛ ورود در این ناحیه ریسک اصلاح دارد."
+                        else "۰٪ یعنی کف و ۱۰۰٪ یعنی سقف ۲۴ ساعت اخیر.",
+                        fontSize = 10.5.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            if (coin.thinMarket) {
+                WarnCard(
+                    "بازار کم‌عمق: ارزش بازار کوچک است و حجم نسبت به آن بسیار بالاست؛ " +
+                            "قیمت با سفارش‌های نه‌چندان بزرگ هم می‌تواند شدید جابه‌جا شود."
+                )
+            }
+
+            // ── تفکیک امتیاز ──
+            Section("چرا این کوین در فهرست است؟")
+            val parts = coin.scoreParts
+            ScoreBar("رشد ۲۴ ساعته", parts.day, parts.total, persian)
+            ScoreBar("شتاب ۱ ساعته (وزن ۲)", parts.hour, parts.total, persian)
+            ScoreBar("ورود حجم (وزن ۵۰)", parts.flow, parts.total, persian)
+            Hint(
+                "امتیاز پامپ = رشد ۲۴ ساعته + ۲× رشد ۱ ساعته + ۵۰× گردش حجم. " +
+                        "امتیاز کل: ${Format.price(parts.total, persian)}"
+            )
+
+            // ── تاریخچه‌ی کوتاه ──
+            previousMatches?.let { (at, ids) ->
+                Hint(
+                    if (coin.id in ids)
+                        "در اسکن قبلی (ساعت ${Format.time(at)}) هم بالای آستانه بود؛ یعنی حرکت ادامه‌دار است."
+                    else "در اسکن قبلی (ساعت ${Format.time(at)}) در فهرست نبود؛ این حرکت تازه شروع شده است."
+                )
+            }
+
+            // ── پیشنهاد احتیاطی برنامه ──
+            Section("نتیجه‌ی احتیاطی برنامه")
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        coin.advice.recommendation.label,
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = risk
+                    )
+                    Text(
+                        coin.advice.reason,
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+
+            // ── نظر دوم AI ──
+            Section("نظر دوم هوش مصنوعی")
+            if (!aiEnabled) {
+                Hint("بررسی با AI خاموش است؛ از بالای همین صفحه می‌توانی روشنش کنی.")
+            } else {
+                OutlinedButton(
+                    onClick = onAiReview,
+                    enabled = aiReady && !aiBusy,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(17.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        when {
+                            aiBusy -> "در حال بررسی و جست‌وجوی خبر…"
+                            aiReview != null -> "بررسی دوباره با AI"
+                            else -> "بررسی با AI"
+                        },
+                        fontSize = 11.5.sp
+                    )
+                }
+                if (!aiReady) {
+                    Hint("برای بررسی، آدرس API و نام مدل را در بخش «نظر دوم هوش مصنوعی» کامل کن.")
+                }
+                if (!aiError.isNullOrBlank()) {
+                    Text(
+                        "خطای AI: $aiError",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+                aiReview?.let { review ->
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Text(
+                                "نظر AI: ${review.recommendation}",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            val confidence = review.confidence?.let {
+                                val n = if (persian) Format.toPersianDigits(it.toString()) else it.toString()
+                                " • اطمینان $n٪"
+                            }.orEmpty()
+                            val at = aiReviewAt?.takeIf { it > 0L }?.let { " • ساعت ${Format.time(it)}" }.orEmpty()
+                            Text(
+                                "وضعیت: ${review.verdict}$confidence$at",
+                                fontSize = 10.5.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                "دلیل AI: ${review.reason}",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            if (review.news.isEmpty()) {
+                                Text(
+                                    if (review.providerSearchRequested)
+                                        "خبر مرتبطِ دارای لینک از پاسخ سرویس دریافت نشد."
+                                    else "جست‌وجوی خبر درخواست نشده بود.",
+                                    fontSize = 10.5.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            } else {
+                                Text(
+                                    "خبرهای مرتبط گزارش‌شده توسط سرویس:",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                for (news in review.news) {
+                                    TextButton(onClick = { onOpenLink(news.url) }) {
+                                        Column(modifier = Modifier.fillMaxWidth()) {
+                                            Text(news.title, fontSize = 11.sp)
+                                            val meta = listOf(news.host, news.source, news.publishedAt)
+                                                .filter { it.isNotBlank() }
+                                                .distinct()
+                                                .joinToString(" • ")
+                                            if (meta.isNotBlank()) {
+                                                Text(
+                                                    meta,
+                                                    fontSize = 9.5.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                            if (news.relation.isNotBlank()) {
+                                                Text(
+                                                    news.relation,
+                                                    fontSize = 9.5.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── اقدام‌ها ──
+            Section("اقدام")
+            if (alreadyAdded) {
+                Text(
+                    "✓ این کوین در ویجت هست.",
+                    fontSize = 11.5.sp,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            } else {
+                Button(
+                    onClick = { onAdd(); onDismiss() },
+                    enabled = canAdd,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(17.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (canAdd) "افزودن به ویجت" else "ویجت پر است", fontSize = 11.5.sp)
+                }
+            }
+            OutlinedButton(
+                onClick = { onOpenLink("https://www.coingecko.com/en/coins/${coin.id}") },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("باز کردن صفحه‌ی CoinGecko", fontSize = 11.5.sp)
+            }
+
+            WarnCard(
+                "هیچ‌کدام از داده‌ها و پیام‌های این صفحه توصیه‌ی مالی یا سیگنال خرید و فروش نیست."
+            )
+        }
+    }
+}
+
+@Composable
+private fun Section(title: String) {
+    Text(
+        title,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(top = 4.dp)
+    )
+}
+
+@Composable
+private fun StatRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            value.ifBlank { "—" },
+            fontSize = 11.5.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+    }
+}
+
+@Composable
+private fun Chip(text: String, color: Color) {
+    Box(
+        modifier = Modifier
+            .background(color.copy(alpha = 0.18f), RoundedCornerShape(7.dp))
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+    ) {
+        Text(text, fontSize = 10.5.sp, color = color)
+    }
+}
+
+@Composable
+private fun WarnCard(text: String) {
+    Row(verticalAlignment = Alignment.Top, modifier = Modifier.fillMaxWidth()) {
+        Icon(
+            Icons.Default.Warning,
+            contentDescription = null,
+            tint = Color(0xFFF59E0B),
+            modifier = Modifier.size(16.dp)
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(text, fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** سهم یک جزء از امتیاز پامپ؛ سهم منفی هم با رنگ قرمز دیده می‌شود. */
+@Composable
+private fun ScoreBar(label: String, value: Double, total: Double, persian: Boolean) {
+    val safeTotal = abs(total).takeIf { it > 0.0001 } ?: 1.0
+    val ratio = (abs(value) / safeTotal).coerceIn(0.0, 1.0).toFloat()
+    val color = if (value < 0.0) Color(0xFFDC2626) else Color(0xFF16A34A)
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp), modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(label, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                Format.price(value, persian),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = color
+            )
+        }
+        LinearProgressIndicator(
+            progress = { ratio },
+            color = color,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(5.dp)
+        )
+    }
+}
+
+/** نمودار ساده‌ی قیمت برای Compose (نسخه‌ی ویجت جداگانه Bitmap می‌سازد). */
+@Composable
+private fun PriceSparkline(values: List<Double>, rising: Boolean, modifier: Modifier) {
+    val color = if (rising) Color(0xFF16A34A) else Color(0xFFDC2626)
+    Canvas(modifier = modifier) {
+        if (values.size < 2) return@Canvas
+        val min = values.minOrNull() ?: return@Canvas
+        val max = values.maxOrNull() ?: return@Canvas
+        val span = (max - min).takeIf { it > 0.0 } ?: 1.0
+        val dx = size.width / (values.size - 1).toFloat()
+        val pad = size.height * 0.1f
+        val usable = size.height - pad * 2f
+        var previous: Offset? = null
+        for ((index, value) in values.withIndex()) {
+            val x = index * dx
+            val y = pad + (usable - (((value - min) / span).toFloat() * usable))
+            val point = Offset(x, y)
+            previous?.let { start ->
+                drawLine(
+                    color = color,
+                    start = start,
+                    end = point,
+                    strokeWidth = 3.5f,
+                    cap = StrokeCap.Round
+                )
+            }
+            previous = point
+        }
+    }
+}
