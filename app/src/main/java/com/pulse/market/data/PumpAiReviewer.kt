@@ -58,35 +58,21 @@ object PumpAiReviewer {
         try {
             val endpoint = chatCompletionsEndpoint(config.endpoint)
             val payload = requestBody(config, coin, endpoint)
-            val request = Request.Builder()
-                .url(endpoint)
-                .post(payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
-                .header("Accept", "application/json")
-                .apply {
-                    if (config.apiKey.isNotBlank()) {
-                        header("Authorization", "Bearer ${config.apiKey}")
-                    }
-                }
-                .build()
-            val outer = Http.execute(request, maxBytes = 512L * 1024)
+            val outer = Http.execute(
+                buildRequest(config, endpoint, payload),
+                maxBytes = 512L * 1024,
+                // جست‌وجوی وب و مدل‌های کند گاهی بیش از ۲۵ ثانیه‌ی پیش‌فرض طول می‌کشند.
+                callTimeoutSeconds = REQUEST_TIMEOUT_SECONDS
+            )
             val content = extractAssistantContent(outer)
                 ?: return@withContext Outcome(error = "پاسخ سرویس AI متن قابل‌خواندن نداشت")
             Outcome(review = parseReview(content, config.providerSearch))
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (http: Http.HttpException) {
-            val message = when (http.code) {
-                401, 403 -> "کلید API یا دسترسی مدل پذیرفته نشد"
-                404 -> "آدرس API یا نام مدل پیدا نشد"
-                408 -> "زمان پاسخ سرویس AI تمام شد"
-                429 -> "سهمیه یا محدودیت درخواست سرویس AI پر شده است"
-                in 500..599 -> "سرویس AI فعلاً خطای داخلی دارد"
-                else -> "سرویس AI پاسخ HTTP ${http.code} داد"
-            }
-            Outcome(error = message)
-        } catch (_: Exception) {
-            // پیام خام exception ممکن است URL یا جزئیات حساس سرویس کاربر را داشته باشد.
-            Outcome(error = "ارتباط با سرویس AI یا خواندن پاسخ ممکن نشد")
+            Outcome(error = httpErrorText(http))
+        } catch (failure: Exception) {
+            Outcome(error = networkErrorText(failure))
         }
     }
 
@@ -100,6 +86,126 @@ object PumpAiReviewer {
             clean.endsWith("/openai", ignoreCase = true) ||
                     VERSIONED_PATH.containsMatchIn(clean) -> "$clean/chat/completions"
             else -> "$clean/v1/chat/completions"
+        }
+    }
+
+    /** سقف زمان یک درخواست AI (ثانیه) — مدل‌های کند و جست‌وجوی وب وقت بیشتری می‌خواهند. */
+    internal const val REQUEST_TIMEOUT_SECONDS = 90
+
+    private fun buildRequest(config: PumpAiConfig, endpoint: String, payload: JsonObject): Request =
+        Request.Builder()
+            .url(endpoint)
+            .post(payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
+            .header("Accept", "application/json")
+            .apply {
+                if (config.apiKey.isNotBlank()) {
+                    header("Authorization", "Bearer ${config.apiKey}")
+                    // Anthropic هم هدر اختصاصی خودش را می‌پذیرد و هم Bearer؛ فرستادن هر دو
+                    // جلوی خطای «authentication» در مسیر سازگار با OpenAI را می‌گیرد.
+                    if (hostOf(endpoint).endsWith("anthropic.com")) {
+                        header("x-api-key", config.apiKey)
+                        header("anthropic-version", "2023-06-01")
+                    }
+                }
+            }
+            .build()
+
+    private fun hostOf(endpoint: String): String = runCatching {
+        URI(endpoint).host.orEmpty().lowercase(Locale.ROOT)
+    }.getOrDefault("")
+
+    /** پیام خطای HTTP همراه با راهنمای رفع؛ متن سرویس هم (کوتاه و پاک‌سازی‌شده) نمایش داده می‌شود. */
+    internal fun httpErrorText(http: Http.HttpException): String {
+        val detail = http.message.orEmpty().substringAfter("—", "").trim()
+        val hint = when (http.code) {
+            400 -> "درخواست پذیرفته نشد؛ معمولاً نام مدل اشتباه است یا مدل این پارامترها را قبول ندارد"
+            401 -> "کلید API پذیرفته نشد (۴۰۱) — کلید را دوباره کپی کن و مطمئن شو مربوط به همین سرویس است"
+            403 -> "دسترسی رد شد (۴۰۳) — کلید به این مدل دسترسی ندارد یا سرویس از کشور تو مسدود است"
+            404 -> "آدرس یا نام مدل پیدا نشد (۴۰۴) — آدرس پایه و نام دقیق مدل را بررسی کن"
+            408 -> "زمان پاسخ سرویس تمام شد (۴۰۸)"
+            413 -> "حجم درخواست بیش از حد مجاز سرویس بود (۴۱۳)"
+            429 -> "سهمیه یا محدودیت درخواست پر شده است (۴۲۹) — کمی بعد دوباره امتحان کن"
+            in 500..599 -> "سرویس AI خطای داخلی داد (${http.code})"
+            else -> "سرویس AI پاسخ HTTP ${http.code} داد"
+        }
+        return if (detail.isBlank()) hint else "$hint — پاسخ سرویس: $detail"
+    }
+
+    /** خطای شبکه‌ای؛ پیام خام ممکن است آدرس یا کلید داشته باشد، پس دسته‌بندی می‌شود. */
+    internal fun networkErrorText(failure: Exception): String {
+        val raw = failure.message.orEmpty().lowercase(Locale.ROOT)
+        return when {
+            raw.contains("timeout") || raw.contains("timed out") ->
+                "زمان پاسخ سرویس تمام شد؛ اینترنت/فیلترشکن را بررسی کن یا جست‌وجوی وب سرویس را خاموش کن"
+            raw.contains("unable to resolve host") || raw.contains("unknownhost") ->
+                "آدرس سرویس پیدا نشد (DNS)؛ آدرس API و اتصال اینترنت را بررسی کن"
+            raw.contains("ssl") || raw.contains("certpath") || raw.contains("handshake") ->
+                "ارتباط امن (TLS) برقرار نشد؛ معمولاً به‌خاطر فیلترشکن یا ساعت اشتباه دستگاه است"
+            raw.contains("econnreset") || raw.contains("connection reset") || raw.contains("connect") ->
+                "اتصال به سرویس برقرار نشد؛ ممکن است دسترسی از ایران مسدود باشد (فیلترشکن لازم است)"
+            raw.contains("ناامن") || raw.contains("تغییر مسیر") || raw.contains("حجم پاسخ") ->
+                failure.message.orEmpty()
+            else -> "ارتباط با سرویس AI یا خواندن پاسخ ممکن نشد"
+        }
+    }
+
+    data class TestResult(val ok: Boolean, val message: String)
+
+    /**
+     * تست اتصال: یک درخواست بسیار کوچک می‌فرستد تا معلوم شود آدرس، مدل و کلید
+     * واقعاً کار می‌کنند. هیچ داده‌ی کوینی فرستاده نمی‌شود.
+     */
+    suspend fun testConnection(config: PumpAiConfig): TestResult = withContext(Dispatchers.IO) {
+        if (config.endpoint.isBlank() || config.model.isBlank()) {
+            return@withContext TestResult(false, "اول آدرس API و نام مدل را بنویس")
+        }
+        if (!config.endpointValid) {
+            return@withContext TestResult(
+                false,
+                "آدرس API معتبر نیست؛ باید HTTPS و بدون query یا نام کاربری باشد"
+            )
+        }
+        if (config.insecureKeyTransport) {
+            return@withContext TestResult(
+                false,
+                "روی آدرس HTTP کلید فرستاده نمی‌شود؛ آدرس HTTPS بگذار"
+            )
+        }
+        val endpoint = runCatching { chatCompletionsEndpoint(config.endpoint) }.getOrNull()
+            ?: return@withContext TestResult(false, "ساختن آدرس نهایی از روی این آدرس ممکن نشد")
+        val payload = buildJsonObject {
+            put("model", config.model)
+            put("max_tokens", 16)
+            put("temperature", 0.0)
+            put("messages", buildJsonArray {
+                add(buildJsonObject {
+                    put("role", "user")
+                    put("content", "Reply with exactly: OK")
+                })
+            })
+        }
+        try {
+            val raw = Http.execute(
+                buildRequest(config, endpoint, payload),
+                maxBytes = 64L * 1024,
+                callTimeoutSeconds = 45
+            )
+            val content = extractAssistantContent(raw)?.trim().orEmpty()
+            val shown = content.take(40).ifBlank { "(پاسخ متنی نداشت)" }
+            TestResult(
+                ok = content.isNotBlank(),
+                message = if (content.isNotBlank()) {
+                    "✅ اتصال برقرار شد — مدل «${config.model}» پاسخ داد: $shown"
+                } else {
+                    "⚠️ سرویس پاسخ داد ولی متنی برنگرداند؛ نام مدل را بررسی کن"
+                }
+            )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (http: Http.HttpException) {
+            TestResult(false, "❌ " + httpErrorText(http))
+        } catch (failure: Exception) {
+            TestResult(false, "❌ " + networkErrorText(failure))
         }
     }
 

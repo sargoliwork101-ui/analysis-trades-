@@ -78,7 +78,8 @@ object Http {
         repeat(MAX_REDIRECTS + 1) { redirectCount ->
             val call = client.newCall(current)
             callTimeoutSeconds?.let {
-                call.timeout().timeout(it.coerceIn(3, 60).toLong(), TimeUnit.SECONDS)
+                // سقف ۱۲۰ ثانیه: سرویس‌های AI با جست‌وجوی وب کندتر از منابع قیمت‌اند.
+                call.timeout().timeout(it.coerceIn(3, 120).toLong(), TimeUnit.SECONDS)
             }
             call.execute().use { response ->
                 if (!response.isRedirect) return readCapped(response, maxBytes)

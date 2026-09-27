@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.HelpOutline
+import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.TrendingUp
@@ -94,6 +95,8 @@ fun PumpsCategory(
     var aiReviews by remember { mutableStateOf<Map<String, PumpAiReviewer.Review>>(emptyMap()) }
     var aiErrors by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var aiStorageError by remember { mutableStateOf(false) }
+    var aiTestBusy by remember { mutableStateOf(false) }
+    var aiTestResult by remember { mutableStateOf<PumpAiReviewer.TestResult?>(null) }
     var aiEdited by remember { mutableStateOf(false) }
     var showHelp by remember { mutableStateOf(false) }
     var showAllResults by remember { mutableStateOf(false) }
@@ -110,6 +113,7 @@ fun PumpsCategory(
         if (new != aiConfig) {
             aiReviews = emptyMap()
             aiErrors = emptyMap()
+            aiTestResult = null
         }
         aiEdited = true
         aiConfig = new
@@ -408,6 +412,44 @@ fun PumpsCategory(
                         "کلید با Android Keystore رمزگذاری می‌شود و وارد بکاپ دستی نمی‌شود. " +
                                 "با زدن دکمه، نام کوین و داده‌های قیمت/حجم/ریسک برای همین API فرستاده می‌شود. " +
                                 "برای خبر، جست‌وجوی وب خود سرویس درخواست می‌شود؛ این قابلیت باید توسط مدل/API پشتیبانی شود."
+                    )
+                }
+                RowDivider()
+                InnerRow {
+                    OutlinedButton(
+                        onClick = {
+                            val config = aiConfig
+                            aiTestBusy = true
+                            aiTestResult = null
+                            scope.launch {
+                                try {
+                                    aiTestResult = PumpAiReviewer.testConnection(config)
+                                } finally {
+                                    aiTestBusy = false
+                                }
+                            }
+                        },
+                        enabled = !aiTestBusy,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.NetworkCheck, contentDescription = null, modifier = Modifier.size(17.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            if (aiTestBusy) "در حال تست اتصال…" else "تست اتصال به سرویس AI",
+                            fontSize = 11.5.sp
+                        )
+                    }
+                    aiTestResult?.let { result ->
+                        Text(
+                            result.message,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (result.ok) Color(0xFF16A34A) else MaterialTheme.colorScheme.error
+                        )
+                    }
+                    Hint(
+                        "تست، یک پیام خیلی کوتاه برای سرویس می‌فرستد (بدون داده‌ی کوین) و نتیجه‌ی دقیق " +
+                                "آدرس، مدل و کلید را می‌گوید."
                     )
                 }
                 RowDivider()

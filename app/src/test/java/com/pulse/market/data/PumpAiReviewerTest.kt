@@ -91,4 +91,32 @@ class PumpAiReviewerTest {
         assertEquals("نامطمئن", review.verdict)
         assertNull(review.confidence)
     }
+
+    @Test
+    fun httpErrorTextExplainsCauseAndKeepsServerDetail() {
+        val unauthorized = PumpAiReviewer.httpErrorText(
+            Http.HttpException(401, "HTTP 401 — invalid_api_key")
+        )
+        assertTrue(unauthorized.contains("۴۰۱"))
+        assertTrue(unauthorized.contains("invalid_api_key"))
+
+        val notFound = PumpAiReviewer.httpErrorText(Http.HttpException(404, "HTTP 404"))
+        assertTrue(notFound.contains("۴۰۴"))
+    }
+
+    @Test
+    fun networkErrorTextIsCategorisedAndNeverLeaksRawUrl() {
+        assertTrue(
+            PumpAiReviewer.networkErrorText(java.net.SocketTimeoutException("timeout"))
+                .contains("زمان پاسخ")
+        )
+        assertTrue(
+            PumpAiReviewer.networkErrorText(java.net.UnknownHostException("Unable to resolve host"))
+                .contains("DNS")
+        )
+        val leaky = PumpAiReviewer.networkErrorText(
+            IllegalStateException("failed to connect to https://secret.example/v1?key=abc")
+        )
+        assertTrue(!leaky.contains("secret.example"))
+    }
 }
