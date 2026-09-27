@@ -1,6 +1,5 @@
 # kotlinx.serialization generates direct serializer references; retaining the whole data
-# package disabled much of R8's member shrinking and unnecessarily enlarged the APK.
--keepattributes *Annotation*, InnerClasses
+# package or all annotation/inner-class metadata disables useful R8 shrinking.
 -dontnote kotlinx.serialization.**
 
 # Jsoup / OkHttp

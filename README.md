@@ -86,6 +86,7 @@ Two built-in ways; both give the **USD** price of one troy ounce:
 - ⚠️ Versions 1.0–1.3 were signed with the CI runner's throwaway key; installing **1.4** over them needs one uninstall/reinstall. After 1.4 that is no longer needed.
 
 **Version history**
+- **1.29** — removes unnecessary annotation/inner-class retention from the app's R8 rules and packages only Persian plus English fallback resources, reducing metadata/locales without changing RTL presentation or runtime behavior.
 - **1.28** — replaced an over-conservative raw DEX-string check (which also matched harmless backport descriptors) with a regression test for the exact HTML parsing/CSS-selector path; release lint, minSdk 23 and standard stream/function desugaring remain enforced.
 - **1.27** — routes HTML strings directly through jsoup's parser, preserving custom CSS-selector sources without calling its unused file/Path entry points.
 - **1.26** — kept patched jsoup on Android 6 while switching from the unused NIO filesystem backport to standard stream/function desugaring; introduced a conservative DEX descriptor experiment that was refined in 1.28.
