@@ -73,7 +73,9 @@ object PumpAiReviewer {
         val endpoint: String,
         val payload: JsonObject,
         val nativeGemini: Boolean,
-        val label: String
+        val label: String,
+        /** سقف زمان همین مسیر (ثانیه) — مسیر اول بیشترین فرصت را دارد */
+        val timeoutSeconds: Int = REQUEST_TIMEOUT_SECONDS
     )
 
     /**
@@ -84,13 +86,32 @@ object PumpAiReviewer {
     internal fun reviewRoutes(config: PumpAiConfig, coin: PumpScanner.PumpCoin): List<Route> {
         val system = systemPrompt()
         val user = userPrompt(coin)
+        val noThinking = supportsThinkingBudget(config.model)
         if (isGeminiNative(config.endpoint)) {
             val native = geminiEndpoint(config.endpoint, config.model)
             val compat = geminiCompatEndpoint()
             return listOf(
-                Route(native, geminiBody(system, user, 4096, jsonOutput = true), true, "Gemini بومی"),
-                Route(native, geminiBody(system, user, 4096), true, "Gemini بومی (متن ساده)"),
-                Route(compat, requestBody(config, coin, compat), false, "Gemini سازگار OpenAI")
+                Route(
+                    native,
+                    geminiBody(system, user, 2048, jsonOutput = true, disableThinking = noThinking),
+                    true,
+                    "Gemini بومی",
+                    REQUEST_TIMEOUT_SECONDS
+                ),
+                Route(
+                    native,
+                    geminiBody(system, user, 2048, disableThinking = noThinking),
+                    true,
+                    "Gemini بومی (متن ساده)",
+                    FALLBACK_TIMEOUT_SECONDS
+                ),
+                Route(
+                    compat,
+                    requestBody(config, coin, compat),
+                    false,
+                    "Gemini سازگار OpenAI",
+                    FALLBACK_TIMEOUT_SECONDS
+                )
             )
         }
         val chat = chatCompletionsEndpoint(config.endpoint)
@@ -98,7 +119,13 @@ object PumpAiReviewer {
         if (isGoogleHost(config.endpoint)) {
             // آدرس سازگار با OpenAI گوگل داده شده؛ مسیر بومی به‌عنوان پشتیبان می‌ماند.
             val native = geminiEndpoint(GOOGLE_BASE, config.model)
-            routes += Route(native, geminiBody(system, user, 4096, jsonOutput = true), true, "Gemini بومی")
+            routes += Route(
+                native,
+                geminiBody(system, user, 2048, jsonOutput = true, disableThinking = noThinking),
+                true,
+                "Gemini بومی",
+                FALLBACK_TIMEOUT_SECONDS
+            )
         }
         return routes
     }
@@ -121,7 +148,7 @@ object PumpAiReviewer {
                     buildRequest(config, route.endpoint, route.payload),
                     maxBytes = 512L * 1024,
                     // جست‌وجوی وب و مدل‌های کند گاهی بیش از ۲۵ ثانیه‌ی پیش‌فرض طول می‌کشند.
-                    callTimeoutSeconds = REQUEST_TIMEOUT_SECONDS
+                    callTimeoutSeconds = route.timeoutSeconds
                 )
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -163,6 +190,9 @@ object PumpAiReviewer {
     /** سقف زمان یک درخواست AI (ثانیه) — مدل‌های کند و جست‌وجوی وب وقت بیشتری می‌خواهند. */
     internal const val REQUEST_TIMEOUT_SECONDS = 180
 
+    /** سقف زمان مسیرهای پشتیبان — کاربر نباید سه بار ۱۸۰ ثانیه منتظر بماند. */
+    internal const val FALLBACK_TIMEOUT_SECONDS = 60
+
     private fun buildRequest(config: PumpAiConfig, endpoint: String, payload: JsonObject): Request =
         Request.Builder()
             .url(endpoint)
@@ -198,6 +228,14 @@ object PumpAiReviewer {
 
     private val MODEL_SAFE = Regex("[^A-Za-z0-9._-]")
 
+    /** مدل‌هایی که پارامتر بودجه‌ی تفکر را می‌پذیرند (خانواده‌ی ۲٫۵ به بعد). */
+    internal fun supportsThinkingBudget(model: String): Boolean {
+        val name = model.lowercase(Locale.ROOT)
+        return name.contains("2.5") || name.contains("2-5") ||
+                name.contains("flash-latest") || name.contains("pro-latest") ||
+                name.contains("gemini-3")
+    }
+
     /** آدرس پایه‌ی رسمی Gemini؛ برای ساختن مسیر پشتیبان استفاده می‌شود. */
     internal const val GOOGLE_BASE = "https://generativelanguage.googleapis.com/v1beta"
 
@@ -231,7 +269,9 @@ object PumpAiReviewer {
          * به‌جای متن، یک فراخوانی تابعِ خراب تولید می‌کنند و پاسخ با
          * MALFORMED_FUNCTION_CALL بی‌متن برمی‌گردد؛ با responseSchema این اتفاق نمی‌افتد.
          */
-        jsonOutput: Boolean = false
+        jsonOutput: Boolean = false,
+        /** خاموش‌کردن فاز «تفکر» مدل‌های 2.5 — سرعت پاسخ چند برابر می‌شود. */
+        disableThinking: Boolean = false
     ): JsonObject = buildJsonObject {
         put("systemInstruction", buildJsonObject {
             put("parts", buildJsonArray { add(buildJsonObject { put("text", system) }) })
@@ -245,6 +285,9 @@ object PumpAiReviewer {
         put("generationConfig", buildJsonObject {
             put("temperature", 0.2)
             put("maxOutputTokens", maxTokens)
+            if (disableThinking) {
+                put("thinkingConfig", buildJsonObject { put("thinkingBudget", 0) })
+            }
             if (jsonOutput) {
                 put("responseMimeType", "application/json")
                 put("responseSchema", reviewSchema())
@@ -428,7 +471,9 @@ object PumpAiReviewer {
         val raw = failure.message.orEmpty().lowercase(Locale.ROOT)
         return when {
             raw.contains("timeout") || raw.contains("timed out") ->
-                "زمان پاسخ سرویس تمام شد؛ اینترنت/فیلترشکن را بررسی کن یا جست‌وجوی وب سرویس را خاموش کن"
+                "زمان پاسخ سرویس تمام شد. سه راه سریع: ۱) مدل سبک‌تر مثل gemini-2.0-flash یا " +
+                        "claude-sonnet را انتخاب کن، ۲) کلید «درخواست جست‌وجوی وب از سرویس» را خاموش کن، " +
+                        "۳) کیفیت اتصال/فیلترشکن را بررسی کن"
             raw.contains("unable to resolve host") || raw.contains("unknownhost") ->
                 "آدرس سرویس پیدا نشد (DNS)؛ آدرس API و اتصال اینترنت را بررسی کن"
             raw.contains("ssl") || raw.contains("certpath") || raw.contains("handshake") ->
@@ -518,7 +563,10 @@ object PumpAiReviewer {
             return listOf(
                 Route(
                     geminiEndpoint(config.endpoint, config.model),
-                    geminiBody(system, user, 512),
+                    geminiBody(
+                        system, user, 512,
+                        disableThinking = supportsThinkingBudget(config.model)
+                    ),
                     true,
                     "Gemini بومی"
                 ),
@@ -530,7 +578,10 @@ object PumpAiReviewer {
         if (isGoogleHost(config.endpoint)) {
             routes += Route(
                 geminiEndpoint(GOOGLE_BASE, config.model),
-                geminiBody(system, user, 512),
+                geminiBody(
+                    system, user, 512,
+                    disableThinking = supportsThinkingBudget(config.model)
+                ),
                 true,
                 "Gemini بومی"
             )
@@ -613,10 +664,9 @@ object PumpAiReviewer {
                 appendLine("وضعیت ایچیموکو: ${Ichimoku.summary(coin.price, ichimoku)}")
             }
             if (coin.spark.size >= 6) {
-                appendLine(
-                    "نمونه‌ی سری قیمت ۷ روزه (قدیم به جدید): " +
-                            coin.spark.joinToString(", ") { number(it) }
-                )
+                // فقط ۸ نقطه‌ی نماینده فرستاده می‌شود؛ سری کامل پاسخ مدل را کند می‌کرد.
+                val sample = PumpScanner.downsample(coin.spark, 8)
+                appendLine("روند ۷ روزه (۸ نقطه، قدیم به جدید): " + sample.joinToString(", ") { number(it) })
             }
             appendLine("پیشنهاد پایه‌ی برنامه: ${advice.recommendation.label}")
             append("دلیل پایه: ${advice.reason}")

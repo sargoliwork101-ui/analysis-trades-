@@ -315,4 +315,33 @@ class PumpAiReviewerTest {
         assertTrue(system.contains("project"))
         assertTrue(system.contains("کلی‌گویی ممنوع"))
     }
+
+    @Test
+    fun thinkingIsDisabledForFastAnswersOnSupportedModels() {
+        assertTrue(PumpAiReviewer.supportsThinkingBudget("gemini-2.5-flash"))
+        assertTrue(PumpAiReviewer.supportsThinkingBudget("gemini-flash-latest"))
+        assertTrue(!PumpAiReviewer.supportsThinkingBudget("gemini-2.0-flash"))
+
+        val body = PumpAiReviewer.geminiBody("s", "u", 2048, jsonOutput = true, disableThinking = true)
+            .toString()
+        assertTrue(body.contains("thinkingConfig"))
+        assertTrue(body.contains("\"thinkingBudget\":0"))
+        assertTrue(!PumpAiReviewer.geminiBody("s", "u", 512).toString().contains("thinkingConfig"))
+    }
+
+    @Test
+    fun fallbackRoutesUseShorterTimeouts() {
+        val coin = PumpScanner.PumpCoin(id = "sol", symbol = "sol", name = "Solana", change24h = 9.0)
+        val routes = PumpAiReviewer.reviewRoutes(
+            PumpAiConfig(
+                enabled = true,
+                endpoint = "https://generativelanguage.googleapis.com/v1beta",
+                model = "gemini-2.5-flash"
+            ),
+            coin
+        )
+        assertEquals(PumpAiReviewer.REQUEST_TIMEOUT_SECONDS, routes[0].timeoutSeconds)
+        assertEquals(PumpAiReviewer.FALLBACK_TIMEOUT_SECONDS, routes[1].timeoutSeconds)
+        assertTrue(routes[0].payload.toString().contains("thinkingConfig"))
+    }
 }

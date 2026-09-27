@@ -3,7 +3,6 @@ package com.pulse.market.ui.settings
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,9 +25,12 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -77,7 +79,7 @@ import kotlinx.coroutines.withContext
  *
  * این بخش عمداً «سیگنال خرید» نیست؛ متن‌های هشدار بخشی از خودِ قابلیت‌اند.
  */
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun PumpsCategory(
     cfg: WidgetConfig,
@@ -537,9 +539,11 @@ fun PumpsCategory(
                 }
             }
 
-            RowsCard {
-                for ((i, coin) in visibleCoins.withIndex()) {
-                    if (i > 0) RowDivider()
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                for (coin in visibleCoins) {
                     PumpRow(
                         coin = coin,
                         persian = cfg.persianDigits,
@@ -834,8 +838,8 @@ internal fun PumpChangeBadge(label: String, value: Double?, persian: Boolean) {
     }
 }
 
-/** یک کوین در فهرست پامپ — خلاصه؛ با کلیک، جزئیات کامل باز می‌شود. */
-@OptIn(ExperimentalLayoutApi::class)
+/** کارت یک کوین در فهرست پامپ — با کلیک، جزئیات کامل باز می‌شود. */
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 private fun PumpRow(
     coin: PumpScanner.PumpCoin,
@@ -844,75 +848,115 @@ private fun PumpRow(
     aiReviewed: Boolean,
     onClick: () -> Unit
 ) {
-    val riskColor = riskColor(coin.risk)
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+    val risk = riskColor(coin.risk)
+    val bandColor = scoreBandColor(coin.scoreBand)
+    Card(
+        onClick = onClick,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
+        border = BorderStroke(1.dp, bandColor.copy(alpha = 0.45f)),
+        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier.fillMaxWidth()
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(
-                coin.displayName,
-                fontSize = 13.5.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.weight(1f)
-            )
+        Column(modifier = Modifier.fillMaxWidth()) {
+            // نوار رنگی بالای کارت: رنگ = دسته‌ی امتیاز پامپ
             Box(
                 modifier = Modifier
-                    .background(riskColor.copy(alpha = 0.18f), RoundedCornerShape(6.dp))
-                    .padding(horizontal = 7.dp, vertical = 3.dp)
-            ) {
-                Text(coin.risk.label, fontSize = 10.sp, color = riskColor)
-            }
-            Icon(
-                Icons.Default.ChevronLeft,
-                contentDescription = "جزئیات",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(18.dp)
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .background(bandColor)
             )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(7.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            coin.displayName,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            QuoteText.priceWithUnit(coin.price, "$", persian),
+                            fontSize = 11.5.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Box(
+                            modifier = Modifier
+                                .background(risk.copy(alpha = 0.18f), RoundedCornerShape(6.dp))
+                                .padding(horizontal = 7.dp, vertical = 3.dp)
+                        ) {
+                            Text(coin.risk.label, fontSize = 10.sp, color = risk)
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "امتیاز ${Format.price(coin.score, persian)}",
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = bandColor
+                        )
+                    }
+                    Icon(
+                        Icons.Default.ChevronLeft,
+                        contentDescription = "جزئیات",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                HorizontalDivider(
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+                )
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    PumpChangeBadge("۱ ساعت", coin.change1h, persian)
+                    PumpChangeBadge("۱ روز", coin.change24h, persian)
+                    PumpChangeBadge("۱ هفته", coin.change7d, persian)
+                    PumpChangeBadge("۱ ماه", coin.change30d, persian)
+                }
+                Text(
+                    "${coin.scoreBand.label} • مرحله: ${coin.stage.label}",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = bandColor
+                )
+                Text(
+                    "نتیجه‌ی احتیاطی: ${coin.advice.recommendation.label}",
+                    fontSize = 11.sp,
+                    color = risk
+                )
+                val footer = buildString {
+                    append("برای جزئیات، نمودار و نظر AI بزن")
+                    if (alreadyAdded) append(" • ✓ در ویجت")
+                    if (aiReviewed) append(" • نظر AI آماده است")
+                }
+                Text(
+                    footer,
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
-        Text(
-            "قیمت ${QuoteText.priceWithUnit(coin.price, "$", persian)}",
-            fontSize = 11.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            PumpChangeBadge("۱ ساعت", coin.change1h, persian)
-            PumpChangeBadge("۱ روز", coin.change24h, persian)
-            PumpChangeBadge("۱ هفته", coin.change7d, persian)
-            PumpChangeBadge("۱ ماه", coin.change30d, persian)
-        }
-        Text(
-            "امتیاز ${Format.price(coin.score, persian)} — ${coin.scoreBand.label}",
-            fontSize = 10.5.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            "مرحله: ${coin.stage.label} • نتیجه‌ی احتیاطی: ${coin.advice.recommendation.label}",
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            color = riskColor
-        )
-        Text(
-            buildString {
-                append("برای جزئیات کامل، نمودار و نظر AI بزن")
-                if (alreadyAdded) append(" • ✓ در ویجت")
-                if (aiReviewed) append(" • نظر AI آماده است")
-            },
-            fontSize = 10.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
     }
+}
+
+/** رنگ دسته‌ی امتیاز پامپ — همان رنگی که در جزئیات هم استفاده می‌شود. */
+internal fun scoreBandColor(band: PumpScanner.ScoreBand): Color = when (band) {
+    PumpScanner.ScoreBand.CALM -> Color(0xFF64748B)
+    PumpScanner.ScoreBand.MODERATE -> Color(0xFF16A34A)
+    PumpScanner.ScoreBand.STRONG -> Color(0xFFF59E0B)
+    PumpScanner.ScoreBand.OVERHEATED -> Color(0xFFDC2626)
 }
 
 /** رنگ ثابت هر سطح ریسک — در فهرست و صفحه‌ی جزئیات یکسان است. */

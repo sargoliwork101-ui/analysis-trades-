@@ -319,12 +319,7 @@ fun PumpDetailSheet(
                 "امتیاز کل: ${Format.price(coin.score, persian)} — ${band.label}",
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
-                color = when (band) {
-                    PumpScanner.ScoreBand.CALM -> MaterialTheme.colorScheme.onSurfaceVariant
-                    PumpScanner.ScoreBand.MODERATE -> Color(0xFF16A34A)
-                    PumpScanner.ScoreBand.STRONG -> Color(0xFFF59E0B)
-                    PumpScanner.ScoreBand.OVERHEATED -> Color(0xFFDC2626)
-                }
+                color = scoreBandColor(band)
             )
             Hint(band.meaning)
             Hint(
