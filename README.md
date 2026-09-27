@@ -86,6 +86,7 @@ Two built-in ways; both give the **USD** price of one troy ounce:
 - ⚠️ Versions 1.0–1.3 were signed with the CI runner's throwaway key; installing **1.4** over them needs one uninstall/reinstall. After 1.4 that is no longer needed.
 
 **Version history**
+- **1.26** — kept patched jsoup on Android 6 while switching from the unused NIO filesystem backport to standard stream/function desugaring; CI now rejects both APKs over 2 MiB and release DEX references to APIs unavailable on Android 6.
 - **1.25** — restored precise R8 shrinking by removing a package-wide keep rule and tightened CI's APK limit to 2 MiB so dependency growth cannot undo the roughly 90% footprint reduction; no UI or product behavior changed.
 - **1.24** — recorded the completed release-build, unit-test, release-lint, size, artifact and stable-signature verification for the audit; no runtime behavior or UI design changed from 1.23.
 - **1.23** — full reliability/security audit: fixed settings delete/import write races, isolated per-source refresh failures, collision-safe cache/history identifiers, per-widget alert-history IDs and stale-state cleanup, clock-rollback-safe pump evaluation, complete source-health reporting, strict custom-URL parsing and hardened CI signature verification; updated Kotlin, jsoup and DataStore without changing the UI design.

@@ -15,8 +15,8 @@ android {
         applicationId = "com.pulse.market"
         minSdk = 23          // اندروید ۶ به بالا
         targetSdk = 36
-        versionCode = 26
-        versionName = "1.25"
+        versionCode = 27
+        versionName = "1.26"
     }
 
     /**
@@ -66,7 +66,8 @@ android {
     }
 
     compileOptions {
-        // jsoup جدید روی Android 6 به core-library desugaring (NIO) نیاز دارد.
+        // مسیر parse(String)+CSS در jsoup روی Android 6 به stream/function desugaring نیاز دارد.
+        // APIهای file/NIO استفاده‌نشده با R8 حذف و نبودشان در DEX انتشار توسط CI کنترل می‌شود.
         isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -94,7 +95,7 @@ kotlin {
 }
 
 dependencies {
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.1.5")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")

@@ -138,6 +138,21 @@ jobs:
           MAX_BYTES=$((2 * 1024 * 1024))
           ls -lh build-output/
           sha256sum "$APK"
+
+          # R8 باید APIهای NIO/Stream استفاده‌نشده‌ی jsoup را حذف و APIهای لازم را
+          # به j$ بازنویسی کند؛ هیچ reference ناسازگار با Android 6 در DEX نماند.
+          DEX_DIR=$(mktemp -d)
+          unzip -qq "$APK" 'classes*.dex' -d "$DEX_DIR"
+          UNSAFE_REFS=$(find "$DEX_DIR" -type f -name 'classes*.dex' -print0 \
+            | xargs -0 strings \
+            | grep -E 'Ljava/(nio/file/|util/(stream/|function/|Optional;))|Ljava/nio/channels/SeekableByteChannel;' \
+            | sort -u || true)
+          if [ -n "$UNSAFE_REFS" ]; then
+            echo "::error::Release DEX still references APIs unavailable on Android 6:"
+            printf '%s\n' "$UNSAFE_REFS"
+            exit 1
+          fi
+
           echo "optimized APK size: $BYTES bytes (limit: $MAX_BYTES)"
           if [ "$BYTES" -gt "$MAX_BYTES" ]; then
             echo "::error::APK از سقف سبک‌بودن ۲ MiB بزرگ‌تر شده است ($BYTES bytes)"
