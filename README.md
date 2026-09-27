@@ -86,6 +86,7 @@ Two built-in ways; both give the **USD** price of one troy ounce:
 - ⚠️ Versions 1.0–1.3 were signed with the CI runner's throwaway key; installing **1.4** over them needs one uninstall/reinstall. After 1.4 that is no longer needed.
 
 **Version history**
+- **1.24** — recorded the completed release-build, unit-test, release-lint, size, artifact and stable-signature verification for the audit; no runtime behavior or UI design changed from 1.23.
 - **1.23** — full reliability/security audit: fixed settings delete/import write races, isolated per-source refresh failures, collision-safe cache/history identifiers, per-widget alert-history IDs and stale-state cleanup, clock-rollback-safe pump evaluation, complete source-health reporting, strict custom-URL parsing and hardened CI signature verification; updated Kotlin, jsoup and DataStore without changing the UI design.
 - **1.21** — lightweight audit: optimized R8/resource-shrunk release APK, unused UI dependencies removed, bounded active-symbol cache, stale-history cleanup and throttled disk writes in live mode.
 - **1.20** — 1h/1d/1w/1m pump changes, period sorting, five-result preview with “show more”, clearer in-app help, responsive spacing, watchlist guidance, bulk TSE fetching and Android 6+ support.
