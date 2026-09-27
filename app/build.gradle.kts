@@ -15,8 +15,8 @@ android {
         applicationId = "com.pulse.market"
         minSdk = 23          // اندروید ۶ به بالا
         targetSdk = 36
-        versionCode = 28
-        versionName = "1.27"
+        versionCode = 29
+        versionName = "1.28"
     }
 
     /**
@@ -67,7 +67,7 @@ android {
 
     compileOptions {
         // مسیر parse(String)+CSS در jsoup روی Android 6 به stream/function desugaring نیاز دارد.
-        // APIهای file/NIO استفاده‌نشده با R8 حذف و نبودشان در DEX انتشار توسط CI کنترل می‌شود.
+        // برنامه APIهای file/Path را صدا نمی‌زند؛ مسیر واقعی parser با تست رگرسیون پوشش دارد.
         isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

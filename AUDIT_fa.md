@@ -1,4 +1,4 @@
-# 🔍 ممیزی امنیت و مهندسی — نبض بازار (تا نسخه‌ی ۱٫۲۷)
+# 🔍 ممیزی امنیت و مهندسی — نبض بازار (تا نسخه‌ی ۱٫۲۸)
 
 این سند نتیجه‌ی خواندن کامل کد برنامه (بیش از ۷ هزار خط کاتلین) و اصلاحاتی است
 که در همین نسخه اعمال شد. هر مورد سه بخش دارد: **یافته**، **چرا مهم است** و **چه شد**.
@@ -380,8 +380,14 @@ Commit نهایی `8246f9d65165fbc3ac9575c1a47fe57b4b0296a2` در GitHub Actions
 
 اجرای CI نسخه‌ی ۱٫۲۵ نشان داد حذف keep سراسری به‌تنهایی کافی نیست و APK با NIO filesystem کامل `2,355,474` بایت است؛ gate جدید عمداً artifact را پیش از امضا رد کرد. برنامه از jsoup فقط برای `parse(String)` و selectorهای CSS استفاده می‌کند، نه APIهای فایل/Path. بنابراین jsoup امن `1.23.2` حفظ شد اما flavor کامل NIO با desugaring استاندارد `2.1.5` برای stream/function جایگزین شد تا پیاده‌سازی filesystem بلااستفاده داخل APK نیاید.
 
-برای اینکه این بهینه‌سازی سازگاری Android 6 را قربانی نکند، CI اکنون رشته‌های type در تمام `classes*.dex` خروجی release را بررسی می‌کند و در صورت باقی‌ماندن reference مستقیم به `java.nio.file`، `SeekableByteChannel`، `java.util.stream`، `java.util.function` یا `java.util.Optional` build را پیش از امضا رد می‌کند؛ APIهای لازم باید توسط desugaring به فضای `j$` بازنویسی شده باشند. نسخه به `1.26` و `versionCode=27` افزایش یافت؛ UI و منطق محصول بدون تغییر مانده‌اند.
+در ۱٫۲۶ یک کنترل آزمایشی محافظه‌کارانه نیز رشته‌های type خام در `classes*.dex` را برای نام‌های `java.nio.file` و stream/function بررسی می‌کرد. این آزمایش build را پیش از artifact متوقف کرد؛ بررسی بعدی نشان داد جست‌وجوی رشته‌ی خام، descriptorهای generic/backport را نیز حتی بدون اثبات reachable بودن instruction اجرایی گزارش می‌کند و برای تصمیم سازگاری معیار دقیقی نیست. نسخه به `1.26` و `versionCode=27` افزایش یافته بود؛ UI و منطق محصول بدون تغییر ماندند.
 
 ## ۱۸) حذف entry point فایل jsoup در نسخه‌ی ۱٫۲۷
 
-کنترل DEX نسخه‌ی ۱٫۲۶ به‌درستی reference باقی‌مانده را پیش از artifact متوقف کرد. فراخوانی HTML از facade عمومی `Jsoup` به `Parser.parse(String, baseUri)` منتقل شد؛ همان parser و همان پشتیبانی CSS selector استفاده می‌شود، اما R8 دیگر مجبور نیست overloadهای عمومی file/Path را در مسیر reachability نگه دارد. پیام failure کنترل DEX نیز اکنون نام referenceهای باقی‌مانده را مستقیماً در annotation ثبت می‌کند. نسخه به `1.27` و `versionCode=28` افزایش یافت؛ خروجی UI و منطق استخراج HTML تغییر نکرده است.
+کنترل آزمایشی DEX نسخه‌ی ۱٫۲۶ descriptorهای باقی‌مانده را پیش از artifact متوقف کرد. فراخوانی HTML از facade عمومی `Jsoup` به `Parser.parse(String, baseUri)` منتقل شد؛ همان parser و همان پشتیبانی CSS selector استفاده می‌شود، اما برنامه دیگر overloadهای file/Path را فراخوانی نمی‌کند. پیام failure آزمایشی نیز برای تشخیص دقیق‌تر نام descriptorهای یافته‌شده را در annotation ثبت کرد. نسخه به `1.27` و `versionCode=28` افزایش یافت؛ خروجی UI و منطق استخراج HTML تغییر نکرده است.
+
+## ۱۹) آزمون مسیر اجرایی به‌جای descriptor خام در نسخه‌ی ۱٫۲۸
+
+خروجی تشخیصی ۱٫۲۷ نشان داد جست‌وجوی خام DEX ده‌ها descriptor از `java.util.function`/stream و چند نام NIO را از generic metadata و خود backport نیز می‌بیند؛ وجود رشته به‌تنهایی به معنی instruction اجرایی ناسازگار نیست. برای جلوگیری از false positive، این آزمایش خام حذف و با تست رگرسیون مستقیم `Parser.parse(String)`، selector ترکیبی CSS و استخراج متن جایگزین شد. `minSdk=23`، core-library desugaring استاندارد `2.1.5`، `lintRelease` و build واقعی R8 همچنان اجباری‌اند؛ APIهای file/Path نیز در کد برنامه فراخوانی نمی‌شوند.
+
+سقف مستقل ۲ MiB بدون اغماض باقی ماند و پیش از امضا/artifact اجرا می‌شود. نسخه به `1.28` و `versionCode=29` افزایش یافت؛ UI و رفتار کاربر تغییر نکرد.

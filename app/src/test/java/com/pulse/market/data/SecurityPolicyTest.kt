@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.jsoup.parser.Parser
 
 class SecurityPolicyTest {
 
@@ -52,6 +53,16 @@ class SecurityPolicyTest {
         assertFalse(SourceUrlPolicy.isValid("https://user:pass@example.com/price/{symbol}"))
         assertFalse(SourceUrlPolicy.isValid("https://example.com/{unknown}"))
         assertFalse(SourceUrlPolicy.isValid("javascript:alert(1)"))
+    }
+
+    @Test
+    fun htmlStringParserKeepsCustomCssSelectorExtraction() {
+        val doc = Parser.parse(
+            """<main><div class="quote" data-kind="last"><span class="price">۱۲۳٫۴۵</span></div></main>""",
+            "https://example.com/market"
+        )
+        val price = doc.selectFirst("div.quote[data-kind=last] > span.price")
+        assertEquals("۱۲۳٫۴۵", price?.text())
     }
 
     @Test
