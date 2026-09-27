@@ -643,14 +643,21 @@ fun PumpsCategory(
             aiError = aiErrors[selected.id],
             nobitex = nobitex[selected.id],
             openTrade = trades.firstOrNull { it.coinId == selected.id && it.isOpen },
-            onBuy = { amount, takeProfit, stopLoss, fee ->
+            onBuy = { amount, takeProfit, stopLoss, fee, stepCount, rangeFloorPct ->
                 scope.launch {
                     val opened = withContext(Dispatchers.IO) {
-                        PaperTradeStore.buy(context, selected, amount, takeProfit, stopLoss, fee)
+                        PaperTradeStore.buy(
+                            context, selected, amount, takeProfit, stopLoss, fee,
+                            stepCount = stepCount, rangeFloorPct = rangeFloorPct
+                        )
                     }
                     trades = withContext(Dispatchers.IO) { PaperTradeStore.all(context) }
-                    tradeNotice = if (opened == null) "ثبت خرید آزمایشی ممکن نشد (قیمت یا مبلغ نامعتبر)"
-                    else "خرید آزمایشی ${opened.name} ثبت شد."
+                    tradeNotice = when {
+                        opened == null -> "ثبت خرید آزمایشی ممکن نشد (قیمت یا مبلغ نامعتبر)"
+                        opened.isLadder -> "خرید پله‌ای آزمایشی ${opened.name} ثبت شد " +
+                                "(${Format.toPersianDigits("${opened.steps.size}")} پله)."
+                        else -> "خرید آزمایشی ${opened.name} ثبت شد."
+                    }
                 }
             },
             onSell = {

@@ -30,12 +30,29 @@ object PaperTradeStore {
     /** کارمزد پیش‌فرض هر سمت معامله (درصد) — نزدیک به کارمزد معمول نوبیتکس */
     const val DEFAULT_FEE_PCT = 0.2
 
+    /** بیشترین تعداد پله‌ی مجاز در خرید پله‌ای */
+    const val MAX_STEPS = 10
+
     /** دلیل بسته‌شدن معامله */
     enum class CloseReason(val label: String) {
         MANUAL("فروش دستی"),
         TAKE_PROFIT("رسیدن به حد سود"),
         STOP_LOSS("رسیدن به حد ضرر")
     }
+
+    /**
+     * یک «پله»ی خرید در محدوده‌ی ورود (شبیه سفارش خرید پله‌ای نوبیتکس).
+     * پله وقتی «پر» می‌شود که قیمت بازار به قیمت هدفِ آن پله یا پایین‌تر برسد.
+     */
+    @Serializable
+    data class LadderStep(
+        /** قیمت هدف این پله (خرید محدود، دلار) */
+        val price: Double,
+        /** مبلغ اختصاص‌یافته به این پله (دلار) */
+        val amountUsd: Double,
+        val filled: Boolean = false,
+        val filledAt: Long? = null
+    )
 
     @Serializable
     data class Trade(
@@ -58,9 +75,27 @@ object PaperTradeStore {
         /** کارمزد هر سمت معامله بر حسب درصد (پیش‌فرض نوبیتکس ≈ ۰٫۲٪) */
         val feePct: Double = DEFAULT_FEE_PCT,
         /** یادداشت کوتاه کاربر */
-        val note: String = ""
+        val note: String = "",
+        /**
+         * پله‌های خرید پله‌ای. خالی = خرید ساده‌ی تک‌مرحله‌ای (مثل نسخه‌های قبل).
+         * قیمت/مبلغِ بالای این کلاس همیشه «مؤثر» (پله‌های پرشده) را نشان می‌دهند.
+         */
+        val steps: List<LadderStep> = emptyList(),
+        /** سقف محدوده‌ی ورود = قیمت پله‌ی اول (فقط برای نمایش) */
+        val entryHigh: Double? = null,
+        /** کف محدوده‌ی ورود = قیمت آخرین پله (فقط برای نمایش) */
+        val entryLow: Double? = null
     ) {
         val isOpen: Boolean get() = closedAt == null || closePrice == null
+
+        /** آیا این معامله خرید پله‌ای است؟ */
+        val isLadder: Boolean get() = steps.isNotEmpty()
+
+        /** کل سرمایه‌ی برنامه‌ریزی‌شده روی همه‌ی پله‌ها (پر و پرنشده) */
+        val plannedAmountUsd: Double get() = if (isLadder) steps.sumOf { it.amountUsd } else amountUsd
+
+        val filledStepCount: Int get() = steps.count { it.filled }
+        val pendingStepCount: Int get() = steps.count { !it.filled }
 
         val closeReason: CloseReason?
             get() = closeReasonName?.let { name ->
@@ -172,7 +207,13 @@ object PaperTradeStore {
             .apply()
     }
 
-    /** ثبت خرید آزمایشی تازه */
+    /**
+     * ثبت خرید آزمایشی تازه.
+     *
+     * @param stepCount     تعداد پله‌ی خرید پله‌ای؛ ۱ یعنی خرید ساده‌ی تک‌مرحله‌ای.
+     * @param rangeFloorPct کف محدوده‌ی ورود بر حسب درصدِ پایین‌ترِ قیمت فعلی
+     *                      (مثلاً ۸ یعنی پله‌ها تا ۸٪ پایین‌تر پخش شوند). null = بدون پله.
+     */
     fun buy(
         context: Context,
         coin: PumpScanner.PumpCoin,
@@ -180,12 +221,15 @@ object PaperTradeStore {
         takeProfitPct: Double?,
         stopLossPct: Double?,
         feePct: Double = DEFAULT_FEE_PCT,
+        stepCount: Int = 1,
+        rangeFloorPct: Double? = null,
         now: Long = System.currentTimeMillis()
     ): Trade? {
         val price = coin.price?.takeIf { it.isFinite() && it > 0.0 } ?: return null
         val amount = amountUsd.takeIf { it.isFinite() && it > 0.0 }?.coerceIn(1.0, 1_000_000.0)
             ?: return null
-        val trade = Trade(
+        val steps = buildLadderSteps(price, amount, stepCount, rangeFloorPct, now)
+        val base = Trade(
             id = "${coin.id}_$now",
             coinId = coin.id,
             symbol = coin.symbol.uppercase(),
@@ -195,10 +239,61 @@ object PaperTradeStore {
             openedAt = now,
             takeProfitPct = takeProfitPct?.takeIf { it.isFinite() && it > 0.0 }?.coerceIn(0.1, 1000.0),
             stopLossPct = stopLossPct?.takeIf { it.isFinite() && it > 0.0 }?.coerceIn(0.1, 99.0),
-            feePct = feePct.takeIf { it.isFinite() && it >= 0.0 }?.coerceAtMost(5.0) ?: DEFAULT_FEE_PCT
+            feePct = feePct.takeIf { it.isFinite() && it >= 0.0 }?.coerceAtMost(5.0) ?: DEFAULT_FEE_PCT,
+            steps = steps,
+            entryHigh = steps.firstOrNull()?.price,
+            entryLow = steps.lastOrNull()?.price
         )
+        // در خرید پله‌ای، قیمت/مبلغِ مؤثر از پله‌های پرشده بازمحاسبه می‌شود
+        // (پله‌ی اول همان لحظه پر می‌شود، بقیه با افت قیمت).
+        val trade = if (steps.isEmpty()) base else recomputeFromFills(base)
         write(context, all(context) + trade)
         return trade
+    }
+
+    /**
+     * ساخت پله‌های خرید در «محدوده‌ی ورود»: از قیمت فعلی تا [rangeFloorPct]٪ پایین‌تر،
+     * در [stepCount] پله‌ی هم‌فاصله و هم‌مبلغ. پله‌ی اول (قیمت فعلی) همان لحظه پر می‌شود؛
+     * پله‌های پایین‌تر با رسیدن قیمت به آن‌ها در بررسی‌های بعدی پر می‌شوند.
+     * خروجی خالی = خرید ساده‌ی تک‌مرحله‌ای (بدون پله).
+     */
+    internal fun buildLadderSteps(
+        price: Double,
+        amountUsd: Double,
+        stepCount: Int,
+        rangeFloorPct: Double?,
+        now: Long
+    ): List<LadderStep> {
+        val n = stepCount.coerceIn(1, MAX_STEPS)
+        val floor = rangeFloorPct?.takeIf { it.isFinite() && it > 0.0 }?.coerceIn(0.1, 90.0)
+        if (n < 2 || floor == null || price <= 0.0 || amountUsd <= 0.0) return emptyList()
+        val per = amountUsd / n
+        val floorFrac = floor / 100.0
+        val threshold = price * (1.0 - LEVEL_TOLERANCE)
+        return List(n) { i ->
+            val frac = floorFrac * i / (n - 1)          // i=0 → ۰ ، i=n-1 → floorFrac
+            val stepPrice = price * (1.0 - frac)
+            val fillNow = stepPrice >= threshold        // فقط پله‌ی اول همین حالا پر می‌شود
+            LadderStep(
+                price = stepPrice,
+                amountUsd = per,
+                filled = fillNow,
+                filledAt = if (fillNow) now else null
+            )
+        }
+    }
+
+    /** بازمحاسبه‌ی قیمت میانگین و مبلغِ مؤثر از پله‌های پرشده (میانگین وزنیِ هزینه). */
+    internal fun recomputeFromFills(trade: Trade): Trade {
+        if (trade.steps.isEmpty()) return trade
+        val filled = trade.steps.filter { it.filled && it.price > 0.0 && it.amountUsd > 0.0 }
+        if (filled.isEmpty()) return trade
+        val totalAmount = filled.sumOf { it.amountUsd }
+        val denom = filled.sumOf { it.amountUsd / it.price }   // Σ (مبلغ ÷ قیمت)
+        val avg = if (denom > 0.0) totalAmount / denom else trade.entryPrice
+        return if (avg.isFinite() && avg > 0.0 && totalAmount > 0.0)
+            trade.copy(entryPrice = avg, amountUsd = totalAmount)
+        else trade
     }
 
     /** فروش دستی */
@@ -238,21 +333,41 @@ object PaperTradeStore {
         val trades = all(context)
         if (trades.none { it.isOpen }) return emptyList()
         val justClosed = mutableListOf<Trade>()
+        var changed = false
         val updated = trades.map { trade ->
             if (!trade.isOpen) return@map trade
             val price = pricesByCoinId[trade.coinId]?.takeIf { it.isFinite() && it > 0.0 }
                 ?: return@map trade
-            val reason = closeReasonFor(trade, price) ?: return@map trade
-            val closed = trade.copy(
+            // ۱) پله‌های پایین‌تری که قیمت به آن‌ها رسیده پر می‌شوند و میانگین ورود بازمحاسبه می‌شود.
+            val afterFill = fillReachedSteps(trade, price, now)
+            if (afterFill !== trade) changed = true
+            // ۲) بعد از پرشدن پله‌ها، رسیدن به حد سود/ضرر بررسی می‌شود.
+            val reason = closeReasonFor(afterFill, price) ?: return@map afterFill
+            val closed = afterFill.copy(
                 closedAt = now,
-                closePrice = triggerPrice(trade, reason, price),
+                closePrice = triggerPrice(afterFill, reason, price),
                 closeReasonName = reason.name
             )
             justClosed += closed
+            changed = true
             closed
         }
-        if (justClosed.isNotEmpty()) write(context, updated)
+        if (changed) write(context, updated)
         return justClosed
+    }
+
+    /** پله‌هایی که قیمت فعلی به آن‌ها رسیده (قیمت ≤ قیمتِ پله) را پر می‌کند و میانگین را بازمحاسبه می‌کند. */
+    internal fun fillReachedSteps(trade: Trade, price: Double, now: Long): Trade {
+        if (trade.steps.isEmpty() || !price.isFinite() || price <= 0.0) return trade
+        if (trade.steps.none { !it.filled }) return trade
+        var any = false
+        val newSteps = trade.steps.map { step ->
+            if (!step.filled && price <= step.price * (1.0 + LEVEL_TOLERANCE)) {
+                any = true
+                step.copy(filled = true, filledAt = now)
+            } else step
+        }
+        return if (any) recomputeFromFills(trade.copy(steps = newSteps)) else trade
     }
 
     /** منطق خالصِ «آیا این معامله باید بسته شود؟» — قابل تست بدون اندروید. */

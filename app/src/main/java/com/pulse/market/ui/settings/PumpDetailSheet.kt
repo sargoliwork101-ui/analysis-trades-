@@ -35,6 +35,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -91,7 +92,7 @@ fun PumpDetailSheet(
     aiError: String?,
     nobitex: NobitexMarkets.Result?,
     openTrade: PaperTradeStore.Trade?,
-    onBuy: (Double, Double?, Double?, Double) -> Unit,
+    onBuy: (Double, Double?, Double?, Double, Int, Double?) -> Unit,
     onSell: () -> Unit,
     onAiReview: () -> Unit,
     onOpenLink: (String) -> Unit,
@@ -522,8 +523,39 @@ fun PumpDetailSheet(
                             fontWeight = FontWeight.Bold,
                             color = if (profit) Color(0xFF16A34A) else Color(0xFFDC2626)
                         )
-                        StatRow("قیمت خرید", QuoteText.priceWithUnit(openTrade.entryPrice, "$", persian))
-                        StatRow("مبلغ", QuoteText.priceWithUnit(openTrade.amountUsd, "$", persian))
+                        StatRow(
+                            if (openTrade.isLadder) "میانگین ورود (پله‌های پرشده)" else "قیمت خرید",
+                            QuoteText.priceWithUnit(openTrade.entryPrice, "$", persian)
+                        )
+                        StatRow(
+                            if (openTrade.isLadder) "سرمایه‌ی به‌کاررفته" else "مبلغ",
+                            QuoteText.priceWithUnit(openTrade.amountUsd, "$", persian)
+                        )
+                        if (openTrade.isLadder) {
+                            StatRow(
+                                "خرید پله‌ای",
+                                "${Format.toPersianDigits("${openTrade.filledStepCount}")} از " +
+                                        "${Format.toPersianDigits("${openTrade.steps.size}")} پله پر شده"
+                            )
+                            if (openTrade.entryHigh != null && openTrade.entryLow != null) {
+                                StatRow(
+                                    "محدوده‌ی ورود",
+                                    QuoteText.priceWithUnit(openTrade.entryLow, "$", persian) + " تا " +
+                                            QuoteText.priceWithUnit(openTrade.entryHigh, "$", persian)
+                                )
+                            }
+                            StatRow(
+                                "سرمایه‌ی کل برنامه",
+                                QuoteText.priceWithUnit(openTrade.plannedAmountUsd, "$", persian)
+                            )
+                            for ((i, step) in openTrade.steps.withIndex()) {
+                                StatRow(
+                                    "پله ${Format.toPersianDigits("${i + 1}")} " +
+                                            (if (step.filled) "✓ پر شد" else "⏳ در انتظار"),
+                                    QuoteText.priceWithUnit(step.price, "$", persian)
+                                )
+                            }
+                        }
                         StatRow(
                             "کارمزد رفت و برگشت",
                             QuoteText.priceWithUnit(openTrade.totalFeeUsd(coin.price), "$", persian) +
@@ -559,6 +591,9 @@ fun PumpDetailSheet(
                 var fee by remember(coin.id) {
                     mutableStateOf(PaperTradeStore.DEFAULT_FEE_PCT.toString())
                 }
+                var ladder by remember(coin.id) { mutableStateOf(false) }
+                var stepCount by remember(coin.id) { mutableStateOf("3") }
+                var rangeFloor by remember(coin.id) { mutableStateOf("8") }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -596,23 +631,80 @@ fun PumpDetailSheet(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                // ── خرید پله‌ای با محدوده‌ی ورود (مثل نوبیتکس) ──
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("خرید پله‌ای", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            "مبلغ در چند پله از قیمت فعلی تا کف محدوده پخش می‌شود",
+                            fontSize = 9.5.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(checked = ladder, onCheckedChange = { ladder = it })
+                }
+                if (ladder) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = stepCount,
+                            onValueChange = { stepCount = it.take(2) },
+                            label = { Text("تعداد پله (۲ تا ۱۰)", fontSize = 10.sp) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedTextField(
+                            value = rangeFloor,
+                            onValueChange = { rangeFloor = it.take(5) },
+                            label = { Text("کف محدوده (٪ پایین‌تر)", fontSize = 10.sp) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    val price = coin.price ?: 0.0
+                    val floorFrac = (rangeFloor.replace(',', '.').toDoubleOrNull() ?: 0.0) / 100.0
+                    if (price > 0.0 && floorFrac > 0.0) {
+                        Hint(
+                            "پله‌ی اول همین حالا با قیمت فعلی پر می‌شود؛ پله‌های بعدی تا " +
+                                    QuoteText.priceWithUnit(price * (1.0 - floorFrac), "$", persian) +
+                                    " با افت قیمت پر می‌شوند. حد سود/ضرر روی «میانگین ورود» حساب می‌شود."
+                        )
+                    }
+                }
+
                 Button(
                     onClick = {
+                        val useLadder = ladder
                         onBuy(
                             amount.replace(',', '.').toDoubleOrNull() ?: 0.0,
                             takeProfit.replace(',', '.').toDoubleOrNull(),
                             stopLoss.replace(',', '.').toDoubleOrNull(),
-                            fee.replace(',', '.').toDoubleOrNull() ?: PaperTradeStore.DEFAULT_FEE_PCT
+                            fee.replace(',', '.').toDoubleOrNull() ?: PaperTradeStore.DEFAULT_FEE_PCT,
+                            if (useLadder) (stepCount.toIntOrNull() ?: 1) else 1,
+                            if (useLadder) rangeFloor.replace(',', '.').toDoubleOrNull() else null
                         )
                     },
                     enabled = (coin.price ?: 0.0) > 0.0 &&
                             (amount.replace(',', '.').toDoubleOrNull() ?: 0.0) > 0.0,
                     modifier = Modifier.fillMaxWidth()
-                ) { Text("ثبت خرید آزمایشی با قیمت فعلی", fontSize = 11.5.sp) }
+                ) {
+                    Text(
+                        if (ladder) "ثبت خرید پله‌ای آزمایشی" else "ثبت خرید آزمایشی با قیمت فعلی",
+                        fontSize = 11.5.sp
+                    )
+                }
                 Hint(
                     "هیچ سفارشی به هیچ صرافی نمی‌رود؛ فقط روی همین گوشی ثبت می‌شود. با هر اسکن تازه، " +
-                            "اگر قیمت به حد سود یا حد ضرر برسد، معامله خودکار بسته و نتیجه ثبت می‌شود. " +
-                            "کارمزد در هر دو سمت خرید و فروش از سود کم می‌شود (پیش‌فرض ۰٫۲٪ مثل نوبیتکس)."
+                            "پله‌های رسیده پر و در صورت رسیدن قیمت به حد سود یا حد ضرر، معامله خودکار بسته " +
+                            "و نتیجه ثبت می‌شود. کارمزد در هر دو سمت خرید و فروش از سود کم می‌شود (پیش‌فرض ۰٫۲٪ مثل نوبیتکس)."
                 )
             }
 

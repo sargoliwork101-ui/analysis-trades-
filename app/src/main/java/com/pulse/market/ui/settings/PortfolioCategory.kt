@@ -267,12 +267,35 @@ private fun TradeCard(
                     color = accent
                 )
             }
-            DetailLine("قیمت خرید", QuoteText.priceWithUnit(trade.entryPrice, "$", persian))
+            DetailLine(
+                if (trade.isLadder) "میانگین ورود" else "قیمت خرید",
+                QuoteText.priceWithUnit(trade.entryPrice, "$", persian)
+            )
             DetailLine(
                 if (trade.isOpen) "قیمت فعلی" else "قیمت فروش",
                 QuoteText.priceWithUnit(price, "$", persian)
             )
-            DetailLine("مبلغ سرمایه", QuoteText.priceWithUnit(trade.amountUsd, "$", persian))
+            if (trade.isLadder) {
+                DetailLine(
+                    "خرید پله‌ای",
+                    "${Format.toPersianDigits("${trade.filledStepCount}")}/" +
+                            "${Format.toPersianDigits("${trade.steps.size}")} پله پر شده"
+                )
+                if (trade.entryHigh != null && trade.entryLow != null) {
+                    DetailLine(
+                        "محدوده‌ی ورود",
+                        QuoteText.priceWithUnit(trade.entryLow, "$", persian) + " تا " +
+                                QuoteText.priceWithUnit(trade.entryHigh, "$", persian)
+                    )
+                }
+                DetailLine(
+                    "سرمایه (به‌کاررفته/کل)",
+                    QuoteText.priceWithUnit(trade.amountUsd, "$", persian) + " از " +
+                            QuoteText.priceWithUnit(trade.plannedAmountUsd, "$", persian)
+                )
+            } else {
+                DetailLine("مبلغ سرمایه", QuoteText.priceWithUnit(trade.amountUsd, "$", persian))
+            }
             DetailLine(
                 "کارمزد (${Format.price(trade.feePct, persian)}٪ هر سمت)",
                 QuoteText.priceWithUnit(trade.totalFeeUsd(price) ?: trade.buyFeeUsd, "$", persian)
