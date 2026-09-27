@@ -86,6 +86,7 @@ Two built-in ways; both give the **USD** price of one troy ounce:
 - ⚠️ Versions 1.0–1.3 were signed with the CI runner's throwaway key; installing **1.4** over them needs one uninstall/reinstall. After 1.4 that is no longer needed.
 
 **Version history**
+- **1.50** — code-quality audit with no change to look or behaviour: the settings time-picker button now formats its clock with an explicit `Locale.US` (previously it depended on the phone's language, so Arabic/Persian locales rendered inconsistent digits), and the "My trades" refresh button is wrapped in `try/finally` so it always re-enables even on an unexpected error instead of staying stuck on "fetching…".
 - **1.49** — adds a dedicated "My trades" tab: every coin you bought in the simulator stays there with full details (entry, current price, fees, break-even, take-profit/stop-loss, timestamps and close reason); prices are fetched directly for those coins independently of the pump scan, levels are evaluated on every refresh, and the header summarises realized profit, open profit, win rate and total fees.
 - **1.48** — every coin is now its own separated card (elevation, border and a colour bar per score band, with price and score in the header), and the AI answers much faster: thinking is disabled on Google 2.5 models, the prompt no longer dumps the whole price series (8 sampled points), the output budget drops to 2048 and fallback routes use shorter timeouts.
 - **1.47** — fixes an Int/Float type error in the candlestick pan-step calculation so chart zoom and drag compile and work.

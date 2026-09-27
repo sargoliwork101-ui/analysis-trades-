@@ -1320,7 +1320,10 @@ private fun TimePickButton(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(12.dp)
         ) {
-            Text("%02d:%02d".format(minuteOfDay / 60, minuteOfDay % 60))
+            // Locale.US صریح: بدون آن، String.format روی گوشیِ با زبانِ عربی/فارسی
+            // ارقام را به ارقام محلی تبدیل می‌کرد و با بقیه‌ی برنامه (که همه‌جا Locale.US
+            // پین شده) ناسازگار می‌شد. همان قرارداد Format.time/Format.dateTime.
+            Text(String.format(java.util.Locale.US, "%02d:%02d", minuteOfDay / 60, minuteOfDay % 60))
         }
     }
 }

@@ -63,23 +63,28 @@ fun PortfolioCategory(persian: Boolean) {
 
     suspend fun refresh(showNotice: Boolean) {
         busy = true
-        val loaded = withContext(Dispatchers.IO) { PaperTradeStore.all(context) }
-        val ids = loaded.filter { it.isOpen }.map { it.coinId }
-        val fresh = if (ids.isEmpty()) emptyMap() else CoinPrices.fetch(ids)
-        if (fresh.isNotEmpty()) {
-            val closed = withContext(Dispatchers.IO) { PaperTradeStore.settle(context, fresh) }
-            if (closed.isNotEmpty() && showNotice) {
-                notice = closed.joinToString(" • ") { trade ->
-                    "${trade.name}: ${trade.closeReason?.label ?: "بسته شد"} — " +
-                            PaperTradeStore.resultText(trade, trade.closePrice, persian)
+        // finally تضمین می‌کند دکمه‌ی «به‌روزرسانی» حتی با خطای غیرمنتظره دوباره فعال
+        // شود؛ وگرنه یک استثنا در میانه‌ی مسیر، دکمه را برای همیشه روی «در حال گرفتن…» قفل می‌کرد.
+        try {
+            val loaded = withContext(Dispatchers.IO) { PaperTradeStore.all(context) }
+            val ids = loaded.filter { it.isOpen }.map { it.coinId }
+            val fresh = if (ids.isEmpty()) emptyMap() else CoinPrices.fetch(ids)
+            if (fresh.isNotEmpty()) {
+                val closed = withContext(Dispatchers.IO) { PaperTradeStore.settle(context, fresh) }
+                if (closed.isNotEmpty() && showNotice) {
+                    notice = closed.joinToString(" • ") { trade ->
+                        "${trade.name}: ${trade.closeReason?.label ?: "بسته شد"} — " +
+                                PaperTradeStore.resultText(trade, trade.closePrice, persian)
+                    }
                 }
+                prices = prices + fresh
+            } else if (showNotice && ids.isNotEmpty()) {
+                notice = "قیمت تازه گرفته نشد؛ اینترنت را بررسی کن (نتیجه‌ها با آخرین قیمت موجود است)."
             }
-            prices = prices + fresh
-        } else if (showNotice && ids.isNotEmpty()) {
-            notice = "قیمت تازه گرفته نشد؛ اینترنت را بررسی کن (نتیجه‌ها با آخرین قیمت موجود است)."
+            trades = withContext(Dispatchers.IO) { PaperTradeStore.all(context) }
+        } finally {
+            busy = false
         }
-        trades = withContext(Dispatchers.IO) { PaperTradeStore.all(context) }
-        busy = false
     }
 
     LaunchedEffect(Unit) { refresh(showNotice = false) }
