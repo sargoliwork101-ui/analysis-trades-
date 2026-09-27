@@ -193,4 +193,14 @@ class PumpScannerTest {
         assertTrue(trimmed.coins[PumpScanner.SPARK_CACHED_COINS].spark.isEmpty())
         assertTrue(trimmed.coins.last().spark.isEmpty())
     }
+
+    @Test
+    fun scoreBandsExplainTheNumber() {
+        assertEquals(PumpScanner.ScoreBand.CALM, PumpScanner.bandOf(9.0))
+        assertEquals(PumpScanner.ScoreBand.MODERATE, PumpScanner.bandOf(20.0))
+        assertEquals(PumpScanner.ScoreBand.STRONG, PumpScanner.bandOf(50.0))
+        assertEquals(PumpScanner.ScoreBand.OVERHEATED, PumpScanner.bandOf(120.0))
+        assertEquals(PumpScanner.ScoreBand.CALM, PumpScanner.bandOf(Double.NaN))
+        assertTrue(PumpScanner.ScoreBand.OVERHEATED.meaning.isNotBlank())
+    }
 }

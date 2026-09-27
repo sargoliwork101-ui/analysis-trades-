@@ -27,6 +27,9 @@ object PaperTradeStore {
     /** رواداری مقایسه‌ی قیمت با سطح حد سود/ضرر (خطای اعشار شناور) */
     private const val LEVEL_TOLERANCE = 1e-9
 
+    /** کارمزد پیش‌فرض هر سمت معامله (درصد) — نزدیک به کارمزد معمول نوبیتکس */
+    const val DEFAULT_FEE_PCT = 0.2
+
     /** دلیل بسته‌شدن معامله */
     enum class CloseReason(val label: String) {
         MANUAL("فروش دستی"),
@@ -52,6 +55,8 @@ object PaperTradeStore {
         val closedAt: Long? = null,
         val closePrice: Double? = null,
         val closeReasonName: String? = null,
+        /** کارمزد هر سمت معامله بر حسب درصد (پیش‌فرض نوبیتکس ≈ ۰٫۲٪) */
+        val feePct: Double = DEFAULT_FEE_PCT,
         /** یادداشت کوتاه کاربر */
         val note: String = ""
     ) {
@@ -62,9 +67,17 @@ object PaperTradeStore {
                 CloseReason.entries.firstOrNull { it.name == name }
             }
 
-        /** تعداد واحد کوین که با این مبلغ خریده می‌شد */
+        /** کارمزد به‌صورت ضریب (۰٫۰۰۲ برای ۰٫۲٪) */
+        val feeRate: Double
+            get() = (feePct.takeIf { it.isFinite() && it >= 0.0 } ?: 0.0).coerceAtMost(5.0) / 100.0
+
+        /** کارمزد خرید (دلار) */
+        val buyFeeUsd: Double
+            get() = amountUsd * feeRate
+
+        /** تعداد واحد کوین پس از کسر کارمزد خرید */
         val units: Double
-            get() = if (entryPrice > 0.0) amountUsd / entryPrice else 0.0
+            get() = if (entryPrice > 0.0) (amountUsd - buyFeeUsd) / entryPrice else 0.0
 
         /** قیمتی که حد سود در آن فعال می‌شود */
         val takeProfitPrice: Double?
@@ -74,16 +87,51 @@ object PaperTradeStore {
         val stopLossPrice: Double?
             get() = stopLossPct?.takeIf { it > 0.0 }?.let { entryPrice * (1.0 - it / 100.0) }
 
-        /** درصد سود/زیان با قیمت داده‌شده (برای معامله‌ی بسته، قیمت بسته‌شدن) */
+        /** ارزش فروش پس از کسر کارمزد فروش */
+        fun exitValueUsd(price: Double?): Double? {
+            val reference = (if (isOpen) price else closePrice)?.takeIf { it.isFinite() && it > 0.0 }
+                ?: return null
+            val gross = units * reference
+            return gross - gross * feeRate
+        }
+
+        /** کارمزد فروش (دلار) */
+        fun sellFeeUsd(price: Double?): Double? {
+            val reference = (if (isOpen) price else closePrice)?.takeIf { it.isFinite() && it > 0.0 }
+                ?: return null
+            return units * reference * feeRate
+        }
+
+        /** مجموع کارمزد رفت و برگشت */
+        fun totalFeeUsd(price: Double?): Double? = sellFeeUsd(price)?.let { buyFeeUsd + it }
+
+        /** سود/زیان خالص دلاری — کارمزد خرید و فروش کسر شده است */
+        fun profitUsd(price: Double?): Double? =
+            exitValueUsd(price)?.let { it - amountUsd }
+
+        /** درصد سود/زیان خالص نسبت به سرمایه‌ی اولیه */
         fun profitPct(price: Double?): Double? {
-            val reference = if (isOpen) price else closePrice
-            if (reference == null || !reference.isFinite() || entryPrice <= 0.0) return null
+            if (amountUsd <= 0.0) return null
+            return profitUsd(price)?.let { it / amountUsd * 100.0 }
+        }
+
+        /** تغییر خام قیمت بدون کارمزد — برای مقایسه */
+        fun rawChangePct(price: Double?): Double? {
+            val reference = (if (isOpen) price else closePrice)?.takeIf { it.isFinite() && it > 0.0 }
+                ?: return null
+            if (entryPrice <= 0.0) return null
             return (reference - entryPrice) / entryPrice * 100.0
         }
 
-        /** سود/زیان دلاری */
-        fun profitUsd(price: Double?): Double? =
-            profitPct(price)?.let { amountUsd * it / 100.0 }
+        /** قیمتی که در آن، بعد از کارمزد رفت و برگشت، سر به سر می‌شوی */
+        val breakEvenPrice: Double?
+            get() {
+                val u = units
+                if (u <= 0.0) return null
+                val netFactor = 1.0 - feeRate
+                if (netFactor <= 0.0) return null
+                return amountUsd / (u * netFactor)
+            }
     }
 
     /** خلاصه‌ی عملکرد کیف آزمایشی */
@@ -131,6 +179,7 @@ object PaperTradeStore {
         amountUsd: Double,
         takeProfitPct: Double?,
         stopLossPct: Double?,
+        feePct: Double = DEFAULT_FEE_PCT,
         now: Long = System.currentTimeMillis()
     ): Trade? {
         val price = coin.price?.takeIf { it.isFinite() && it > 0.0 } ?: return null
@@ -145,7 +194,8 @@ object PaperTradeStore {
             amountUsd = amount,
             openedAt = now,
             takeProfitPct = takeProfitPct?.takeIf { it.isFinite() && it > 0.0 }?.coerceIn(0.1, 1000.0),
-            stopLossPct = stopLossPct?.takeIf { it.isFinite() && it > 0.0 }?.coerceIn(0.1, 99.0)
+            stopLossPct = stopLossPct?.takeIf { it.isFinite() && it > 0.0 }?.coerceIn(0.1, 99.0),
+            feePct = feePct.takeIf { it.isFinite() && it >= 0.0 }?.coerceAtMost(5.0) ?: DEFAULT_FEE_PCT
         )
         write(context, all(context) + trade)
         return trade
@@ -256,6 +306,12 @@ object PaperTradeStore {
             investedOpenUsd = investedOpen
         )
     }
+
+    /** مجموع کارمزد پرداخت‌شده در کیف */
+    fun totalFees(trades: List<Trade>, pricesByCoinId: Map<String, Double>): Double =
+        trades.sumOf { trade ->
+            trade.totalFeeUsd(pricesByCoinId[trade.coinId]) ?: trade.buyFeeUsd
+        }
 
     /** متن کوتاه نتیجه‌ی یک معامله برای نمایش */
     fun resultText(trade: Trade, price: Double?, persianDigits: Boolean): String {

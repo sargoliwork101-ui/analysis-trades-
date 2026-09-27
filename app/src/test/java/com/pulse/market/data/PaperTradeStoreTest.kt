@@ -12,7 +12,8 @@ class PaperTradeStoreTest {
         entry: Double = 100.0,
         amount: Double = 200.0,
         tp: Double? = 10.0,
-        sl: Double? = 5.0
+        sl: Double? = 5.0,
+        fee: Double = 0.0
     ) = PaperTradeStore.Trade(
         id = "t1",
         coinId = "sol",
@@ -22,7 +23,8 @@ class PaperTradeStoreTest {
         amountUsd = amount,
         openedAt = 1_000L,
         takeProfitPct = tp,
-        stopLossPct = sl
+        stopLossPct = sl,
+        feePct = fee
     )
 
     @Test
@@ -91,5 +93,30 @@ class PaperTradeStoreTest {
         assertTrue(text.startsWith("+"))
         assertTrue(text.contains("20.00"))
         assertTrue(text.contains("40.00"))
+    }
+
+    @Test
+    fun feesAreChargedOnBothSides() {
+        val t = trade(fee = 0.2)
+        // خرید: ۲۰۰ دلار منهای ۰٫۲٪ کارمزد = ۱۹۹٫۶ دلار خرید واقعی
+        assertEquals(0.4, t.buyFeeUsd, 0.0001)
+        assertEquals(1.996, t.units, 0.0001)
+        // فروش روی ۱۱۰ دلار: ۲۱۹٫۵۶ منهای ۰٫۲٪ کارمزد
+        assertEquals(0.43912, t.sellFeeUsd(110.0)!!, 0.0001)
+        assertEquals(19.12088, t.profitUsd(110.0)!!, 0.0001)
+        assertEquals(9.56044, t.profitPct(110.0)!!, 0.0001)
+        // تغییر خام قیمت همچنان ۱۰٪ است؛ تفاوت همان کارمزد است.
+        assertEquals(10.0, t.rawChangePct(110.0)!!, 0.0001)
+        // سر به سر کمی بالاتر از قیمت خرید است.
+        assertTrue(t.breakEvenPrice!! > t.entryPrice)
+        assertEquals(0.0, t.profitUsd(t.breakEvenPrice)!!, 0.0001)
+    }
+
+    @Test
+    fun walletFeeTotalCountsOpenAndClosedTrades() {
+        val open = trade(fee = 0.2)
+        val closed = trade(fee = 0.2).copy(id = "t9", closedAt = 5L, closePrice = 110.0)
+        val fees = PaperTradeStore.totalFees(listOf(open, closed), mapOf("sol" to 110.0))
+        assertEquals((0.4 + 0.43912) * 2, fees, 0.0001)
     }
 }

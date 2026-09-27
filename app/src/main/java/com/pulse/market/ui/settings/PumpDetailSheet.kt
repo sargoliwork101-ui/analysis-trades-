@@ -2,6 +2,7 @@ package com.pulse.market.ui.settings
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +28,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -37,6 +39,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -44,9 +47,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -55,6 +60,7 @@ import com.pulse.market.data.Ichimoku
 import com.pulse.market.data.NobitexMarkets
 import com.pulse.market.data.PaperTradeStore
 import com.pulse.market.data.PumpAiReviewer
+import com.pulse.market.data.PumpOhlc
 import com.pulse.market.data.PumpScanner
 import com.pulse.market.ui.Format
 import com.pulse.market.ui.QuoteText
@@ -85,7 +91,7 @@ fun PumpDetailSheet(
     aiError: String?,
     nobitex: NobitexMarkets.Result?,
     openTrade: PaperTradeStore.Trade?,
-    onBuy: (Double, Double?, Double?) -> Unit,
+    onBuy: (Double, Double?, Double?, Double) -> Unit,
     onSell: () -> Unit,
     onAiReview: () -> Unit,
     onOpenLink: (String) -> Unit,
@@ -139,25 +145,54 @@ fun PumpDetailSheet(
                 color = MaterialTheme.colorScheme.onSurface
             )
 
-            // ── نمودار ۷ روزه ──
-            if (coin.spark.size >= 3) {
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-                    ),
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text(
-                            "روند ۷ روز اخیر",
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
+            // ── نمودار کندلی با بازه‌ی انتخابی و زوم ──
+            var range by remember(coin.id) { mutableStateOf(PumpOhlc.Range.WEEK) }
+            var candles by remember(coin.id) { mutableStateOf<List<PumpOhlc.Candle>>(emptyList()) }
+            var chartBusy by remember(coin.id) { mutableStateOf(false) }
+            LaunchedEffect(coin.id, range) {
+                chartBusy = true
+                candles = PumpOhlc.load(coin.id, range)
+                chartBusy = false
+            }
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                ),
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        for (option in PumpOhlc.Range.entries) {
+                            FilterChip(
+                                selected = range == option,
+                                onClick = { range = option },
+                                label = { Text(option.label, fontSize = 11.sp) }
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    val closes = remember(candles) { PumpOhlc.closes(candles) }
+                    val ichimoku = remember(candles, coin.spark) {
+                        Ichimoku.of(closes.ifEmpty { coin.spark })
+                    }
+                    when {
+                        candles.size >= 3 -> CandleChart(
+                            candles = candles,
+                            ichimoku = ichimoku,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(190.dp)
                         )
-                        val ichimoku = remember(coin.id, coin.spark) { Ichimoku.of(coin.spark) }
-                        Spacer(Modifier.height(8.dp))
-                        PriceSparkline(
+                        chartBusy -> Text(
+                            "در حال گرفتن کندل‌ها…",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        coin.spark.size >= 3 -> PriceSparkline(
                             values = coin.spark,
                             rising = (coin.change7d ?: 0.0) >= 0.0,
                             ichimoku = ichimoku,
@@ -165,23 +200,22 @@ fun PumpDetailSheet(
                                 .fillMaxWidth()
                                 .height(110.dp)
                         )
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            "ایچیموکو: ${Ichimoku.summary(coin.price, ichimoku)}",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            "خط آبی = تنکان (کوتاه‌مدت)، خط نارنجی = کیجون (میان‌مدت)، ناحیه‌ی رنگی = ابر. " +
-                                    "قیمت بالای ابر یعنی روند صعودی و زیر ابر یعنی نزولی.",
-                            fontSize = 10.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        else -> Hint("داده‌ی نمودار برای این کوین در دسترس نبود.")
                     }
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "ایچیموکو: ${Ichimoku.summary(coin.price, ichimoku)}",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        "${range.candleHint} • با دو انگشت زوم کن و با کشیدن، نمودار را جابه‌جا کن. " +
+                                "خط آبی تنکان، خط نارنجی کیجون و ناحیه‌ی رنگی ابر ایچیموکو است.",
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
-            } else {
-                Hint("نمودار ۷ روزه برای این کوین در پاسخ منبع نبود؛ با «اسکن تازه» دوباره تلاش کن.")
             }
 
             // ── تغییرات ──
@@ -280,9 +314,23 @@ fun PumpDetailSheet(
             ScoreBar("رشد ۲۴ ساعته", parts.day, parts.total, persian)
             ScoreBar("شتاب ۱ ساعته (وزن ۲)", parts.hour, parts.total, persian)
             ScoreBar("ورود حجم (وزن ۵۰)", parts.flow, parts.total, persian)
+            val band = coin.scoreBand
+            Text(
+                "امتیاز کل: ${Format.price(coin.score, persian)} — ${band.label}",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = when (band) {
+                    PumpScanner.ScoreBand.CALM -> MaterialTheme.colorScheme.onSurfaceVariant
+                    PumpScanner.ScoreBand.MODERATE -> Color(0xFF16A34A)
+                    PumpScanner.ScoreBand.STRONG -> Color(0xFFF59E0B)
+                    PumpScanner.ScoreBand.OVERHEATED -> Color(0xFFDC2626)
+                }
+            )
+            Hint(band.meaning)
             Hint(
-                "امتیاز پامپ = رشد ۲۴ ساعته + ۲× رشد ۱ ساعته + ۵۰× گردش حجم. " +
-                        "امتیاز کل: ${Format.price(parts.total, persian)}"
+                "فرمول: رشد ۲۴ ساعته + ۲× رشد ۱ ساعته + ۵۰× گردش حجم. عدد بالاتر یعنی حرکت شدیدتر، " +
+                        "نه فرصت بهتر؛ بهترین محدوده برای «زیر نظر گرفتن» معمولاً ۱۵ تا ۳۵ است و بالای ۷۰ " +
+                        "بیشتر نشانه‌ی اشباع و ریسک برگشت است."
             )
 
             // ── تاریخچه‌ی کوتاه ──
@@ -481,6 +529,17 @@ fun PumpDetailSheet(
                         )
                         StatRow("قیمت خرید", QuoteText.priceWithUnit(openTrade.entryPrice, "$", persian))
                         StatRow("مبلغ", QuoteText.priceWithUnit(openTrade.amountUsd, "$", persian))
+                        StatRow(
+                            "کارمزد رفت و برگشت",
+                            QuoteText.priceWithUnit(openTrade.totalFeeUsd(coin.price), "$", persian) +
+                                    " (${Format.price(openTrade.feePct, persian)}٪ هر سمت)"
+                        )
+                        openTrade.breakEvenPrice?.let {
+                            StatRow("قیمت سر به سر (با کارمزد)", QuoteText.priceWithUnit(it, "$", persian))
+                        }
+                        openTrade.rawChangePct(coin.price)?.let {
+                            StatRow("تغییر خام قیمت (بدون کارمزد)", "${Format.price(it, persian)}٪")
+                        }
                         openTrade.takeProfitPrice?.let {
                             StatRow("فروش خودکار در سود", QuoteText.priceWithUnit(it, "$", persian))
                         }
@@ -502,6 +561,9 @@ fun PumpDetailSheet(
                 var amount by remember(coin.id) { mutableStateOf("100") }
                 var takeProfit by remember(coin.id) { mutableStateOf("10") }
                 var stopLoss by remember(coin.id) { mutableStateOf("5") }
+                var fee by remember(coin.id) {
+                    mutableStateOf(PaperTradeStore.DEFAULT_FEE_PCT.toString())
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -531,12 +593,21 @@ fun PumpDetailSheet(
                         modifier = Modifier.weight(1f)
                     )
                 }
+                OutlinedTextField(
+                    value = fee,
+                    onValueChange = { fee = it.take(5) },
+                    label = { Text("کارمزد هر سمت (٪)", fontSize = 10.sp) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth()
+                )
                 Button(
                     onClick = {
                         onBuy(
                             amount.replace(',', '.').toDoubleOrNull() ?: 0.0,
                             takeProfit.replace(',', '.').toDoubleOrNull(),
-                            stopLoss.replace(',', '.').toDoubleOrNull()
+                            stopLoss.replace(',', '.').toDoubleOrNull(),
+                            fee.replace(',', '.').toDoubleOrNull() ?: PaperTradeStore.DEFAULT_FEE_PCT
                         )
                     },
                     enabled = (coin.price ?: 0.0) > 0.0 &&
@@ -545,7 +616,8 @@ fun PumpDetailSheet(
                 ) { Text("ثبت خرید آزمایشی با قیمت فعلی", fontSize = 11.5.sp) }
                 Hint(
                     "هیچ سفارشی به هیچ صرافی نمی‌رود؛ فقط روی همین گوشی ثبت می‌شود. با هر اسکن تازه، " +
-                            "اگر قیمت به حد سود یا حد ضرر برسد، معامله خودکار بسته و نتیجه ثبت می‌شود."
+                            "اگر قیمت به حد سود یا حد ضرر برسد، معامله خودکار بسته و نتیجه ثبت می‌شود. " +
+                            "کارمزد در هر دو سمت خرید و فروش از سود کم می‌شود (پیش‌فرض ۰٫۲٪ مثل نوبیتکس)."
                 )
             }
 
@@ -569,13 +641,17 @@ fun PumpDetailSheet(
                 }
             }
             OutlinedButton(
-                onClick = { onOpenLink("https://www.coingecko.com/en/coins/${coin.id}") },
+                onClick = { onOpenLink(tradingViewUrl(coin.symbol)) },
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("باز کردن صفحه‌ی CoinGecko", fontSize = 11.5.sp)
+                Text("باز کردن نمودار در TradingView", fontSize = 11.5.sp)
             }
+            TextButton(
+                onClick = { onOpenLink("https://www.coingecko.com/en/coins/${coin.id}") },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("صفحه‌ی CoinGecko (داده‌ی بنیادی و لینک‌ها)", fontSize = 10.5.sp) }
 
             WarnCard(
                 "هیچ‌کدام از داده‌ها و پیام‌های این صفحه توصیه‌ی مالی یا سیگنال خرید و فروش نیست."
@@ -758,5 +834,137 @@ private fun PriceSparkline(
             drawSeries(it.kijun, kijunColor, 2.5f)
         }
         drawSeries(values.map { it }, priceColor, 3.5f)
+    }
+}
+
+/** آدرس نمودار همین نماد در TradingView (جفت USDT رایج‌ترین بازار است). */
+internal fun tradingViewUrl(symbol: String): String {
+    val clean = symbol.trim().uppercase().filter { it.isLetterOrDigit() }.take(12)
+    return if (clean.isEmpty()) "https://www.tradingview.com/markets/cryptocurrencies/"
+    else "https://www.tradingview.com/chart/?symbol=${clean}USDT"
+}
+
+/**
+ * نمودار شمعی با زوم و جابه‌جایی.
+ * زوم با دو انگشت تعداد کندل‌های دیده‌شده را کم/زیاد می‌کند و کشیدن افقی،
+ * پنجره‌ی دید را روی تاریخ جابه‌جا می‌کند. خطوط ایچیموکو هم روی همان پنجره رسم می‌شوند.
+ */
+@Composable
+private fun CandleChart(
+    candles: List<PumpOhlc.Candle>,
+    ichimoku: Ichimoku.Series?,
+    modifier: Modifier
+) {
+    val upColor = Color(0xFF16A34A)
+    val downColor = Color(0xFFDC2626)
+    val tenkanColor = Color(0xFF3B82F6)
+    val kijunColor = Color(0xFFF59E0B)
+    val bullCloud = Color(0xFF22C55E)
+    val bearCloud = Color(0xFFF43F5E)
+
+    var zoom by remember(candles) { mutableStateOf(1f) }
+    var offset by remember(candles) { mutableStateOf(0f) }
+    val total = candles.size
+    val visibleCount = (total / zoom).toInt().coerceIn(6, total.coerceAtLeast(6))
+    val maxStart = (total - visibleCount).coerceAtLeast(0)
+    val start = offset.toInt().coerceIn(0, maxStart)
+    val window = candles.subList(start, (start + visibleCount).coerceAtMost(total))
+
+    Canvas(
+        modifier = modifier.pointerInput(candles) {
+            detectTransformGestures { _, pan, gestureZoom, _ ->
+                zoom = (zoom * gestureZoom).coerceIn(1f, 8f)
+                val step = (size.width / visibleCount.coerceAtLeast(1)).coerceAtLeast(1f)
+                offset = (offset - pan.x / step).coerceIn(0f, maxStart.toFloat())
+            }
+        }
+    ) {
+        if (window.size < 2) return@Canvas
+        val spanA = ichimoku?.spanA.orEmpty()
+        val spanB = ichimoku?.spanB.orEmpty()
+        val tenkan = ichimoku?.tenkan.orEmpty()
+        val kijun = ichimoku?.kijun.orEmpty()
+
+        fun windowValues(series: List<Double?>): List<Double?> =
+            (start until start + window.size).map { series.getOrNull(it) }
+
+        val wSpanA = windowValues(spanA)
+        val wSpanB = windowValues(spanB)
+        val wTenkan = windowValues(tenkan)
+        val wKijun = windowValues(kijun)
+
+        val values = buildList {
+            for (candle in window) {
+                add(candle.high)
+                add(candle.low)
+            }
+            addAll(wSpanA.filterNotNull())
+            addAll(wSpanB.filterNotNull())
+            addAll(wTenkan.filterNotNull())
+            addAll(wKijun.filterNotNull())
+        }
+        val min = values.minOrNull() ?: return@Canvas
+        val max = values.maxOrNull() ?: return@Canvas
+        val priceRange = (max - min).takeIf { it > 0.0 } ?: 1.0
+        val pad = size.height * 0.06f
+        val usable = size.height - pad * 2f
+        val slot = size.width / window.size.toFloat()
+        val bodyWidth = (slot * 0.62f).coerceAtLeast(1.2f)
+
+        fun yOf(value: Double): Float = pad + (usable - (((value - min) / priceRange).toFloat() * usable))
+        fun xOf(index: Int): Float = slot * (index + 0.5f)
+
+        // ابر ایچیموکو زیر کندل‌ها
+        for (i in 0 until window.size - 1) {
+            val a1 = wSpanA.getOrNull(i)
+            val b1 = wSpanB.getOrNull(i)
+            val a2 = wSpanA.getOrNull(i + 1)
+            val b2 = wSpanB.getOrNull(i + 1)
+            if (a1 != null && b1 != null && a2 != null && b2 != null) {
+                val path = Path().apply {
+                    moveTo(xOf(i), yOf(a1))
+                    lineTo(xOf(i + 1), yOf(a2))
+                    lineTo(xOf(i + 1), yOf(b2))
+                    lineTo(xOf(i), yOf(b1))
+                    close()
+                }
+                val bullish = (a1 + a2) >= (b1 + b2)
+                drawPath(path, color = (if (bullish) bullCloud else bearCloud).copy(alpha = 0.20f))
+            }
+        }
+
+        // کندل‌ها
+        for ((index, candle) in window.withIndex()) {
+            val color = if (candle.bullish) upColor else downColor
+            val x = xOf(index)
+            drawLine(
+                color = color,
+                start = Offset(x, yOf(candle.high)),
+                end = Offset(x, yOf(candle.low)),
+                strokeWidth = 1.6f
+            )
+            val top = yOf(maxOf(candle.open, candle.close))
+            val bottom = yOf(minOf(candle.open, candle.close))
+            drawRect(
+                color = color,
+                topLeft = Offset(x - bodyWidth / 2f, top),
+                size = Size(bodyWidth, (bottom - top).coerceAtLeast(1.2f))
+            )
+        }
+
+        fun drawSeries(series: List<Double?>, color: Color, width: Float) {
+            var previous: Offset? = null
+            for ((index, value) in series.withIndex()) {
+                if (value == null) {
+                    previous = null
+                    continue
+                }
+                val point = Offset(xOf(index), yOf(value))
+                previous?.let { drawLine(color, it, point, strokeWidth = width, cap = StrokeCap.Round) }
+                previous = point
+            }
+        }
+        drawSeries(wTenkan, tenkanColor, 2.2f)
+        drawSeries(wKijun, kijunColor, 2.2f)
     }
 }

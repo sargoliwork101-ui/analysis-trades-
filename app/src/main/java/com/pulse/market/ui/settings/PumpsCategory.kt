@@ -639,10 +639,10 @@ fun PumpsCategory(
             aiError = aiErrors[selected.id],
             nobitex = nobitex[selected.id],
             openTrade = trades.firstOrNull { it.coinId == selected.id && it.isOpen },
-            onBuy = { amount, takeProfit, stopLoss ->
+            onBuy = { amount, takeProfit, stopLoss, fee ->
                 scope.launch {
                     val opened = withContext(Dispatchers.IO) {
-                        PaperTradeStore.buy(context, selected, amount, takeProfit, stopLoss)
+                        PaperTradeStore.buy(context, selected, amount, takeProfit, stopLoss, fee)
                     }
                     trades = withContext(Dispatchers.IO) { PaperTradeStore.all(context) }
                     tradeNotice = if (opened == null) "ثبت خرید آزمایشی ممکن نشد (قیمت یا مبلغ نامعتبر)"
@@ -730,6 +730,21 @@ private fun PumpHelpCard() {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.height(2.dp))
+            Text(
+                "امتیاز پامپ یعنی چه؟",
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                "امتیاز = رشد ۲۴ ساعته + ۲× رشد ۱ ساعته + ۵۰× (حجم ۲۴ ساعته ÷ ارزش بازار). " +
+                        "عدد بزرگ‌تر یعنی حرکت شدیدتر، نه فرصت بهتر.",
+                fontSize = 11.5.sp,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            for (band in PumpScanner.ScoreBand.entries) {
+                HelpMeaning(band.label, band.meaning)
+            }
             RuleLine("۱", "فقط به دلیل رشد زیاد خرید نکن؛ رشد زیاد معمولاً یعنی ریسک بیشتر.")
             RuleLine("۲", "حجم، ارزش بازار، خبر معتبر و امکان برداشت از صرافی را جداگانه بررسی کن.")
             RuleLine("۳", "به گروه‌ها و عبارت‌هایی مثل «سود قطعی» یا «سیگنال تضمینی» اعتماد نکن.")
@@ -878,6 +893,11 @@ private fun PumpRow(
             PumpChangeBadge("۱ ماه", coin.change30d, persian)
         }
         Text(
+            "امتیاز ${Format.price(coin.score, persian)} — ${coin.scoreBand.label}",
+            fontSize = 10.5.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
             "مرحله: ${coin.stage.label} • نتیجه‌ی احتیاطی: ${coin.advice.recommendation.label}",
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
@@ -933,6 +953,11 @@ private fun PaperWalletCard(
                 fontWeight = FontWeight.Bold,
                 color = if (summary.realizedUsd + summary.openUsd >= 0.0) Color(0xFF16A34A)
                 else Color(0xFFDC2626)
+            )
+            Text(
+                "کارمزد پرداخت‌شده: ${Format.price(PaperTradeStore.totalFees(trades, prices), persian)} دلار",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
                 "معامله‌ی باز: ${Format.toPersianDigits("${summary.openCount}")} • " +

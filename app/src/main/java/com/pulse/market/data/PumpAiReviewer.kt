@@ -161,7 +161,7 @@ object PumpAiReviewer {
     }
 
     /** سقف زمان یک درخواست AI (ثانیه) — مدل‌های کند و جست‌وجوی وب وقت بیشتری می‌خواهند. */
-    internal const val REQUEST_TIMEOUT_SECONDS = 90
+    internal const val REQUEST_TIMEOUT_SECONDS = 180
 
     private fun buildRequest(config: PumpAiConfig, endpoint: String, payload: JsonObject): Request =
         Request.Builder()
@@ -474,7 +474,7 @@ object PumpAiReviewer {
                 Http.execute(
                     buildRequest(config, route.endpoint, route.payload),
                     maxBytes = 64L * 1024,
-                    callTimeoutSeconds = 45
+                    callTimeoutSeconds = 60
                 )
             } catch (cancelled: CancellationException) {
                 throw cancelled

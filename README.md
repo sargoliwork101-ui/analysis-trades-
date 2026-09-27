@@ -86,6 +86,7 @@ Two built-in ways; both give the **USD** price of one troy ounce:
 - ⚠️ Versions 1.0–1.3 were signed with the CI runner's throwaway key; installing **1.4** over them needs one uninstall/reinstall. After 1.4 that is no longer needed.
 
 **Version history**
+- **1.46** — trading fees in the simulator (0.2% per side by default, editable) with net profit, break-even price and total fees; the main chart is now candlesticks with selectable ranges (1 day hourly, 7 days, 30 days, 3 months), pinch zoom and pan, and the Ichimoku cloud drawn on those candles; the chart button opens TradingView (CoinGecko stays as a secondary link); the AI timeout is now 180s; and the pump score is graded with an explanation (calm under 15, moderate 15-35, strong 35-70, overheated above 70).
 - **1.45** — fixes a floating-point edge in the trade simulator: hitting the take-profit or stop-loss level exactly now closes the position (110.00000000000001 used to block it).
 - **1.44** — paper-trade take-profit/stop-loss levels are now also evaluated against the cached prices when the page opens, not only after a fresh scan.
 - **1.43** — adds a paper-trading simulator: record a simulated buy with amount, take-profit and stop-loss percentages, sell manually, auto-close positions when a later scan crosses those levels, and review a wallet card with realized profit, open profit, win rate and history; each coin detail also reports whether it trades on Nobitex (cached for 24h).

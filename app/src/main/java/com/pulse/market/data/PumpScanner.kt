@@ -98,6 +98,10 @@ object PumpScanner {
         val turnover: Double
             get() = turnover(volume, marketCap)
 
+        /** دسته‌ی امتیاز پامپ (کم‌جان/متوسط/قوی/بیش‌ازحد داغ) */
+        val scoreBand: ScoreBand
+            get() = bandOf(score)
+
         /** مرحله‌ی تقریبی حرکت قیمت — فقط توصیف وضعیت، نه سیگنال */
         val stage: Stage
             get() = stageFor(this)
@@ -140,6 +144,39 @@ object PumpScanner {
     }
 
     data class Advice(val recommendation: Recommendation, val reason: String)
+
+    /**
+     * معنی عدد «امتیاز پامپ».
+     *
+     * امتیاز = رشد ۲۴ ساعته + ۲× رشد ۱ ساعته + ۵۰× (حجم ۲۴ ساعته ÷ ارزش بازار).
+     * پس امتیاز بالا یعنی «حرکت شدیدتر»، نه «فرصت بهتر»: هرچه بالاتر، احتمال
+     * اینکه بخش بزرگی از حرکت انجام شده و برگشت نزدیک باشد بیشتر است.
+     */
+    enum class ScoreBand(val label: String, val meaning: String) {
+        CALM(
+            "کم‌جان (زیر ۱۵)",
+            "حرکت و ورود پول محسوس نیست؛ معمولاً نه فرصت است نه خطر، فقط نوسان عادی."
+        ),
+        MODERATE(
+            "متوسط (۱۵ تا ۳۵)",
+            "حرکت واقعی شروع شده و حجم نسبتاً همراه است؛ همین محدوده برای «زیر نظر گرفتن» مناسب‌ترین است."
+        ),
+        STRONG(
+            "قوی (۳۵ تا ۷۰)",
+            "پامپ جدی در جریان است؛ بخش بزرگی از حرکت انجام شده و ورود در این محدوده یعنی خرید بعد از رشد."
+        ),
+        OVERHEATED(
+            "بیش‌ازحد داغ (بالای ۷۰)",
+            "ترکیب رشد شدید و حجم غیرعادی؛ تاریخچه نشان می‌دهد این محدوده بیشتر به اصلاح تند ختم می‌شود تا ادامه‌ی روند."
+        )
+    }
+
+    fun bandOf(score: Double): ScoreBand = when {
+        !score.isFinite() || score < 15.0 -> ScoreBand.CALM
+        score < 35.0 -> ScoreBand.MODERATE
+        score < 70.0 -> ScoreBand.STRONG
+        else -> ScoreBand.OVERHEATED
+    }
 
     /** سهم هر جزء در امتیاز پامپ؛ مجموع آن دقیقاً همان [score] است. */
     data class ScoreParts(val day: Double, val hour: Double, val flow: Double) {
