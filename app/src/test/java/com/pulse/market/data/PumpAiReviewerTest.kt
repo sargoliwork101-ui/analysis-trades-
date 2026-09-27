@@ -226,4 +226,41 @@ class PumpAiReviewerTest {
             )
         )
     }
+
+    @Test
+    fun bothGeminiRoutesAreKeptAndTriedInOrder() {
+        val coin = PumpScanner.PumpCoin(id = "sol", symbol = "sol", name = "Solana", change24h = 12.0)
+        val nativeConfig = PumpAiConfig(
+            enabled = true,
+            endpoint = "https://generativelanguage.googleapis.com/v1beta",
+            model = "gemini-flash-latest"
+        )
+        val routes = PumpAiReviewer.reviewRoutes(nativeConfig, coin)
+        assertEquals(3, routes.size)
+        assertTrue(routes[0].nativeGemini && routes[0].payload.toString().contains("responseSchema"))
+        assertTrue(routes[1].nativeGemini && !routes[1].payload.toString().contains("responseSchema"))
+        assertTrue(!routes[2].nativeGemini)
+        assertEquals(
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+            routes[2].endpoint
+        )
+
+        val compatConfig = nativeConfig.copy(
+            endpoint = "https://generativelanguage.googleapis.com/v1beta/openai",
+            model = "gemini-2.0-flash"
+        )
+        val compatRoutes = PumpAiReviewer.reviewRoutes(compatConfig, coin)
+        assertEquals(2, compatRoutes.size)
+        assertTrue(!compatRoutes[0].nativeGemini)
+        assertTrue(compatRoutes[1].nativeGemini)
+
+        val openAi = PumpAiConfig(enabled = true, endpoint = "https://api.openai.com/v1", model = "gpt-4o-mini")
+        assertEquals(1, PumpAiReviewer.reviewRoutes(openAi, coin).size)
+    }
+
+    @Test
+    fun keyAndQuotaErrorsDoNotRetryOtherRoutes() {
+        assertTrue(PumpAiReviewer.isFatalServiceError(Http.HttpException(401, "HTTP 401"), "کلید"))
+        assertTrue(!PumpAiReviewer.isFatalServiceError(Http.HttpException(400, "HTTP 400"), "خطا"))
+    }
 }

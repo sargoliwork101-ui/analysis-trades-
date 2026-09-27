@@ -62,6 +62,15 @@ data class PumpAiConfig(
                 providerSearch = false
             ),
             Preset(
+                id = "gemini_openai",
+                title = "Gemini (سازگار OpenAI)",
+                endpoint = "https://generativelanguage.googleapis.com/v1beta/openai",
+                model = "gemini-2.0-flash",
+                hint = "همان کلید AI Studio، ولی از مسیر سازگار با OpenAI گوگل. اگر مسیر بومی " +
+                        "پاسخ بی‌متن داد، برنامه خودکار همین مسیر را هم امتحان می‌کند.",
+                providerSearch = false
+            ),
+            Preset(
                 id = "claude",
                 title = "Claude (کلاد)",
                 endpoint = "https://api.anthropic.com/v1",
