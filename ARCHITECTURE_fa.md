@@ -101,7 +101,7 @@ QuoteText.volume(q)                 // «۱۲٫۴ میلیون»
 ### ۵) هر منطق خالصی که می‌شود، تست JVM دارد
 - `app/src/test/java/com/pulse/market/data/` — `JsonPath`، `Num`، `AppUpdater`،
   `PumpScanner`، `Fetcher`، URL/security policy، state چندویجتی و سیاست cache.
-- CI برای APK انتشار بهینه، `assembleRelease`، تست‌های JVM و `lintRelease` را اجرا می‌کند؛ امضا و از نسخه‌ی ۱٫۲۵ سقف حجم سخت‌گیرانه‌ی ۲ MiB نیز اجباری‌اند تا کاهش حدود ۹۰٪ حجم حفظ شود. مسیر واقعی `Parser.parse(String)` و CSS selector نیز تست رگرسیون دارد و stream/function لازم برای minSdk 23 desugar می‌شود. منابع release به فارسی و fallback انگلیسی محدودند؛ جهت RTL فارسی تغییری نکرده است.
+- CI برای APK انتشار بهینه، `assembleRelease`، تست‌های JVM و `lintRelease` را اجرا می‌کند؛ امضا و از نسخه‌ی ۱٫۲۵ سقف حجم سخت‌گیرانه‌ی ۲ MiB نیز اجباری‌اند تا کاهش حدود ۹۰٪ حجم حفظ شود. مسیر واقعی `Parser.parse(String)` و CSS selector نیز تست رگرسیون دارد؛ پیمایش DOM بدون Stream است و function/Optional لازم برای minSdk 23 با flavor حداقلی desugar می‌شود. منابع release به فارسی و fallback انگلیسی محدودند؛ جهت RTL فارسی تغییری نکرده است.
 
 ---
 

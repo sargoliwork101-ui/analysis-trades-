@@ -11,10 +11,34 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
+import org.jsoup.nodes.Element
 import org.jsoup.parser.Parser
+import org.jsoup.select.Selector
 import java.net.URI
 import java.net.URLEncoder
+import java.util.ArrayDeque
 import java.util.concurrent.ConcurrentHashMap
+
+/**
+ * همان semantics سلکتور jsoup را بدون Collector مبتنی بر Stream اجرا می‌کند.
+ * این مسیر برای Android 6 فقط به function desugaring حداقلی نیاز دارد و ترتیب
+ * پیمایش سند را حفظ می‌کند.
+ */
+internal fun firstMatchingHtmlElement(root: Element, cssSelector: String): Element? {
+    val evaluator = Selector.evaluatorOf(cssSelector)
+    val pending = ArrayDeque<Element>()
+    pending.addLast(root)
+    while (pending.isNotEmpty()) {
+        val current = pending.removeLast()
+        if (evaluator.matches(root, current)) return current
+        val children = current.childNodes()
+        for (index in children.indices.reversed()) {
+            val child = children[index]
+            if (child is Element) pending.addLast(child)
+        }
+    }
+    return null
+}
 
 /**
  * موتور گرفتن داده از سایت‌ها.
@@ -188,7 +212,7 @@ object Fetcher {
             val el = if (selector.isNullOrBlank()) {
                 error("سلکتور CSS برای منبع HTML تعریف نشده")
             } else {
-                runCatching { doc.selectFirst(selector) ?: doc.select(selector).firstOrNull() }.getOrNull()
+                runCatching { firstMatchingHtmlElement(doc, selector) }.getOrNull()
                     ?: error("سلکتور در صفحه پیدا نشد")
             }
             val raw = if (source.cssAttr.isNullOrBlank()) el.text() else el.attr(source.cssAttr)

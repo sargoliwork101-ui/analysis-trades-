@@ -18,8 +18,8 @@ android {
         // UI برنامه فارسی است و انگلیسی فقط fallback کتابخانه‌هاست؛ localeهای بلااستفاده
         // AndroidX نباید در APK release نگه داشته شوند.
         resourceConfigurations += listOf("fa", "en")
-        versionCode = 30
-        versionName = "1.29"
+        versionCode = 31
+        versionName = "1.30"
     }
 
     /**
@@ -69,8 +69,8 @@ android {
     }
 
     compileOptions {
-        // مسیر parse(String)+CSS در jsoup روی Android 6 به stream/function desugaring نیاز دارد.
-        // برنامه APIهای file/Path را صدا نمی‌زند؛ مسیر واقعی parser با تست رگرسیون پوشش دارد.
+        // مسیر parse(String)+CSS با پیمایش بدون Stream روی Android 6 فقط به
+        // function/Optional desugaring حداقلی نیاز دارد و تست رگرسیون مستقیم دارد.
         isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -98,7 +98,7 @@ kotlin {
 }
 
 dependencies {
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_minimal:2.1.5")
 
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")

@@ -61,7 +61,7 @@ class SecurityPolicyTest {
             """<main><div class="quote" data-kind="last"><span class="price">۱۲۳٫۴۵</span></div></main>""",
             "https://example.com/market"
         )
-        val price = doc.selectFirst("div.quote[data-kind=last] > span.price")
+        val price = firstMatchingHtmlElement(doc, "div.quote[data-kind=last] > span.price")
         assertEquals("۱۲۳٫۴۵", price?.text())
     }
 
