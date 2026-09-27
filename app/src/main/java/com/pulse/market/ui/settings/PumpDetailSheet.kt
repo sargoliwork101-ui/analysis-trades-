@@ -29,6 +29,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -92,6 +93,10 @@ fun PumpDetailSheet(
     nobitex: NobitexMarkets.Result?,
     openTrade: PaperTradeStore.Trade?,
     onBuy: (Double, Double?, Double?, Double) -> Unit,
+    /** مبلغ کل، سقف محدوده، کف محدوده، تعداد پله، حد سود٪، حد ضرر٪، کارمزد٪ */
+    onPlan: (Double, Double, Double, Int, Double?, Double?, Double) -> Unit,
+    activePlans: List<PaperTradeStore.Plan>,
+    onCancelPlan: (String) -> Unit,
     onSell: () -> Unit,
     onAiReview: () -> Unit,
     onOpenLink: (String) -> Unit,
@@ -614,6 +619,145 @@ fun PumpDetailSheet(
                             "اگر قیمت به حد سود یا حد ضرر برسد، معامله خودکار بسته و نتیجه ثبت می‌شود. " +
                             "کارمزد در هر دو سمت خرید و فروش از سود کم می‌شود (پیش‌فرض ۰٫۲٪ مثل نوبیتکس)."
                 )
+
+                // ── سفارش محدوده‌ای و خرید پله‌ای (شبیه سفارش limit نوبیتکس) ──
+                HorizontalDivider(
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier.padding(vertical = 4.dp)
+                )
+                Text(
+                    "سفارش محدوده‌ای و خرید پله‌ای",
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                val price = coin.price ?: 0.0
+                var entryHigh by remember(coin.id) {
+                    mutableStateOf(trimNumber(price * 0.98))
+                }
+                var entryLow by remember(coin.id) {
+                    mutableStateOf(trimNumber(price * 0.90))
+                }
+                var steps by remember(coin.id) { mutableStateOf(3) }
+                var planTotal by remember(coin.id) { mutableStateOf("300") }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = entryHigh,
+                        onValueChange = { entryHigh = it.take(14) },
+                        label = { Text("سقف محدوده ورود ($)", fontSize = 10.sp) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = entryLow,
+                        onValueChange = { entryLow = it.take(14) },
+                        label = { Text("کف محدوده ورود ($)", fontSize = 10.sp) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                OutlinedTextField(
+                    value = planTotal,
+                    onValueChange = { planTotal = it.take(9) },
+                    label = { Text("کل سرمایه‌ی طرح (دلار)", fontSize = 10.sp) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text("تعداد پله", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    for (option in 1..PaperTradeStore.MAX_STEPS) {
+                        FilterChip(
+                            selected = steps == option,
+                            onClick = { steps = option },
+                            label = { Text(Format.toPersianDigits("$option"), fontSize = 11.sp) }
+                        )
+                    }
+                }
+                val ladderPreview = remember(entryHigh, entryLow, steps) {
+                    PaperTradeStore.ladderPrices(
+                        entryHigh.replace(',', '.').toDoubleOrNull() ?: 0.0,
+                        entryLow.replace(',', '.').toDoubleOrNull() ?: 0.0,
+                        steps
+                    )
+                }
+                val planAmount = planTotal.replace(',', '.').toDoubleOrNull() ?: 0.0
+                if (ladderPreview.all { it > 0.0 } && planAmount > 0.0) {
+                    Text(
+                        "پله‌ها: " + ladderPreview.joinToString(" • ") {
+                            QuoteText.priceWithUnit(it, "$", persian)
+                        } + " — هر پله ${QuoteText.priceWithUnit(planAmount / steps, "$", persian)}",
+                        fontSize = 10.5.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                Button(
+                    onClick = {
+                        onPlan(
+                            planAmount,
+                            entryHigh.replace(',', '.').toDoubleOrNull() ?: 0.0,
+                            entryLow.replace(',', '.').toDoubleOrNull() ?: 0.0,
+                            steps,
+                            takeProfit.replace(',', '.').toDoubleOrNull(),
+                            stopLoss.replace(',', '.').toDoubleOrNull(),
+                            fee.replace(',', '.').toDoubleOrNull() ?: PaperTradeStore.DEFAULT_FEE_PCT
+                        )
+                    },
+                    enabled = planAmount > 0.0 && ladderPreview.all { it > 0.0 },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("ثبت طرح خرید پله‌ای", fontSize = 11.5.sp) }
+                Hint(
+                    "هیچ پله‌ای تا وقتی قیمت به آن نرسد خریداری نمی‌شود (مثل سفارش limit). " +
+                            "حد سود و حد ضرر بالا روی هر پله جداگانه اعمال می‌شود و اگر قیمت از کف محدوده " +
+                            "به‌اندازه‌ی حد ضرر پایین‌تر برود، پله‌های باقی‌مانده لغو می‌شوند."
+                )
+                for (plan in activePlans) {
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            Text(
+                                "طرح فعال: ${Format.toPersianDigits("${plan.filledSteps}")} از " +
+                                        "${Format.toPersianDigits("${plan.steps}")} پله پر شده",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                "محدوده: ${QuoteText.priceWithUnit(plan.entryLow, "$", persian)} تا " +
+                                        QuoteText.priceWithUnit(plan.entryHigh, "$", persian),
+                                fontSize = 10.5.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            plan.cancelPrice?.let {
+                                Text(
+                                    "ابطال طرح زیر ${QuoteText.priceWithUnit(it, "$", persian)}",
+                                    fontSize = 10.5.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            OutlinedButton(
+                                onClick = { onCancelPlan(plan.id) },
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text("لغو پله‌های باقی‌مانده", fontSize = 11.sp) }
+                        }
+                    }
+                }
             }
 
             // ── اقدام‌ها ──
@@ -830,6 +974,14 @@ private fun PriceSparkline(
         }
         drawSeries(values.map { it }, priceColor, 3.5f)
     }
+}
+
+/** عدد پیش‌فرض فرم‌ها با دقت مناسب همان قیمت */
+internal fun trimNumber(value: Double): String = when {
+    !value.isFinite() || value <= 0.0 -> ""
+    value >= 100 -> String.format(java.util.Locale.US, "%.2f", value)
+    value >= 1 -> String.format(java.util.Locale.US, "%.4f", value)
+    else -> String.format(java.util.Locale.US, "%.6f", value)
 }
 
 /** آدرس نمودار همین نماد در TradingView (جفت USDT رایج‌ترین بازار است). */

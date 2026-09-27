@@ -20,7 +20,10 @@ object PaperTradeStore {
 
     private const val PREF = "pulse_paper_trades"
     private const val KEY_TRADES = "trades"
+    private const val KEY_PLANS = "plans"
     private const val MAX_TRADES = 200
+    private const val MAX_PLANS = 30
+    const val MAX_STEPS = 5
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
@@ -172,7 +175,196 @@ object PaperTradeStore {
             .apply()
     }
 
-    /** ثبت خرید آزمایشی تازه */
+
+    /**
+     * «طرح خرید» شبیه سفارش‌های نوبیتکس: محدوده‌ی ورود + خرید پله‌ای + حد سود/ضرر.
+     *
+     * برخلاف خرید فوری، هیچ پولی تا وقتی قیمت وارد محدوده نشود درگیر نمی‌شود؛ هر
+     * پله سفارش limit خودش را دارد و با رسیدن قیمت به آن پله، همان بخش از سرمایه
+     * خرید می‌شود (میانگین‌گیری در ریزش). حد سود و حد ضرر روی هر پله‌ی پرشده
+     * جداگانه اعمال می‌شود.
+     */
+    @Serializable
+    data class Plan(
+        val id: String,
+        val coinId: String,
+        val symbol: String,
+        val name: String,
+        /** کل سرمایه‌ی طرح (دلار) که بین پله‌ها تقسیم می‌شود */
+        val totalUsd: Double,
+        /** بالاترین قیمت محدوده‌ی ورود (پله‌ی اول) */
+        val entryHigh: Double,
+        /** پایین‌ترین قیمت محدوده‌ی ورود (پله‌ی آخر) */
+        val entryLow: Double,
+        val steps: Int,
+        val filledSteps: Int = 0,
+        val takeProfitPct: Double? = null,
+        val stopLossPct: Double? = null,
+        val feePct: Double = DEFAULT_FEE_PCT,
+        val createdAt: Long = 0L,
+        val lastFillAt: Long? = null,
+        val canceledAt: Long? = null,
+        val cancelReason: String = ""
+    ) {
+        val isActive: Boolean get() = canceledAt == null && filledSteps < steps
+
+        /** مبلغ هر پله */
+        val stepUsd: Double get() = if (steps > 0) totalUsd / steps else 0.0
+
+        /** قیمت سفارش هر پله، از بالای محدوده به پایین */
+        val ladder: List<Double> get() = ladderPrices(entryHigh, entryLow, steps)
+
+        /** قیمتی که کل طرح باطل می‌شود (زیر محدوده + حد ضرر) */
+        val cancelPrice: Double?
+            get() = stopLossPct?.takeIf { it > 0.0 }?.let { entryLow * (1.0 - it / 100.0) }
+    }
+
+    /** پله‌بندی خطی قیمت‌ها: پله‌ی اول روی سقف محدوده، پله‌ی آخر روی کف. */
+    internal fun ladderPrices(high: Double, low: Double, steps: Int): List<Double> {
+        val count = steps.coerceIn(1, MAX_STEPS)
+        val top = maxOf(high, low)
+        val bottom = minOf(high, low)
+        if (count == 1) return listOf(top)
+        val gap = (top - bottom) / (count - 1)
+        return (0 until count).map { index -> top - gap * index }
+    }
+
+    /** با این قیمت، چند پله باید پر شده باشد؟ (سفارش خرید limit) */
+    internal fun filledStepsAt(plan: Plan, price: Double): Int {
+        if (!price.isFinite() || price <= 0.0) return plan.filledSteps
+        val reached = plan.ladder.count { price <= it * (1.0 + LEVEL_TOLERANCE) }
+        return maxOf(plan.filledSteps, reached.coerceAtMost(plan.steps))
+    }
+
+    /** آیا قیمت آن‌قدر ریخته که ادامه‌ی طرح بی‌معنی شود؟ */
+    internal fun planShouldCancel(plan: Plan, price: Double): Boolean {
+        val limit = plan.cancelPrice ?: return false
+        return price.isFinite() && price > 0.0 && price <= limit * (1.0 + LEVEL_TOLERANCE)
+    }
+
+    @Synchronized
+    fun plans(context: Context): List<Plan> {
+        val raw = prefs(context).getString(KEY_PLANS, null) ?: return emptyList()
+        return runCatching {
+            json.decodeFromString(ListSerializer(Plan.serializer()), raw)
+        }.getOrDefault(emptyList())
+            .filter { it.coinId.isNotBlank() && it.totalUsd > 0.0 && it.steps in 1..MAX_STEPS }
+            .sortedByDescending { it.createdAt }
+            .take(MAX_PLANS)
+    }
+
+    @Synchronized
+    private fun writePlans(context: Context, plans: List<Plan>) {
+        val bounded = plans.sortedByDescending { it.createdAt }.take(MAX_PLANS)
+        prefs(context).edit()
+            .putString(KEY_PLANS, json.encodeToString(ListSerializer(Plan.serializer()), bounded))
+            .apply()
+    }
+
+    /** ثبت طرح خرید پله‌ای؛ اگر قیمت همین حالا داخل محدوده باشد، پله‌های رسیده فوراً پر می‌شوند. */
+    fun planBuy(
+        context: Context,
+        coin: PumpScanner.PumpCoin,
+        totalUsd: Double,
+        entryHigh: Double,
+        entryLow: Double,
+        steps: Int,
+        takeProfitPct: Double?,
+        stopLossPct: Double?,
+        feePct: Double = DEFAULT_FEE_PCT,
+        now: Long = System.currentTimeMillis()
+    ): Plan? {
+        val total = totalUsd.takeIf { it.isFinite() && it > 0.0 }?.coerceIn(1.0, 1_000_000.0) ?: return null
+        val high = entryHigh.takeIf { it.isFinite() && it > 0.0 } ?: return null
+        val low = entryLow.takeIf { it.isFinite() && it > 0.0 } ?: return null
+        val plan = Plan(
+            id = "plan_${coin.id}_$now",
+            coinId = coin.id,
+            symbol = coin.symbol.uppercase(),
+            name = coin.name,
+            totalUsd = total,
+            entryHigh = maxOf(high, low),
+            entryLow = minOf(high, low),
+            steps = steps.coerceIn(1, MAX_STEPS),
+            takeProfitPct = takeProfitPct?.takeIf { it.isFinite() && it > 0.0 }?.coerceIn(0.1, 1000.0),
+            stopLossPct = stopLossPct?.takeIf { it.isFinite() && it > 0.0 }?.coerceIn(0.1, 99.0),
+            feePct = feePct.takeIf { it.isFinite() && it >= 0.0 }?.coerceAtMost(5.0) ?: DEFAULT_FEE_PCT,
+            createdAt = now
+        )
+        writePlans(context, plans(context) + plan)
+        coin.price?.let { settlePlans(context, mapOf(coin.id to it), now) }
+        return plans(context).firstOrNull { it.id == plan.id } ?: plan
+    }
+
+    fun cancelPlan(context: Context, planId: String, now: Long = System.currentTimeMillis()) {
+        writePlans(
+            context,
+            plans(context).map {
+                if (it.id == planId && it.isActive)
+                    it.copy(canceledAt = now, cancelReason = "لغو دستی")
+                else it
+            }
+        )
+    }
+
+    fun removePlan(context: Context, planId: String) {
+        writePlans(context, plans(context).filterNot { it.id == planId })
+    }
+
+    /**
+     * بررسی طرح‌ها با قیمت‌های تازه: پرکردن پله‌های رسیده (ساخت معامله برای هر پله)
+     * و باطل‌کردن طرح‌هایی که قیمت از کف محدوده هم پایین‌تر رفته است.
+     * خروجی: پیام‌های خوانا برای نمایش به کاربر.
+     */
+    fun settlePlans(
+        context: Context,
+        pricesByCoinId: Map<String, Double>,
+        now: Long = System.currentTimeMillis()
+    ): List<String> {
+        if (pricesByCoinId.isEmpty()) return emptyList()
+        val current = plans(context)
+        if (current.none { it.isActive }) return emptyList()
+        val messages = mutableListOf<String>()
+        val newTrades = mutableListOf<Trade>()
+        val updated = current.map { plan ->
+            if (!plan.isActive) return@map plan
+            val price = pricesByCoinId[plan.coinId]?.takeIf { it.isFinite() && it > 0.0 }
+                ?: return@map plan
+            val target = filledStepsAt(plan, price)
+            var result = plan
+            if (target > plan.filledSteps) {
+                val ladder = plan.ladder
+                for (index in plan.filledSteps until target) {
+                    val stepPrice = ladder.getOrNull(index) ?: continue
+                    newTrades += Trade(
+                        id = "${plan.id}_step${index + 1}_$now",
+                        coinId = plan.coinId,
+                        symbol = plan.symbol,
+                        name = plan.name,
+                        entryPrice = stepPrice,
+                        amountUsd = plan.stepUsd,
+                        openedAt = now,
+                        takeProfitPct = plan.takeProfitPct,
+                        stopLossPct = plan.stopLossPct,
+                        feePct = plan.feePct,
+                        note = "پله ${index + 1} از ${plan.steps}"
+                    )
+                }
+                messages += "${plan.name}: پله‌ی ${plan.filledSteps + 1} تا ${target} از ${plan.steps} خریداری شد."
+                result = plan.copy(filledSteps = target, lastFillAt = now)
+            }
+            if (result.isActive && planShouldCancel(result, price)) {
+                messages += "${plan.name}: قیمت از کف محدوده و حد ضرر هم پایین‌تر رفت؛ پله‌های باقی‌مانده لغو شد."
+                result = result.copy(canceledAt = now, cancelReason = "عبور از حد ضرر محدوده")
+            }
+            result
+        }
+        if (newTrades.isNotEmpty()) write(context, all(context) + newTrades)
+        if (messages.isNotEmpty()) writePlans(context, updated)
+        return messages
+    }
+
+    /** ثبت خرید آزمایشی تازه (سفارش بازار) */
     fun buy(
         context: Context,
         coin: PumpScanner.PumpCoin,

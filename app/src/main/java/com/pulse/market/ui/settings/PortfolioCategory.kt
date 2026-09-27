@@ -58,15 +58,20 @@ fun PortfolioCategory(persian: Boolean) {
     val scope = rememberCoroutineScope()
     var trades by remember { mutableStateOf<List<PaperTradeStore.Trade>>(emptyList()) }
     var prices by remember { mutableStateOf<Map<String, Double>>(emptyMap()) }
+    var plans by remember { mutableStateOf<List<PaperTradeStore.Plan>>(emptyList()) }
     var busy by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
 
     suspend fun refresh(showNotice: Boolean) {
         busy = true
         val loaded = withContext(Dispatchers.IO) { PaperTradeStore.all(context) }
-        val ids = loaded.filter { it.isOpen }.map { it.coinId }
+        val activePlans = withContext(Dispatchers.IO) { PaperTradeStore.plans(context) }
+        val ids = loaded.filter { it.isOpen }.map { it.coinId } +
+                activePlans.filter { it.isActive }.map { it.coinId }
         val fresh = if (ids.isEmpty()) emptyMap() else CoinPrices.fetch(ids)
         if (fresh.isNotEmpty()) {
+            val filled = withContext(Dispatchers.IO) { PaperTradeStore.settlePlans(context, fresh) }
+            if (filled.isNotEmpty() && showNotice) notice = filled.joinToString(" • ")
             val closed = withContext(Dispatchers.IO) { PaperTradeStore.settle(context, fresh) }
             if (closed.isNotEmpty() && showNotice) {
                 notice = closed.joinToString(" • ") { trade ->
@@ -79,6 +84,7 @@ fun PortfolioCategory(persian: Boolean) {
             notice = "قیمت تازه گرفته نشد؛ اینترنت را بررسی کن (نتیجه‌ها با آخرین قیمت موجود است)."
         }
         trades = withContext(Dispatchers.IO) { PaperTradeStore.all(context) }
+        plans = withContext(Dispatchers.IO) { PaperTradeStore.plans(context) }
         busy = false
     }
 
@@ -154,6 +160,85 @@ fun PortfolioCategory(persian: Boolean) {
                 "هنوز معامله‌ای ثبت نکرده‌ای. در بخش «پامپ‌های کریپتو» روی یک کوین بزن و از قسمت " +
                         "«خرید و فروش آزمایشی» یک خرید ثبت کن؛ از آن به بعد همین‌جا پیگیری می‌شود."
             )
+        }
+
+        val activePlans = plans.filter { it.isActive }
+        if (activePlans.isNotEmpty()) {
+            SectionHeader(
+                "طرح‌های خرید پله‌ای",
+                "سفارش‌های محدوده‌ای که هنوز کامل پر نشده‌اند."
+            )
+            for (plan in activePlans) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                    border = BorderStroke(1.dp, Color(0xFF3B82F6).copy(alpha = 0.4f)),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Text(
+                            "${plan.name} (${plan.symbol})",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        DetailLine(
+                            "پله‌های پرشده",
+                            "${Format.toPersianDigits("${plan.filledSteps}")} از " +
+                                    Format.toPersianDigits("${plan.steps}")
+                        )
+                        DetailLine(
+                            "محدوده‌ی ورود",
+                            "${QuoteText.priceWithUnit(plan.entryLow, "$", persian)} تا " +
+                                    QuoteText.priceWithUnit(plan.entryHigh, "$", persian)
+                        )
+                        DetailLine(
+                            "قیمت پله‌ها",
+                            plan.ladder.joinToString(" • ") {
+                                QuoteText.priceWithUnit(it, "$", persian)
+                            }
+                        )
+                        DetailLine("مبلغ هر پله", QuoteText.priceWithUnit(plan.stepUsd, "$", persian))
+                        plan.cancelPrice?.let {
+                            DetailLine("ابطال طرح زیر", QuoteText.priceWithUnit(it, "$", persian))
+                        }
+                        prices[plan.coinId]?.let {
+                            DetailLine("قیمت فعلی", QuoteText.priceWithUnit(it, "$", persian))
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    scope.launch {
+                                        withContext(Dispatchers.IO) {
+                                            PaperTradeStore.cancelPlan(context, plan.id)
+                                        }
+                                        refresh(showNotice = false)
+                                    }
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) { Text("لغو پله‌های باقی‌مانده", fontSize = 11.sp) }
+                            OutlinedButton(
+                                onClick = {
+                                    scope.launch {
+                                        withContext(Dispatchers.IO) {
+                                            PaperTradeStore.removePlan(context, plan.id)
+                                        }
+                                        refresh(showNotice = false)
+                                    }
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) { Text("حذف طرح", fontSize = 11.sp) }
+                        }
+                    }
+                }
+            }
         }
 
         if (open.isNotEmpty()) {

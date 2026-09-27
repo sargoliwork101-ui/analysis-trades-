@@ -110,6 +110,7 @@ fun PumpsCategory(
     var trades by remember { mutableStateOf<List<PaperTradeStore.Trade>>(emptyList()) }
     var tradeNotice by remember { mutableStateOf<String?>(null) }
     var nobitex by remember { mutableStateOf<Map<String, NobitexMarkets.Result>>(emptyMap()) }
+    var plans by remember { mutableStateOf<List<PaperTradeStore.Plan>>(emptyList()) }
 
     LaunchedEffect(Unit) {
         val loaded = withContext(Dispatchers.IO) { PumpAiConfigStore.load(context) }
@@ -154,10 +155,13 @@ fun PumpsCategory(
         val cached = PumpScanner.cached(context)
         // با باز شدن صفحه هم حد سود/ضرر با آخرین قیمت کش‌شده بررسی می‌شود.
         trades = withContext(Dispatchers.IO) {
-            cached?.coins?.mapNotNull { coin -> coin.price?.let { coin.id to it } }?.toMap()
-                ?.let { PaperTradeStore.settle(context, it) }
+            cached?.coins?.mapNotNull { coin -> coin.price?.let { coin.id to it } }?.toMap()?.let {
+                PaperTradeStore.settlePlans(context, it)
+                PaperTradeStore.settle(context, it)
+            }
             PaperTradeStore.all(context)
         }
+        plans = withContext(Dispatchers.IO) { PaperTradeStore.plans(context) }
         scan = cached
         if (cached == null) {
             busy = true
@@ -182,13 +186,14 @@ fun PumpsCategory(
                 scan = res
                 previousMatches = withContext(Dispatchers.IO) { PumpScanner.previousMatches(context) }
                 // حد سود/حد ضرر معامله‌های آزمایشی با قیمت‌های تازه بررسی می‌شود.
-                val closed = withContext(Dispatchers.IO) {
-                    val prices = res.coins.mapNotNull { coin ->
-                        coin.price?.let { coin.id to it }
-                    }.toMap()
-                    PaperTradeStore.settle(context, prices)
-                }
+                val prices = res.coins.mapNotNull { coin ->
+                    coin.price?.let { coin.id to it }
+                }.toMap()
+                val filled = withContext(Dispatchers.IO) { PaperTradeStore.settlePlans(context, prices) }
+                val closed = withContext(Dispatchers.IO) { PaperTradeStore.settle(context, prices) }
                 trades = withContext(Dispatchers.IO) { PaperTradeStore.all(context) }
+                plans = withContext(Dispatchers.IO) { PaperTradeStore.plans(context) }
+                if (filled.isNotEmpty()) tradeNotice = filled.joinToString(" • ")
                 if (closed.isNotEmpty()) {
                     tradeNotice = closed.joinToString(" • ") { trade ->
                         "${trade.name}: ${trade.closeReason?.label ?: "بسته شد"} — " +
@@ -651,6 +656,28 @@ fun PumpsCategory(
                     trades = withContext(Dispatchers.IO) { PaperTradeStore.all(context) }
                     tradeNotice = if (opened == null) "ثبت خرید آزمایشی ممکن نشد (قیمت یا مبلغ نامعتبر)"
                     else "خرید آزمایشی ${opened.name} ثبت شد."
+                }
+            },
+            onPlan = { total, high, low, steps, takeProfit, stopLoss, fee ->
+                scope.launch {
+                    val created = withContext(Dispatchers.IO) {
+                        PaperTradeStore.planBuy(
+                            context, selected, total, high, low, steps, takeProfit, stopLoss, fee
+                        )
+                    }
+                    trades = withContext(Dispatchers.IO) { PaperTradeStore.all(context) }
+                    plans = withContext(Dispatchers.IO) { PaperTradeStore.plans(context) }
+                    tradeNotice = if (created == null) "ثبت طرح ممکن نشد؛ مبلغ و محدوده را بررسی کن"
+                    else "طرح خرید پله‌ای ${created.name} ثبت شد " +
+                            "(${Format.toPersianDigits("${created.filledSteps}")} پله همین حالا پر شد)."
+                }
+            },
+            activePlans = plans.filter { it.coinId == selected.id && it.isActive },
+            onCancelPlan = { planId ->
+                scope.launch {
+                    withContext(Dispatchers.IO) { PaperTradeStore.cancelPlan(context, planId) }
+                    plans = withContext(Dispatchers.IO) { PaperTradeStore.plans(context) }
+                    tradeNotice = "پله‌های باقی‌مانده‌ی طرح لغو شد."
                 }
             },
             onSell = {

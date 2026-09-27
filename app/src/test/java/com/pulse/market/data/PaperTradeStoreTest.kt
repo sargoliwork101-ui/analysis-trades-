@@ -119,4 +119,63 @@ class PaperTradeStoreTest {
         val fees = PaperTradeStore.totalFees(listOf(open, closed), mapOf("sol" to 110.0))
         assertEquals((0.4 + 0.43912) * 2, fees, 0.0001)
     }
+
+    private fun plan(
+        high: Double = 100.0,
+        low: Double = 80.0,
+        steps: Int = 3,
+        sl: Double? = 10.0,
+        filled: Int = 0
+    ) = PaperTradeStore.Plan(
+        id = "p1",
+        coinId = "sol",
+        symbol = "SOL",
+        name = "Solana",
+        totalUsd = 300.0,
+        entryHigh = high,
+        entryLow = low,
+        steps = steps,
+        filledSteps = filled,
+        takeProfitPct = 12.0,
+        stopLossPct = sl,
+        feePct = 0.2,
+        createdAt = 1L
+    )
+
+    @Test
+    fun ladderSplitsTheEntryRangeFromTopToBottom() {
+        assertEquals(listOf(100.0, 90.0, 80.0), PaperTradeStore.ladderPrices(100.0, 80.0, 3))
+        assertEquals(listOf(100.0), PaperTradeStore.ladderPrices(100.0, 80.0, 1))
+        // ترتیب ورودی مهم نیست؛ همیشه از سقف به کف
+        assertEquals(listOf(100.0, 80.0), PaperTradeStore.ladderPrices(80.0, 100.0, 2))
+        assertEquals(100.0, plan().stepUsd, 0.0001)
+    }
+
+    @Test
+    fun stepsFillOnlyWhenPriceReachesThem() {
+        val p = plan()
+        assertEquals(0, PaperTradeStore.filledStepsAt(p, 105.0))
+        assertEquals(1, PaperTradeStore.filledStepsAt(p, 100.0))
+        assertEquals(2, PaperTradeStore.filledStepsAt(p, 88.0))
+        assertEquals(3, PaperTradeStore.filledStepsAt(p, 70.0))
+        // پله‌ی پرشده دوباره باز نمی‌گردد
+        assertEquals(2, PaperTradeStore.filledStepsAt(p.copy(filledSteps = 2), 99.0))
+    }
+
+    @Test
+    fun planIsCancelledBelowTheRangeStopLoss() {
+        val p = plan()
+        assertEquals(72.0, p.cancelPrice!!, 0.0001)
+        assertTrue(!PaperTradeStore.planShouldCancel(p, 75.0))
+        assertTrue(PaperTradeStore.planShouldCancel(p, 72.0))
+        assertTrue(PaperTradeStore.planShouldCancel(p, 60.0))
+        assertTrue(!PaperTradeStore.planShouldCancel(plan(sl = null), 1.0))
+    }
+
+    @Test
+    fun planStaysActiveUntilAllStepsFillOrItIsCancelled() {
+        assertTrue(plan().isActive)
+        assertTrue(!plan(filled = 3).isActive)
+        assertTrue(!plan().copy(canceledAt = 9L).isActive)
+    }
 }
