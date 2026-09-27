@@ -1,4 +1,4 @@
-# 🔍 ممیزی امنیت و مهندسی — نبض بازار (تا نسخه‌ی ۱٫۲۶)
+# 🔍 ممیزی امنیت و مهندسی — نبض بازار (تا نسخه‌ی ۱٫۲۷)
 
 این سند نتیجه‌ی خواندن کامل کد برنامه (بیش از ۷ هزار خط کاتلین) و اصلاحاتی است
 که در همین نسخه اعمال شد. هر مورد سه بخش دارد: **یافته**، **چرا مهم است** و **چه شد**.
@@ -381,3 +381,7 @@ Commit نهایی `8246f9d65165fbc3ac9575c1a47fe57b4b0296a2` در GitHub Actions
 اجرای CI نسخه‌ی ۱٫۲۵ نشان داد حذف keep سراسری به‌تنهایی کافی نیست و APK با NIO filesystem کامل `2,355,474` بایت است؛ gate جدید عمداً artifact را پیش از امضا رد کرد. برنامه از jsoup فقط برای `parse(String)` و selectorهای CSS استفاده می‌کند، نه APIهای فایل/Path. بنابراین jsoup امن `1.23.2` حفظ شد اما flavor کامل NIO با desugaring استاندارد `2.1.5` برای stream/function جایگزین شد تا پیاده‌سازی filesystem بلااستفاده داخل APK نیاید.
 
 برای اینکه این بهینه‌سازی سازگاری Android 6 را قربانی نکند، CI اکنون رشته‌های type در تمام `classes*.dex` خروجی release را بررسی می‌کند و در صورت باقی‌ماندن reference مستقیم به `java.nio.file`، `SeekableByteChannel`، `java.util.stream`، `java.util.function` یا `java.util.Optional` build را پیش از امضا رد می‌کند؛ APIهای لازم باید توسط desugaring به فضای `j$` بازنویسی شده باشند. نسخه به `1.26` و `versionCode=27` افزایش یافت؛ UI و منطق محصول بدون تغییر مانده‌اند.
+
+## ۱۸) حذف entry point فایل jsoup در نسخه‌ی ۱٫۲۷
+
+کنترل DEX نسخه‌ی ۱٫۲۶ به‌درستی reference باقی‌مانده را پیش از artifact متوقف کرد. فراخوانی HTML از facade عمومی `Jsoup` به `Parser.parse(String, baseUri)` منتقل شد؛ همان parser و همان پشتیبانی CSS selector استفاده می‌شود، اما R8 دیگر مجبور نیست overloadهای عمومی file/Path را در مسیر reachability نگه دارد. پیام failure کنترل DEX نیز اکنون نام referenceهای باقی‌مانده را مستقیماً در annotation ثبت می‌کند. نسخه به `1.27` و `versionCode=28` افزایش یافت؛ خروجی UI و منطق استخراج HTML تغییر نکرده است.

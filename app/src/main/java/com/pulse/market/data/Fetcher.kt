@@ -11,7 +11,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
-import org.jsoup.Jsoup
+import org.jsoup.parser.Parser
 import java.net.URI
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
@@ -182,7 +182,8 @@ object Fetcher {
         return try {
             val urls = singleUrls(source, sym.code)
             val body = getAny(urls, source)
-            val doc = Jsoup.parse(body, urls.first())
+            // مسیر String از نگه‌داشتن APIهای بلااستفاده‌ی file/Path در jsoup جلوگیری می‌کند.
+            val doc = Parser.parse(body, urls.first())
             val selector = source.cssSelector
             val el = if (selector.isNullOrBlank()) {
                 error("سلکتور CSS برای منبع HTML تعریف نشده")

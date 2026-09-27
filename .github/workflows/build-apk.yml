@@ -148,8 +148,8 @@ jobs:
             | grep -E 'Ljava/(nio/file/|util/(stream/|function/|Optional;))|Ljava/nio/channels/SeekableByteChannel;' \
             | sort -u || true)
           if [ -n "$UNSAFE_REFS" ]; then
-            echo "::error::Release DEX still references APIs unavailable on Android 6:"
-            printf '%s\n' "$UNSAFE_REFS"
+            UNSAFE_SUMMARY=${UNSAFE_REFS//$'\n'/, }
+            echo "::error::Release DEX still references APIs unavailable on Android 6: $UNSAFE_SUMMARY"
             exit 1
           fi
 
