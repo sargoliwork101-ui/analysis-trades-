@@ -86,6 +86,7 @@ Two built-in ways; both give the **USD** price of one troy ounce:
 - ⚠️ Versions 1.0–1.3 were signed with the CI runner's throwaway key; installing **1.4** over them needs one uninstall/reinstall. After 1.4 that is no longer needed.
 
 **Version history**
+- **1.37** — AI service errors are now parsed out of the JSON body and explained in Persian (Gemini geo-restriction, invalid/expired key, wrong model name, quota, permission), the captured server message grew from 60 to 240 characters, and the Google preset hint documents the regional block.
 - **1.36** — audit pass: fixes BOOT_COMPLETED never reaching the boot receiver (it must be exported, otherwise widgets stayed stale after a reboot), guards the live service against ForegroundServiceStartNotAllowedException crashes, null-guards NotificationManager in the alert engine and live service, creates the notification channel only once, and trims the pump cache so sparklines are stored for the top 60 coins only.
 - **1.35** — adds an "AI connection test" button with a precise result message, actionable error texts (401/403/404/429, DNS, TLS, timeout, blocked network) that include a short redacted server reply, raises the AI request timeout to 90s, and sends Anthropic's native headers alongside Bearer.
 - **1.34** — subsets the Vazirmatn fonts to the Persian/Latin characters the app actually uses, cutting about 170 KB from the APK and bringing it back under the 2 MiB budget.

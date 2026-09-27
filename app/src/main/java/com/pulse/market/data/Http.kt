@@ -202,8 +202,9 @@ object Http {
             }
         }
         if (!resp.isSuccessful) {
+            // ۶۰ کاراکتر برای دیدن پیام واقعی سرویس (مثل خطاهای Google/OpenAI) کم بود.
             val detail = if (text.isNotBlank()) {
-                " — ${SensitiveText.redact(text.trim(), 60)}"
+                " — ${SensitiveText.redact(text.trim(), 240)}"
             } else ""
             throw HttpException(resp.code, "HTTP ${resp.code}$detail")
         }

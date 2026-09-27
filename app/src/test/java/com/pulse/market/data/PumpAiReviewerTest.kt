@@ -119,4 +119,28 @@ class PumpAiReviewerTest {
         )
         assertTrue(!leaky.contains("secret.example"))
     }
+
+    @Test
+    fun googleGeoBlockAndKeyErrorsBecomeReadableMessages() {
+        val geo = PumpAiReviewer.httpErrorText(
+            Http.HttpException(
+                400,
+                """HTTP 400 — {"error":{"code":400,"message":"User location is not supported for the API use.","status":"FAILED_PRECONDITION"}}"""
+            )
+        )
+        assertTrue(geo.contains("محدودیت جغرافیایی"))
+
+        val badKey = PumpAiReviewer.httpErrorText(
+            Http.HttpException(
+                400,
+                """HTTP 400 — {"error":{"message":"API key not valid. Please pass a valid API key."}}"""
+            )
+        )
+        assertTrue(badKey.contains("کلید API معتبر نیست"))
+
+        assertEquals(
+            "API key not valid.",
+            PumpAiReviewer.serviceMessage("""{"error":{"message":"API key not valid."}}""")
+        )
+    }
 }

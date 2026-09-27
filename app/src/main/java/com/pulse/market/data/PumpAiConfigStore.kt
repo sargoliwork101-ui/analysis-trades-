@@ -58,7 +58,7 @@ data class PumpAiConfig(
                 title = "Gemini (گوگل)",
                 endpoint = "https://generativelanguage.googleapis.com/v1beta/openai",
                 model = "gemini-2.5-flash",
-                hint = "کلید رایگان از Google AI Studio گرفته می‌شود؛ مسیر سازگار با OpenAI گوگل استفاده می‌شود.",
+                hint = "کلید رایگان از aistudio.google.com؛ مسیر سازگار با OpenAI گوگل استفاده می‌شود. توجه: Gemini در ایران مسدود است و بدون تغییر مسیر شبکه، حتی کلید درست هم خطای «محدودیت جغرافیایی» می‌گیرد.",
                 providerSearch = false
             ),
             Preset(

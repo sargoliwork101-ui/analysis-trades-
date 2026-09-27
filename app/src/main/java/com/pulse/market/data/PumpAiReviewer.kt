@@ -116,7 +116,8 @@ object PumpAiReviewer {
 
     /** پیام خطای HTTP همراه با راهنمای رفع؛ متن سرویس هم (کوتاه و پاک‌سازی‌شده) نمایش داده می‌شود. */
     internal fun httpErrorText(http: Http.HttpException): String {
-        val detail = http.message.orEmpty().substringAfter("—", "").trim()
+        val detail = serviceMessage(http.message.orEmpty().substringAfter("—", "").trim())
+        knownServiceProblem(detail)?.let { return it }
         val hint = when (http.code) {
             400 -> "درخواست پذیرفته نشد؛ معمولاً نام مدل اشتباه است یا مدل این پارامترها را قبول ندارد"
             401 -> "کلید API پذیرفته نشد (۴۰۱) — کلید را دوباره کپی کن و مطمئن شو مربوط به همین سرویس است"
@@ -129,6 +130,46 @@ object PumpAiReviewer {
             else -> "سرویس AI پاسخ HTTP ${http.code} داد"
         }
         return if (detail.isBlank()) hint else "$hint — پاسخ سرویس: $detail"
+    }
+
+    /** از بدنه‌ی JSON خطا فقط متن قابل‌فهم بیرون کشیده می‌شود (Google/OpenAI/Anthropic). */
+    internal fun serviceMessage(raw: String): String {
+        if (raw.isBlank()) return ""
+        val parsed = runCatching { json.parseToJsonElement(raw) as? JsonObject }.getOrNull()
+        val node = (parsed?.get("error") as? JsonObject) ?: parsed
+        val text = node?.let { obj ->
+            (obj["message"] as? JsonPrimitive)?.contentOrNull
+                ?: (obj["detail"] as? JsonPrimitive)?.contentOrNull
+        }
+        return (text ?: raw).replace(Regex("\\s+"), " ").trim().take(200)
+    }
+
+    /**
+     * خطاهای پرتکرارِ شناخته‌شده که پیام خام‌شان برای کاربر گویا نیست.
+     * مهم‌ترینشان محدودیت جغرافیایی Gemini است که کلید درست هم با آن کار نمی‌کند.
+     */
+    internal fun knownServiceProblem(detail: String): String? {
+        val lower = detail.lowercase(Locale.ROOT)
+        return when {
+            lower.contains("user location is not supported") ||
+                    lower.contains("location is not supported") ->
+                "❗ این سرویس (Gemini/Google) از کشور تو در دسترس نیست — کلید درست است ولی " +
+                        "درخواست به‌خاطر محدودیت جغرافیایی رد می‌شود. با تغییر مسیر شبکه به یک کشور " +
+                        "پشتیبانی‌شده، یا با یک سرویس واسط مثل OpenRouter امتحان کن."
+            lower.contains("api key not valid") || lower.contains("api_key_invalid") ->
+                "کلید API معتبر نیست — مطمئن شو کلید را از Google AI Studio کپی کرده‌ای و " +
+                        "فاصله یا کاراکتر اضافه‌ای در آن نمانده است."
+            lower.contains("api key expired") ->
+                "کلید API منقضی شده است؛ از Google AI Studio یک کلید تازه بساز."
+            lower.contains("is not found for api version") || lower.contains("model not found") ->
+                "نام مدل برای این سرویس درست نیست — مثلاً برای Gemini از gemini-2.5-flash " +
+                        "یا gemini-2.0-flash استفاده کن."
+            lower.contains("quota") || lower.contains("rate limit") ->
+                "سهمیه یا محدودیت درخواست این کلید پر شده است؛ کمی بعد دوباره امتحان کن."
+            lower.contains("permission") && lower.contains("denied") ->
+                "این کلید اجازه‌ی استفاده از این مدل/سرویس را ندارد."
+            else -> null
+        }
     }
 
     /** خطای شبکه‌ای؛ پیام خام ممکن است آدرس یا کلید داشته باشد، پس دسته‌بندی می‌شود. */
