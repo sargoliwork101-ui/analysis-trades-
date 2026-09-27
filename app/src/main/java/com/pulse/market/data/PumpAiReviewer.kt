@@ -59,7 +59,7 @@ object PumpAiReviewer {
             val gemini = isGeminiNative(config.endpoint)
             val endpoint = if (gemini) geminiEndpoint(config.endpoint, config.model)
             else chatCompletionsEndpoint(config.endpoint)
-            val payload = if (gemini) geminiBody(systemPrompt(), userPrompt(coin), 1200)
+            val payload = if (gemini) geminiBody(systemPrompt(), userPrompt(coin), 4096)
             else requestBody(config, coin, endpoint)
             val outer = Http.execute(
                 buildRequest(config, endpoint, payload),
@@ -68,7 +68,7 @@ object PumpAiReviewer {
                 callTimeoutSeconds = REQUEST_TIMEOUT_SECONDS
             )
             val content = (if (gemini) extractGeminiContent(outer) else extractAssistantContent(outer))
-                ?: return@withContext Outcome(error = "پاسخ سرویس AI متن قابل‌خواندن نداشت")
+                ?: return@withContext Outcome(error = emptyContentReason(outer))
             Outcome(review = parseReview(content, config.providerSearch))
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -161,15 +161,49 @@ object PumpAiReviewer {
             })
         }
 
-    /** متن پاسخ مسیر بومی Gemini: candidates[0].content.parts[].text */
+    /**
+     * متن پاسخ مسیر بومی Gemini: candidates[0].content.parts[].text
+     * بخش‌های «thought» (زنجیره‌ی تفکر مدل‌های 2.5) پاسخ نهایی نیستند و نادیده می‌روند.
+     */
     internal fun extractGeminiContent(raw: String): String? {
         val root = runCatching { json.parseToJsonElement(raw) as? JsonObject }.getOrNull() ?: return null
         val first = (root["candidates"] as? JsonArray)?.firstOrNull() as? JsonObject ?: return null
         val parts = (first["content"] as? JsonObject)?.get("parts") as? JsonArray ?: return null
-        val text = parts.mapNotNull { part ->
-            ((part as? JsonObject)?.get("text") as? JsonPrimitive)?.contentOrNull
+        val text = parts.mapNotNull { element ->
+            val part = element as? JsonObject ?: return@mapNotNull null
+            val isThought = (part["thought"] as? JsonPrimitive)?.contentOrNull?.equals("true", true) == true
+            if (isThought) null else (part["text"] as? JsonPrimitive)?.contentOrNull
         }.joinToString("\n").trim()
         return text.takeIf { it.isNotBlank() }
+    }
+
+    /**
+     * چرا پاسخ متن نداشت؟ متداول‌ترین حالت، تمام‌شدن سقف توکن روی مدل‌های «thinking»
+     * است (کل بودجه صرف تفکر می‌شود و بخش متن خالی می‌ماند).
+     */
+    internal fun emptyContentReason(raw: String): String {
+        val root = runCatching { json.parseToJsonElement(raw) as? JsonObject }.getOrNull()
+            ?: return "پاسخ سرویس قابل خواندن نبود (JSON معتبر نبود)"
+        val blockReason = ((root["promptFeedback"] as? JsonObject)?.get("blockReason")
+                as? JsonPrimitive)?.contentOrNull
+        if (!blockReason.isNullOrBlank()) {
+            return "درخواست توسط فیلتر ایمنی سرویس رد شد ($blockReason)"
+        }
+        val candidate = (root["candidates"] as? JsonArray)?.firstOrNull() as? JsonObject
+        val finish = ((candidate?.get("finishReason") ?: candidate?.get("finish_reason"))
+                as? JsonPrimitive)?.contentOrNull.orEmpty()
+        return when {
+            finish.equals("MAX_TOKENS", true) || finish.equals("length", true) ->
+                "سقف طول پاسخ پر شد و مدل متنی برنگرداند — روی مدل‌های «thinking» مثل gemini-2.5 " +
+                        "این اتفاق می‌افتد؛ مدل سبک‌تر (مثل gemini-2.0-flash) را امتحان کن"
+            finish.equals("SAFETY", true) || finish.equals("content_filter", true) ->
+                "پاسخ توسط فیلتر ایمنی سرویس حذف شد"
+            finish.equals("RECITATION", true) ->
+                "سرویس پاسخ را به‌خاطر شباهت به محتوای دارای حق نشر حذف کرد"
+            candidate == null -> "سرویس هیچ پاسخی (candidate) برنگرداند؛ نام مدل را بررسی کن"
+            finish.isNotBlank() -> "سرویس بدون متن پاسخ داد (دلیل پایان: $finish)"
+            else -> "سرویس پاسخ داد ولی متنی در آن نبود"
+        }
     }
 
     private fun hostOf(endpoint: String): String = runCatching {
@@ -281,7 +315,7 @@ object PumpAiReviewer {
         }.getOrNull()
             ?: return@withContext TestResult(false, "ساختن آدرس نهایی از روی این آدرس ممکن نشد")
         val payload = if (gemini) {
-            geminiBody("Answer with one short word.", "Reply with exactly: OK", 16)
+            geminiBody("Answer with one short word.", "Reply with exactly: OK", 512)
         } else buildJsonObject {
             put("model", config.model)
             put("max_tokens", 16)
@@ -307,7 +341,7 @@ object PumpAiReviewer {
                 message = if (content.isNotBlank()) {
                     "✅ اتصال برقرار شد — مدل «${config.model}» پاسخ داد: $shown"
                 } else {
-                    "⚠️ سرویس پاسخ داد ولی متنی برنگرداند؛ نام مدل را بررسی کن"
+                    "⚠️ " + emptyContentReason(raw)
                 }
             )
         } catch (cancelled: CancellationException) {
