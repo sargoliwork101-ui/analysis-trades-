@@ -86,6 +86,7 @@ Two built-in ways; both give the **USD** price of one troy ounce:
 - ⚠️ Versions 1.0–1.3 were signed with the CI runner's throwaway key; installing **1.4** over them needs one uninstall/reinstall. After 1.4 that is no longer needed.
 
 **Version history**
+- **1.32** — adds ready-made AI provider presets (Gemini, Claude, OpenAI, OpenRouter) to the pumps section plus a provider web-search toggle, supports Google's `/v1beta/openai` compatible path, fixes the API key being lost while migrating from 1.18, and null-guards `NotificationManager` in pump alerts.
 - **1.31** — replaces API-24 `Iterable.forEach` call sites with equivalent ordered `for` loops, so Android 6 compatibility no longer depends on the standard stream desugaring bundle; UI output and execution order are unchanged.
 - **1.30** — preserves full custom CSS-selector semantics with deterministic non-Stream DOM traversal, allowing the Android 6 build to use the minimal function/Optional desugaring flavor instead of bundling unused stream implementations.
 - **1.29** — removes unnecessary annotation/inner-class retention from the app's R8 rules and packages only Persian plus English fallback resources, reducing metadata/locales without changing RTL presentation or runtime behavior.

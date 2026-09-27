@@ -327,6 +327,38 @@ fun PumpsCategory(
             if (aiConfig.enabled) {
                 RowDivider()
                 InnerRow {
+                    Text(
+                        "تنظیمات پیش‌فرض سرویس",
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        for (preset in PumpAiConfig.PRESETS) {
+                            FilterChip(
+                                selected = aiConfig.matches(preset),
+                                onClick = {
+                                    saveAiConfig(
+                                        aiConfig.copy(
+                                            endpoint = preset.endpoint,
+                                            model = preset.model,
+                                            providerSearch = preset.providerSearch
+                                        )
+                                    )
+                                },
+                                label = { Text(preset.title, fontSize = 11.5.sp) }
+                            )
+                        }
+                    }
+                    val activePreset = PumpAiConfig.PRESETS.firstOrNull { aiConfig.matches(it) }
+                    Hint(
+                        activePreset?.hint
+                            ?: "با انتخاب هر سرویس، آدرس API و نام مدل خودکار پر می‌شود؛ فقط کلید خودت را وارد کن. " +
+                            "می‌توانی مقادیر را دستی هم تغییر بدهی."
+                    )
                     OutlinedTextField(
                         value = aiConfig.endpoint,
                         onValueChange = { saveAiConfig(aiConfig.copy(endpoint = it.take(500))) },
@@ -359,6 +391,9 @@ fun PumpsCategory(
                     if (aiConfig.endpoint.isNotBlank() && !aiConfig.endpointValid) {
                         Hint("آدرس باید HTTP(S) معتبر، بدون نام کاربری، query یا fragment باشد.")
                     }
+                    if (aiConfig.model.isBlank()) {
+                        Hint("نام مدل خالی است؛ یکی از سرویس‌های بالا را بزن یا نام مدل را دستی بنویس.")
+                    }
                     if (aiStorageError) {
                         Hint("⚠️ Android Keystore کلید را ذخیره نکرد؛ برای امنیت، کلید روی دیسک نوشته نشد.")
                     }
@@ -368,6 +403,14 @@ fun PumpsCategory(
                                 "برای خبر، جست‌وجوی وب خود سرویس درخواست می‌شود؛ این قابلیت باید توسط مدل/API پشتیبانی شود."
                     )
                 }
+                RowDivider()
+                SwitchRow(
+                    "درخواست جست‌وجوی وب از سرویس",
+                    if (aiConfig.providerSearch)
+                        "برای OpenAI و OpenRouter افزونه‌ی جست‌وجو فعال می‌شود؛ سرویس‌های دیگر فقط بر اساس قابلیت خود مدل جست‌وجو می‌کنند."
+                    else "خاموش؛ مدل فقط با داده‌های همین صفحه نظر می‌دهد و خبر تازه جست‌وجو نمی‌کند.",
+                    aiConfig.providerSearch
+                ) { saveAiConfig(aiConfig.copy(providerSearch = it)) }
             }
         }
 

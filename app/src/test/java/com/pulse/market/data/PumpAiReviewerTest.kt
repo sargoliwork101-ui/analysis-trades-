@@ -24,6 +24,35 @@ class PumpAiReviewerTest {
     }
 
     @Test
+    fun endpointKeepsGoogleCompatiblePath() {
+        assertEquals(
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+            PumpAiReviewer.chatCompletionsEndpoint("https://generativelanguage.googleapis.com/v1beta/openai")
+        )
+        assertEquals(
+            "https://api.anthropic.com/v1/chat/completions",
+            PumpAiReviewer.chatCompletionsEndpoint("https://api.anthropic.com/v1")
+        )
+    }
+
+    @Test
+    fun everyPresetBuildsReadyConfigAndValidEndpoint() {
+        for (preset in PumpAiConfig.PRESETS) {
+            val config = PumpAiConfig(
+                enabled = true,
+                endpoint = preset.endpoint,
+                model = preset.model
+            )
+            assertTrue(preset.id, config.isReady)
+            assertTrue(preset.id, config.matches(preset))
+            assertTrue(
+                preset.id,
+                PumpAiReviewer.chatCompletionsEndpoint(preset.endpoint).endsWith("/chat/completions")
+            )
+        }
+    }
+
+    @Test
     fun reviewParsesCautiousResultAndOnlyValidNewsLinks() {
         val review = PumpAiReviewer.parseReview(
             """

@@ -31,7 +31,62 @@ data class PumpAiConfig(
     val isReady: Boolean
         get() = endpointValid && model.isNotBlank() && !insecureKeyTransport
 
+    /** آیا این پیکربندی دقیقاً روی یکی از سرویس‌های آماده تنظیم شده است؟ */
+    fun matches(preset: Preset): Boolean =
+        endpoint.trim().trimEnd('/').equals(preset.endpoint, ignoreCase = true) &&
+                model.trim().equals(preset.model, ignoreCase = true)
+
+    /** تنظیمات پیش‌فرض یک سرویس آماده (Gemini/Claude/OpenAI) */
+    data class Preset(
+        val id: String,
+        val title: String,
+        val endpoint: String,
+        val model: String,
+        val hint: String,
+        /** آیا جست‌وجوی وب سمت سرویس برای این ارائه‌دهنده معنا دارد؟ */
+        val providerSearch: Boolean
+    )
+
     companion object {
+        /**
+         * سرویس‌های آماده؛ همه از مسیر سازگار با OpenAI (chat/completions) و هدر
+         * Authorization: Bearer پشتیبانی می‌کنند، پس نیازی به کد اختصاصی نیست.
+         */
+        val PRESETS: List<Preset> = listOf(
+            Preset(
+                id = "gemini",
+                title = "Gemini (گوگل)",
+                endpoint = "https://generativelanguage.googleapis.com/v1beta/openai",
+                model = "gemini-2.5-flash",
+                hint = "کلید رایگان از Google AI Studio گرفته می‌شود؛ مسیر سازگار با OpenAI گوگل استفاده می‌شود.",
+                providerSearch = false
+            ),
+            Preset(
+                id = "claude",
+                title = "Claude (کلاد)",
+                endpoint = "https://api.anthropic.com/v1",
+                model = "claude-sonnet-4-5",
+                hint = "کلید از console.anthropic.com؛ Anthropic مسیر سازگار با OpenAI را پشتیبانی می‌کند.",
+                providerSearch = false
+            ),
+            Preset(
+                id = "openai",
+                title = "OpenAI",
+                endpoint = "https://api.openai.com/v1",
+                model = "gpt-4o-mini",
+                hint = "کلید از platform.openai.com؛ جست‌وجوی وب سرویس هم پشتیبانی می‌شود.",
+                providerSearch = true
+            ),
+            Preset(
+                id = "openrouter",
+                title = "OpenRouter",
+                endpoint = "https://openrouter.ai/api/v1",
+                model = "openai/gpt-4o-mini",
+                hint = "یک کلید برای چند مدل؛ افزونه‌ی جست‌وجوی وب OpenRouter فعال می‌شود.",
+                providerSearch = true
+            )
+        )
+
         fun isValidEndpoint(value: String): Boolean = runCatching {
             val uri = URI(value.trim())
             (uri.scheme.equals("https", true) || uri.scheme.equals("http", true)) &&
@@ -57,7 +112,13 @@ object PumpAiConfigStore {
             // مهاجرت یک‌باره از ۱٫۱۸: مقدار قدیمی plaintext خوانده و بلافاصله
             // با Keystore بازنویسی می‌شود؛ در شکست رمزگذاری، plaintext حذف می‌شود.
             val legacyPlainText = obj.optString("apiKey")
-            val apiKey = PumpAiSecretCipher.decrypt(cipherText) ?: legacyPlainText
+            // decrypt برای ciphertext خالی رشته‌ی خالی برمی‌گرداند؛ پس فقط مقدار
+            // واقعاً رمزگشایی‌شده جایگزین plaintext قدیمی می‌شود، وگرنه کلید کاربر
+            // در مهاجرت از نسخه‌ی ۱٫۱۸ گم می‌شد.
+            val decrypted = PumpAiSecretCipher.decrypt(cipherText)?.takeIf { it.isNotEmpty() }
+            val apiKey = decrypted ?: legacyPlainText
+            // هر مقدار plaintext باقی‌مانده روی دیسک باید با نسخه‌ی رمزشده بازنویسی شود.
+            val needsMigration = legacyPlainText.isNotEmpty()
             val config = sanitize(
                 PumpAiConfig(
                     enabled = obj.optBoolean("enabled", false),
@@ -67,7 +128,7 @@ object PumpAiConfigStore {
                     providerSearch = obj.optBoolean("providerSearch", true)
                 )
             )
-            if (legacyPlainText.isNotEmpty() && !save(context, config)) {
+            if (needsMigration && !save(context, config)) {
                 // اگر Keystore در دسترس نبود، پیکربندی غیرحساس را نگه دار ولی plaintext را حذف کن.
                 val withoutKey = config.copy(apiKey = "")
                 save(context, withoutKey)

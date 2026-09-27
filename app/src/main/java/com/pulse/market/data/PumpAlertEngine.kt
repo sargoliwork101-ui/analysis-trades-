@@ -68,10 +68,11 @@ object PumpAlertEngine {
     ): Boolean {
         if (!cfg.pumpAlertEnabled || scan.error != null || scan.at <= 0L) return false
         ensureChannel(context)
-        val manager = context.getSystemService(NotificationManager::class.java)
+        // روی بعضی دستگاه‌ها/پروفایل‌ها این سرویس در دسترس نیست و مقدار null برمی‌گرداند.
+        val manager: NotificationManager? = context.getSystemService(NotificationManager::class.java)
         if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return false
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-            manager.getNotificationChannel(CHANNEL_ID)?.importance == NotificationManager.IMPORTANCE_NONE
+            manager?.getNotificationChannel(CHANNEL_ID)?.importance == NotificationManager.IMPORTANCE_NONE
         ) return false
 
         val safeKey = ownerKey.take(100)
@@ -165,10 +166,9 @@ object PumpAlertEngine {
             .setAutoCancel(true)
             .setContentIntent(open)
             .build()
-        return runCatching {
-            context.getSystemService(NotificationManager::class.java)
-                .notify(notificationId(ownerKey), notification)
-        }.isSuccess
+        val manager: NotificationManager = context.getSystemService(NotificationManager::class.java)
+            ?: return false
+        return runCatching { manager.notify(notificationId(ownerKey), notification) }.isSuccess
     }
 
     private fun ensureChannel(context: Context) {

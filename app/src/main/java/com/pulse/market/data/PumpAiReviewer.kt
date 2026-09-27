@@ -25,6 +25,9 @@ object PumpAiReviewer {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val allowedRecommendations = PumpScanner.Recommendation.entries.map { it.label }
 
+    /** مسیرهایی مثل /v1، /v1beta یا /v2alpha که فقط «chat/completions» کم دارند. */
+    private val VERSIONED_PATH = Regex("(?i)/v\\d+(?:beta|alpha)?\\d*$")
+
     data class NewsItem(
         val title: String,
         val url: String,
@@ -93,7 +96,9 @@ object PumpAiReviewer {
         val clean = raw.trim().trimEnd('/')
         return when {
             clean.endsWith("/chat/completions", ignoreCase = true) -> clean
-            clean.endsWith("/v1", ignoreCase = true) -> "$clean/chat/completions"
+            // «…/v1»، «…/v1beta/openai» (Gemini) و هر مسیر نسخه‌دار دیگری آماده‌ی افزودن مسیر نهایی است.
+            clean.endsWith("/openai", ignoreCase = true) ||
+                    VERSIONED_PATH.containsMatchIn(clean) -> "$clean/chat/completions"
             else -> "$clean/v1/chat/completions"
         }
     }
