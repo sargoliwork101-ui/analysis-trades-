@@ -982,7 +982,7 @@ private fun PaperWalletCard(
     val closed = trades.filterNot { it.isOpen }.take(10)
     SectionHeader(
         "کیف آزمایشی",
-        "خرید و فروش بدون پول واقعی؛ فقط برای سنجش تصمیم‌ها روی همین گوشی."
+        "خلاصه‌ی معامله‌ها؛ جزئیات کامل و تاریخچه در تب «معامله‌های من» است."
     )
     RowsCard {
         if (!notice.isNullOrBlank()) {

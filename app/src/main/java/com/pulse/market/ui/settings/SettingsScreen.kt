@@ -27,6 +27,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CloudQueue
+import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.FavoriteBorder
@@ -114,6 +115,7 @@ enum class SettingsSection(val title: String) {
     UPDATE("به‌روزرسانی"),
     ALERTS("هشدارها"),
     PUMPS("پامپ‌های کریپتو"),
+    PORTFOLIO("معامله‌های من"),
     BACKUP("بکاپ و بازگردانی"),
     ABOUT("درباره")
 }
@@ -684,6 +686,8 @@ fun SettingsScreen(
                         }
                     )
 
+                    SettingsSection.PORTFOLIO -> PortfolioCategory(persian = cfg.persianDigits)
+
                     SettingsSection.ABOUT -> AboutCategory()
                 }
 
@@ -1014,6 +1018,13 @@ private fun LandingMenu(
                     summary = "کوین‌های در حال رشد شارپ + آموزش پامپ"
                 ) { onOpen(SettingsSection.PUMPS) }
             }
+            RowDivider()
+            NavMenuRow(
+                icon = Icons.Default.AccountBalanceWallet,
+                tint = Color(0xFF22C55E),
+                title = SettingsSection.PORTFOLIO.title,
+                summary = "کوین‌هایی که خرید آزمایشی زده‌ای + سود و زیان"
+            ) { onOpen(SettingsSection.PORTFOLIO) }
             RowDivider()
             NavMenuRow(
                 icon = Icons.Default.SettingsBackupRestore,
