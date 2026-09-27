@@ -189,6 +189,20 @@ object PumpAiReviewer {
         if (!blockReason.isNullOrBlank()) {
             return "درخواست توسط فیلتر ایمنی سرویس رد شد ($blockReason)"
         }
+        // مسیر سازگار با OpenAI: choices[0].finish_reason و refusal احتمالی
+        ((root["choices"] as? JsonArray)?.firstOrNull() as? JsonObject)?.let { choice ->
+            val refusal = ((choice["message"] as? JsonObject)?.get("refusal") as? JsonPrimitive)
+                ?.contentOrNull?.takeIf { it.isNotBlank() && it != "null" }
+            if (refusal != null) return "مدل پاسخ‌دادن را رد کرد: ${refusal.take(120)}"
+            val reason = (choice["finish_reason"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+            return when {
+                reason.equals("length", true) ->
+                    "سقف طول پاسخ پر شد و مدل متنی برنگرداند؛ مدل دیگری را امتحان کن"
+                reason.equals("content_filter", true) -> "پاسخ توسط فیلتر ایمنی سرویس حذف شد"
+                reason.isNotBlank() -> "سرویس بدون متن پاسخ داد (دلیل پایان: $reason)"
+                else -> "سرویس پاسخ داد ولی متنی در آن نبود"
+            }
+        }
         val candidate = (root["candidates"] as? JsonArray)?.firstOrNull() as? JsonObject
         val finish = ((candidate?.get("finishReason") ?: candidate?.get("finish_reason"))
                 as? JsonPrimitive)?.contentOrNull.orEmpty()

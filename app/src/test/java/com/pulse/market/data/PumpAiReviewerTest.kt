@@ -181,4 +181,29 @@ class PumpAiReviewerTest {
         assertEquals("OK", text)
         assertNull(PumpAiReviewer.extractGeminiContent("""{"candidates":[]}"""))
     }
+
+    @Test
+    fun thinkingPartsAreIgnoredAndEmptyAnswersAreExplained() {
+        assertEquals(
+            "پاسخ نهایی",
+            PumpAiReviewer.extractGeminiContent(
+                """{"candidates":[{"content":{"parts":[{"thought":true,"text":"فکر"},{"text":"پاسخ نهایی"}]}}]}"""
+            )
+        )
+
+        val maxTokens = PumpAiReviewer.emptyContentReason(
+            """{"candidates":[{"content":{"parts":[]},"finishReason":"MAX_TOKENS"}]}"""
+        )
+        assertTrue(maxTokens.contains("سقف طول پاسخ"))
+
+        val blocked = PumpAiReviewer.emptyContentReason(
+            """{"promptFeedback":{"blockReason":"SAFETY"}}"""
+        )
+        assertTrue(blocked.contains("فیلتر ایمنی"))
+
+        val openAiLength = PumpAiReviewer.emptyContentReason(
+            """{"choices":[{"finish_reason":"length","message":{"content":""}}]}"""
+        )
+        assertTrue(openAiLength.contains("سقف طول پاسخ"))
+    }
 }

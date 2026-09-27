@@ -86,6 +86,7 @@ Two built-in ways; both give the **USD** price of one troy ounce:
 - ⚠️ Versions 1.0–1.3 were signed with the CI runner's throwaway key; installing **1.4** over them needs one uninstall/reinstall. After 1.4 that is no longer needed.
 
 **Version history**
+- **1.39** — fixes the empty-answer failure on Google thinking models: thought parts are skipped, the output budget grew to 4096 (512 for the connection test), and the vague message is replaced by the real cause (MAX_TOKENS, safety filter, missing candidate, OpenAI-style refusal).
 - **1.38** — supports Gemini's native path (`/v1beta/models/{model}:generateContent` with the `X-goog-api-key` header) so Google AI Studio keys work directly; the Google preset now uses `gemini-flash-latest`, and the connection test uses the same path.
 - **1.37** — AI service errors are now parsed out of the JSON body and explained in Persian (Gemini geo-restriction, invalid/expired key, wrong model name, quota, permission), the captured server message grew from 60 to 240 characters, and the Google preset hint documents the regional block.
 - **1.36** — audit pass: fixes BOOT_COMPLETED never reaching the boot receiver (it must be exported, otherwise widgets stayed stale after a reboot), guards the live service against ForegroundServiceStartNotAllowedException crashes, null-guards NotificationManager in the alert engine and live service, creates the notification channel only once, and trims the pump cache so sparklines are stored for the top 60 coins only.
