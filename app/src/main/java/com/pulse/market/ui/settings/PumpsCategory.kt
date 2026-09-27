@@ -556,6 +556,8 @@ fun PumpsCategory(
                             it.code == coin.id && it.sourceId == PumpScanner.CRYPTO_SOURCE_ID
                         },
                         aiReviewed = aiReviews[coin.id] != null,
+                        hasOpenTrade = trades.any { it.coinId == coin.id && it.isOpen },
+                        hasActivePlan = plans.any { it.coinId == coin.id && it.isActive },
                         onClick = { selectedCoinId = coin.id }
                     )
                 }
@@ -873,6 +875,8 @@ private fun PumpRow(
     persian: Boolean,
     alreadyAdded: Boolean,
     aiReviewed: Boolean,
+    hasOpenTrade: Boolean,
+    hasActivePlan: Boolean,
     onClick: () -> Unit
 ) {
     val risk = riskColor(coin.risk)
@@ -964,7 +968,9 @@ private fun PumpRow(
                     color = risk
                 )
                 val footer = buildString {
-                    append("برای جزئیات، نمودار و نظر AI بزن")
+                    append("برای جزئیات، نمودار، سفارش آزمایشی و نظر AI بزن")
+                    if (hasOpenTrade) append(" • 💼 معامله‌ی باز")
+                    if (hasActivePlan) append(" • 🪜 طرح پله‌ای فعال")
                     if (alreadyAdded) append(" • ✓ در ویجت")
                     if (aiReviewed) append(" • نظر AI آماده است")
                 }
