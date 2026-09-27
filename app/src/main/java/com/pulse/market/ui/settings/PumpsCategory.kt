@@ -52,6 +52,8 @@ import androidx.compose.ui.unit.sp
 import com.pulse.market.data.MAX_SYMBOLS
 import com.pulse.market.data.PumpAiConfig
 import com.pulse.market.data.PumpAiConfigStore
+import com.pulse.market.data.NobitexMarkets
+import com.pulse.market.data.PaperTradeStore
 import com.pulse.market.data.PumpAiReviewer
 import com.pulse.market.data.PumpAlertEngine
 import com.pulse.market.data.PumpScanner
@@ -103,6 +105,9 @@ fun PumpsCategory(
     var selectedCoinId by remember { mutableStateOf<String?>(null) }
     var aiReviewAt by remember { mutableStateOf<Map<String, Long>>(emptyMap()) }
     var previousMatches by remember { mutableStateOf<Pair<Long, Set<String>>?>(null) }
+    var trades by remember { mutableStateOf<List<PaperTradeStore.Trade>>(emptyList()) }
+    var tradeNotice by remember { mutableStateOf<String?>(null) }
+    var nobitex by remember { mutableStateOf<Map<String, NobitexMarkets.Result>>(emptyMap()) }
 
     LaunchedEffect(Unit) {
         val loaded = withContext(Dispatchers.IO) { PumpAiConfigStore.load(context) }
@@ -144,6 +149,7 @@ fun PumpsCategory(
     // فهرست قبلی (ذخیره‌شده روی گوشی) فوراً نشان داده می‌شود؛ اگر نبود یک بار اسکن می‌کنیم
     LaunchedEffect(Unit) {
         previousMatches = withContext(Dispatchers.IO) { PumpScanner.previousMatches(context) }
+        trades = withContext(Dispatchers.IO) { PaperTradeStore.all(context) }
         val cached = PumpScanner.cached(context)
         scan = cached
         if (cached == null) {
@@ -168,6 +174,20 @@ fun PumpsCategory(
                 val res = PumpScanner.scan(context, cfg.pumpUniverse, cfg.pumpMinChange, force = force)
                 scan = res
                 previousMatches = withContext(Dispatchers.IO) { PumpScanner.previousMatches(context) }
+                // حد سود/حد ضرر معامله‌های آزمایشی با قیمت‌های تازه بررسی می‌شود.
+                val closed = withContext(Dispatchers.IO) {
+                    val prices = res.coins.mapNotNull { coin ->
+                        coin.price?.let { coin.id to it }
+                    }.toMap()
+                    PaperTradeStore.settle(context, prices)
+                }
+                trades = withContext(Dispatchers.IO) { PaperTradeStore.all(context) }
+                if (closed.isNotEmpty()) {
+                    tradeNotice = closed.joinToString(" • ") { trade ->
+                        "${trade.name}: ${trade.closeReason?.label ?: "بسته شد"} — " +
+                                PaperTradeStore.resultText(trade, trade.closePrice, cfg.persianDigits)
+                    }
+                }
                 if (res.error == null) PumpAlertEngine.evaluateScan(context, alertOwnerKey, cfg, res)
                 note = res.error?.let {
                     "⚠️ اسکن تازه نگرفت — $it (فهرست قبلی نمایش داده می‌شود)"
@@ -547,6 +567,34 @@ fun PumpsCategory(
                     "به ویجت اضافه کنی، لازم است منبع «کریپتو — CoinGecko» روشن باشد."
         )
 
+        PaperWalletCard(
+            trades = trades,
+            prices = (scan?.coins ?: emptyList()).mapNotNull { coin ->
+                coin.price?.let { coin.id to it }
+            }.toMap(),
+            persian = cfg.persianDigits,
+            notice = tradeNotice,
+            onSell = { trade ->
+                scope.launch {
+                    val price = scan?.coins?.firstOrNull { it.id == trade.coinId }?.price
+                    val closed = withContext(Dispatchers.IO) {
+                        PaperTradeStore.sell(context, trade.id, price)
+                    }
+                    trades = withContext(Dispatchers.IO) { PaperTradeStore.all(context) }
+                    tradeNotice = if (closed == null) "برای فروش، اول یک اسکن تازه بزن تا قیمت به‌روز شود"
+                    else "فروش آزمایشی ${closed.name}: " +
+                            PaperTradeStore.resultText(closed, closed.closePrice, cfg.persianDigits)
+                }
+            },
+            onClearHistory = {
+                scope.launch {
+                    withContext(Dispatchers.IO) { PaperTradeStore.clearClosed(context) }
+                    trades = withContext(Dispatchers.IO) { PaperTradeStore.all(context) }
+                    tradeNotice = null
+                }
+            }
+        )
+
         Button(
             onClick = { runScan(true) },
             enabled = !busy,
@@ -556,6 +604,13 @@ fun PumpsCategory(
             Spacer(Modifier.width(6.dp))
             Text(if (busy) "در حال اسکن…" else "اسکن تازه‌ی پامپ‌ها", fontSize = 12.5.sp)
         }
+    }
+
+    LaunchedEffect(selectedCoinId) {
+        val coin = selectedCoinId?.let { id -> shown.firstOrNull { it.id == id } } ?: return@LaunchedEffect
+        if (nobitex.containsKey(coin.id)) return@LaunchedEffect
+        val result = NobitexMarkets.check(context, coin.symbol)
+        nobitex = nobitex + (coin.id to result)
     }
 
     val selected = selectedCoinId?.let { id -> shown.firstOrNull { it.id == id } }
@@ -577,6 +632,30 @@ fun PumpsCategory(
             aiReview = aiReviews[selected.id],
             aiReviewAt = aiReviewAt[selected.id],
             aiError = aiErrors[selected.id],
+            nobitex = nobitex[selected.id],
+            openTrade = trades.firstOrNull { it.coinId == selected.id && it.isOpen },
+            onBuy = { amount, takeProfit, stopLoss ->
+                scope.launch {
+                    val opened = withContext(Dispatchers.IO) {
+                        PaperTradeStore.buy(context, selected, amount, takeProfit, stopLoss)
+                    }
+                    trades = withContext(Dispatchers.IO) { PaperTradeStore.all(context) }
+                    tradeNotice = if (opened == null) "ثبت خرید آزمایشی ممکن نشد (قیمت یا مبلغ نامعتبر)"
+                    else "خرید آزمایشی ${opened.name} ثبت شد."
+                }
+            },
+            onSell = {
+                scope.launch {
+                    val open = trades.firstOrNull { it.coinId == selected.id && it.isOpen }
+                    val closed = if (open == null) null else withContext(Dispatchers.IO) {
+                        PaperTradeStore.sell(context, open.id, selected.price)
+                    }
+                    trades = withContext(Dispatchers.IO) { PaperTradeStore.all(context) }
+                    tradeNotice = if (closed == null) "فروش آزمایشی ممکن نشد"
+                    else "فروش آزمایشی ${closed.name}: " +
+                            PaperTradeStore.resultText(closed, closed.closePrice, cfg.persianDigits)
+                }
+            },
             onAiReview = { runAiReview(selected) },
             onOpenLink = { url ->
                 runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
@@ -816,4 +895,117 @@ internal fun riskColor(risk: PumpScanner.Risk): Color = when (risk) {
     PumpScanner.Risk.LOW -> Color(0xFF22C55E)
     PumpScanner.Risk.MEDIUM -> Color(0xFFF59E0B)
     PumpScanner.Risk.HIGH -> Color(0xFFF43F5E)
+}
+
+/** کیف آزمایشی: معامله‌های باز، نتیجه‌ی معامله‌های بسته و خلاصه‌ی عملکرد. */
+@Composable
+private fun PaperWalletCard(
+    trades: List<PaperTradeStore.Trade>,
+    prices: Map<String, Double>,
+    persian: Boolean,
+    notice: String?,
+    onSell: (PaperTradeStore.Trade) -> Unit,
+    onClearHistory: () -> Unit
+) {
+    if (trades.isEmpty() && notice == null) return
+    val summary = PaperTradeStore.summarize(trades, prices)
+    val open = trades.filter { it.isOpen }
+    val closed = trades.filterNot { it.isOpen }.take(10)
+    SectionHeader(
+        "کیف آزمایشی",
+        "خرید و فروش بدون پول واقعی؛ فقط برای سنجش تصمیم‌ها روی همین گوشی."
+    )
+    RowsCard {
+        if (!notice.isNullOrBlank()) {
+            InnerRow { Hint(notice) }
+            RowDivider()
+        }
+        InnerRow {
+            Text(
+                "سود محقق‌شده: ${money(summary.realizedUsd, persian)} • " +
+                        "سود باز: ${money(summary.openUsd, persian)}",
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (summary.realizedUsd + summary.openUsd >= 0.0) Color(0xFF16A34A)
+                else Color(0xFFDC2626)
+            )
+            Text(
+                "معامله‌ی باز: ${Format.toPersianDigits("${summary.openCount}")} • " +
+                        "بسته‌شده: ${Format.toPersianDigits("${summary.closedCount}")} • " +
+                        "برد: ${Format.toPersianDigits("${summary.wins}")} / " +
+                        "باخت: ${Format.toPersianDigits("${summary.losses}")}",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        for (trade in open) {
+            RowDivider()
+            InnerRow {
+                Text(
+                    "${trade.name} (${trade.symbol})",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    "خرید در ${QuoteText.priceWithUnit(trade.entryPrice, "$", persian)} • " +
+                            "مبلغ ${QuoteText.priceWithUnit(trade.amountUsd, "$", persian)}",
+                    fontSize = 10.5.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    "نتیجه‌ی فعلی: ${PaperTradeStore.resultText(trade, prices[trade.coinId], persian)}",
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if ((trade.profitPct(prices[trade.coinId]) ?: 0.0) >= 0.0)
+                        Color(0xFF16A34A) else Color(0xFFDC2626)
+                )
+                val levels = buildString {
+                    trade.takeProfitPrice?.let {
+                        append("حد سود ${QuoteText.priceWithUnit(it, "$", persian)}")
+                    }
+                    trade.stopLossPrice?.let {
+                        if (isNotEmpty()) append(" • ")
+                        append("حد ضرر ${QuoteText.priceWithUnit(it, "$", persian)}")
+                    }
+                }
+                if (levels.isNotBlank()) {
+                    Text(levels, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                OutlinedButton(onClick = { onSell(trade) }, modifier = Modifier.fillMaxWidth()) {
+                    Text("فروش آزمایشی", fontSize = 11.sp)
+                }
+            }
+        }
+        if (closed.isNotEmpty()) {
+            RowDivider()
+            InnerRow {
+                Text(
+                    "معامله‌های بسته‌شده",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                for (trade in closed) {
+                    Text(
+                        "${trade.name}: ${PaperTradeStore.resultText(trade, null, persian)} — " +
+                                (trade.closeReason?.label ?: "بسته شد"),
+                        fontSize = 10.5.sp,
+                        color = if ((trade.profitPct(null) ?: 0.0) >= 0.0) Color(0xFF16A34A)
+                        else Color(0xFFDC2626)
+                    )
+                }
+                OutlinedButton(onClick = onClearHistory, modifier = Modifier.fillMaxWidth()) {
+                    Text("پاک کردن تاریخچه", fontSize = 11.sp)
+                }
+            }
+        }
+    }
+}
+
+/** مبلغ دلاری با علامت سود/زیان */
+private fun money(value: Double, persian: Boolean): String {
+    val sign = if (value >= 0.0) "+" else "−"
+    val text = Format.price(kotlin.math.abs(value), persian)
+    return "$sign$text دلار"
 }

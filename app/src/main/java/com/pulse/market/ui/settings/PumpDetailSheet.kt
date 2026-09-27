@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -31,11 +32,15 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -43,9 +48,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pulse.market.data.Ichimoku
+import com.pulse.market.data.NobitexMarkets
+import com.pulse.market.data.PaperTradeStore
 import com.pulse.market.data.PumpAiReviewer
 import com.pulse.market.data.PumpScanner
 import com.pulse.market.ui.Format
@@ -75,6 +83,10 @@ fun PumpDetailSheet(
     aiReview: PumpAiReviewer.Review?,
     aiReviewAt: Long?,
     aiError: String?,
+    nobitex: NobitexMarkets.Result?,
+    openTrade: PaperTradeStore.Trade?,
+    onBuy: (Double, Double?, Double?) -> Unit,
+    onSell: () -> Unit,
     onAiReview: () -> Unit,
     onOpenLink: (String) -> Unit,
     onAdd: () -> Unit,
@@ -221,6 +233,10 @@ fun PumpDetailSheet(
             coin.athChangePct?.let {
                 StatRow("فاصله تا ATH", Format.pct(it, persian).ifBlank { "—" })
             }
+            StatRow(
+                "نوبیتکس",
+                nobitex?.label ?: "در حال بررسی…"
+            )
             coin.circulatingSupply?.let {
                 StatRow("عرضه در گردش", Format.volume(it, persian))
             }
@@ -438,6 +454,99 @@ fun PumpDetailSheet(
                         }
                     }
                 }
+            }
+
+            // ── معامله‌ی آزمایشی ──
+            Section("خرید و فروش آزمایشی (شبیه‌ساز)")
+            if (openTrade != null) {
+                val pnl = PaperTradeStore.resultText(openTrade, coin.price, persian)
+                val profit = (openTrade.profitPct(coin.price) ?: 0.0) >= 0.0
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = (if (profit) Color(0xFF16A34A) else Color(0xFFDC2626))
+                            .copy(alpha = 0.12f)
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            "سود/زیان فعلی: $pnl",
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (profit) Color(0xFF16A34A) else Color(0xFFDC2626)
+                        )
+                        StatRow("قیمت خرید", QuoteText.priceWithUnit(openTrade.entryPrice, "$", persian))
+                        StatRow("مبلغ", QuoteText.priceWithUnit(openTrade.amountUsd, "$", persian))
+                        openTrade.takeProfitPrice?.let {
+                            StatRow("فروش خودکار در سود", QuoteText.priceWithUnit(it, "$", persian))
+                        }
+                        openTrade.stopLossPrice?.let {
+                            StatRow("فروش خودکار در ضرر", QuoteText.priceWithUnit(it, "$", persian))
+                        }
+                        Text(
+                            "زمان خرید: ${Format.dateTime(openTrade.openedAt, persian)}",
+                            fontSize = 10.5.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Button(
+                            onClick = { onSell() },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("فروش آزمایشی با قیمت فعلی", fontSize = 11.5.sp) }
+                    }
+                }
+            } else {
+                var amount by remember(coin.id) { mutableStateOf("100") }
+                var takeProfit by remember(coin.id) { mutableStateOf("10") }
+                var stopLoss by remember(coin.id) { mutableStateOf("5") }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = amount,
+                        onValueChange = { amount = it.take(9) },
+                        label = { Text("مبلغ (دلار)", fontSize = 10.sp) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = takeProfit,
+                        onValueChange = { takeProfit = it.take(6) },
+                        label = { Text("حد سود ٪", fontSize = 10.sp) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = stopLoss,
+                        onValueChange = { stopLoss = it.take(6) },
+                        label = { Text("حد ضرر ٪", fontSize = 10.sp) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                Button(
+                    onClick = {
+                        onBuy(
+                            amount.replace(',', '.').toDoubleOrNull() ?: 0.0,
+                            takeProfit.replace(',', '.').toDoubleOrNull(),
+                            stopLoss.replace(',', '.').toDoubleOrNull()
+                        )
+                    },
+                    enabled = (coin.price ?: 0.0) > 0.0 &&
+                            (amount.replace(',', '.').toDoubleOrNull() ?: 0.0) > 0.0,
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("ثبت خرید آزمایشی با قیمت فعلی", fontSize = 11.5.sp) }
+                Hint(
+                    "هیچ سفارشی به هیچ صرافی نمی‌رود؛ فقط روی همین گوشی ثبت می‌شود. با هر اسکن تازه، " +
+                            "اگر قیمت به حد سود یا حد ضرر برسد، معامله خودکار بسته و نتیجه ثبت می‌شود."
+                )
             }
 
             // ── اقدام‌ها ──
