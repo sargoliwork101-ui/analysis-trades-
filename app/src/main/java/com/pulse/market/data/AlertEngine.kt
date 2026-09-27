@@ -37,6 +37,44 @@ object AlertEngine {
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
 
+    private fun safeOwner(ownerKey: String): String = ownerKey
+        .filter { it.isLetterOrDigit() || it == '_' || it == '-' }
+        .take(80)
+        .ifBlank { "default" }
+
+    private fun metricKey(owner: String, rule: AlertRule): String =
+        "last_metric_${safeOwner(owner)}_${rule.id}_${rule.condition.name}"
+
+    private fun notifiedKey(owner: String, ruleId: String): String =
+        "last_notified_${safeOwner(owner)}_$ruleId"
+
+    /** شناسه‌ی تاریخچه باید owner را هم داشته باشد تا قوانین کپی‌شده حذف نشوند. */
+    internal fun eventId(ownerKey: String, ruleId: String, triggeredAt: Long): String =
+        "event_${safeOwner(ownerKey)}_${ruleId.take(200)}_$triggeredAt"
+
+    /**
+     * state عبور/cooldown فقط برای قوانین ویجت‌های نصب‌شده نگه داشته می‌شود.
+     * حذف ویجت یا قانون نباید کلیدهای SharedPreferences را برای همیشه باقی بگذارد.
+     */
+    @Synchronized
+    fun pruneState(context: Context, activeRulesByOwner: Map<String, List<AlertRule>>) {
+        val keep = buildSet {
+            activeRulesByOwner.forEach { (owner, rules) ->
+                rules.forEach { rule ->
+                    add(metricKey(owner, rule))
+                    add(notifiedKey(owner, rule.id))
+                }
+            }
+        }
+        val store = prefs(context)
+        val stale = store.all.keys.filter { key ->
+            (key.startsWith("last_metric_") || key.startsWith("last_notified_")) && key !in keep
+        }
+        if (stale.isNotEmpty()) {
+            store.edit().also { editor -> stale.forEach(editor::remove) }.apply()
+        }
+    }
+
     /** جلوگیری از دو نوتیف تکراری وقتی سرویس، Worker و رسیور هم‌زمان ارزیابی می‌کنند. */
     private val evaluateMutex = Mutex()
 
@@ -67,8 +105,7 @@ object AlertEngine {
         if (rules.isEmpty() || quotes.isEmpty()) return
 
         val now = System.currentTimeMillis()
-        val safeOwner = ownerKey.filter { it.isLetterOrDigit() || it == '_' || it == '-' }.take(80)
-            .ifBlank { "default" }
+        val safeOwner = safeOwner(ownerKey)
         val snoozed = isSnoozed(context)
         val cal = Calendar.getInstance().apply { timeInMillis = now }
         val minuteOfDay = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
@@ -87,8 +124,8 @@ object AlertEngine {
             val price = quote.price?.takeIf { it.isFinite() } ?: continue
             // ruleهای کپی‌شده از template در چند ویجت id یکسان دارند؛ owner باید
             // بخشی از کلید باشد تا crossing/cooldown دو ویجت روی هم اثر نگذارند.
-            val keyMetric = "last_metric_${safeOwner}_${rule.id}_${rule.condition.name}"
-            val keyNotified = "last_notified_${safeOwner}_${rule.id}"
+            val keyMetric = metricKey(safeOwner, rule)
+            val keyNotified = notifiedKey(safeOwner, rule.id)
             val previous = store.getString(keyMetric, null)?.toDoubleOrNull()
                 ?.takeIf { it.isFinite() }
 
@@ -143,7 +180,7 @@ object AlertEngine {
                 AlertHistoryStore.add(
                     context,
                     AlertEvent(
-                        id = "event_${rule.id}_$now",
+                        id = eventId(safeOwner, rule.id, now),
                         ruleId = rule.id,
                         symbolCode = rule.symbolCode,
                         symbolLabel = rule.symbolLabel,
@@ -178,20 +215,33 @@ object AlertEngine {
     // ───────────── خواب موقت هشدارها (میتینگ/شب) ─────────────
 
     private const val KEY_SNOOZE = "snooze_until"
+    private const val KEY_SNOOZE_SET_AT = "snooze_set_at"
 
     fun snooze(context: Context, minutes: Int) {
+        val now = System.currentTimeMillis()
+        val safeMinutes = minutes.coerceIn(1, 24 * 60)
         prefs(context).edit()
-            .putLong(KEY_SNOOZE, System.currentTimeMillis() + minutes * 60_000L)
+            .putLong(KEY_SNOOZE_SET_AT, now)
+            .putLong(KEY_SNOOZE, now + safeMinutes * 60_000L)
             .apply()
     }
 
     fun cancelSnooze(context: Context) {
-        prefs(context).edit().remove(KEY_SNOOZE).apply()
+        prefs(context).edit().remove(KEY_SNOOZE).remove(KEY_SNOOZE_SET_AT).apply()
     }
 
-    /** ۰ یعنی بیدار؛ غیره = زمان پایان خواب (timestamp) */
-    fun snoozeUntil(context: Context): Long =
-        prefs(context).getLong(KEY_SNOOZE, 0L).takeIf { it > System.currentTimeMillis() } ?: 0L
+    /** ۰ یعنی بیدار؛ عقب‌رفتن ساعت نباید خواب کوتاه را ساعت‌ها/روزها تمدید کند. */
+    fun snoozeUntil(context: Context): Long {
+        val store = prefs(context)
+        val now = System.currentTimeMillis()
+        val setAt = store.getLong(KEY_SNOOZE_SET_AT, 0L)
+        val until = store.getLong(KEY_SNOOZE, 0L)
+        val valid = until > now && (setAt <= 0L || now >= setAt)
+        if (!valid && (until != 0L || setAt != 0L)) {
+            store.edit().remove(KEY_SNOOZE).remove(KEY_SNOOZE_SET_AT).apply()
+        }
+        return if (valid) until else 0L
+    }
 
     fun isSnoozed(context: Context): Boolean = snoozeUntil(context) > 0L
 

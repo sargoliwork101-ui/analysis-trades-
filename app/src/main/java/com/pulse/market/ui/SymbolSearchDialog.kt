@@ -64,6 +64,7 @@ import com.pulse.market.ui.settings.RowDivider
 import com.pulse.market.ui.settings.RowsCard
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import java.util.Locale
 
 /** یک نتیجه‌ی جستجو — یکدست برای همه‌ی منابع */
 private data class SearchHit(
@@ -140,8 +141,12 @@ fun SymbolSearchDialog(
     }
 
     fun pasteFromClipboard() {
-        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-        val text = clipboard?.primaryClip?.getItemAt(0)?.text?.toString()?.trim().orEmpty()
+        val text = runCatching {
+            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            val clip = clipboard?.primaryClip
+            if (clip == null || clip.itemCount == 0) ""
+            else clip.getItemAt(0).coerceToText(context)?.toString()?.trim().orEmpty()
+        }.getOrDefault("").take(2_048)
         if (text.isNotEmpty()) {
             query = text
             focusManager.clearFocus()
@@ -172,7 +177,7 @@ fun SymbolSearchDialog(
         // ─── فیلد جستجو + چسباندن ───
         OutlinedTextField(
             value = query,
-            onValueChange = { query = it },
+            onValueChange = { query = it.take(2_048) },
             modifier = Modifier.fillMaxWidth(),
             placeholder = {
                 Text(if (isTse) "نام نماد یا لینک tsetmc.com…" else "نام یا کد نماد…")
@@ -293,8 +298,8 @@ private suspend fun generalHits(src: SourceDef, q: String): List<SearchHit> {
 
     // جستجوی آنلاین — اگر منبع API جستجو نداشت یا شبکه شکست خورد، همین فهرست کافی است
     val web = WebSymbolSearch.search(src.id, q).orEmpty()
-    val seen = localHits.mapTo(mutableSetOf()) { it.sym.code.lowercase() }
-    val webHits = web.filter { it.code.lowercase() !in seen }.map {
+    val seen = localHits.mapTo(mutableSetOf()) { it.sym.code.lowercase(Locale.ROOT) }
+    val webHits = web.filter { it.code.lowercase(Locale.ROOT) !in seen }.map {
         SearchHit(sym = it, title = it.label, subtitle = "${it.code} • از جستجوی آنلاین")
     }
     return localHits + webHits

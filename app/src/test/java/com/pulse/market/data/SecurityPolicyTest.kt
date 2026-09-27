@@ -44,6 +44,17 @@ class SecurityPolicyTest {
     }
 
     @Test
+    fun customSourceUrlRequiresARealHostAndAllowsDocumentedPlaceholders() {
+        assertTrue(SourceUrlPolicy.isValid("https://api.example.com/price/{symbol}"))
+        assertTrue(SourceUrlPolicy.isValid("HTTP://example.com/all?ids={symbols}"))
+        assertFalse(SourceUrlPolicy.isValid("https://"))
+        assertFalse(SourceUrlPolicy.isValid("https:///missing-host/{symbol}"))
+        assertFalse(SourceUrlPolicy.isValid("https://user:pass@example.com/price/{symbol}"))
+        assertFalse(SourceUrlPolicy.isValid("https://example.com/{unknown}"))
+        assertFalse(SourceUrlPolicy.isValid("javascript:alert(1)"))
+    }
+
+    @Test
     fun aiEndpointRejectsCredentialsQueryAndFragments() {
         assertTrue(PumpAiConfig.isValidEndpoint("https://api.example.com/v1"))
         assertFalse(PumpAiConfig.isValidEndpoint("https://user:pass@api.example.com/v1"))
@@ -62,6 +73,18 @@ class SecurityPolicyTest {
     @Test
     fun remoteCoinTextDropsBidiOverridesAndControls() {
         assertEquals("ABCD", PumpScanner.safeRemoteText("A\u202EBC\u0000D", 20))
+    }
+
+    @Test
+    fun tseUrlParserAcceptsLegacyInsCodeQuery() {
+        val parsed = TseUrlParser.parse(
+            "https://www.tsetmc.com/Loader.aspx?ParTree=151311&i=46348559193224090"
+        )
+        assertEquals("46348559193224090", parsed.insCode)
+        val named = TseUrlParser.parse(
+            "https://example.com/page?inscode=46348559193224090"
+        )
+        assertEquals("46348559193224090", named.insCode)
     }
 
     @Test

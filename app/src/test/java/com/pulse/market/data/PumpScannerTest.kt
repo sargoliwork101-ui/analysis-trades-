@@ -134,5 +134,11 @@ class PumpScannerTest {
             )
         )
         assertEquals(listOf("a"), scan.matches.map { it.id })
+
+        val zeroThreshold = scan.copy(
+            minChange = 0.0,
+            coins = scan.coins + PumpScanner.PumpCoin(id = "missing", symbol = "m", name = "Missing")
+        )
+        assertEquals(listOf("a", "b"), zeroThreshold.matches.map { it.id })
     }
 }

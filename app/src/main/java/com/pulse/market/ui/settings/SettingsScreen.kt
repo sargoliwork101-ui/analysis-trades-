@@ -136,6 +136,7 @@ fun SettingsScreen(
     val scope = rememberCoroutineScope()
 
     var cfg by remember { mutableStateOf(WidgetConfig()) }
+    var cfgLoaded by remember { mutableStateOf(false) }
     var customSources by remember { mutableStateOf<List<SourceDef>>(emptyList()) }
     var tseCustomSymbols by remember { mutableStateOf<List<SymbolDef>>(emptyList()) }
     var watchlists by remember { mutableStateOf<List<Watchlist>>(emptyList()) }
@@ -163,6 +164,9 @@ fun SettingsScreen(
     // ─── ذخیره‌ی خودکار هر تغییر (با اسکوپ دائمی — با بسته شدن صفحه از بین نمی‌رود) ───
 
     fun persist(new: WidgetConfig) {
+        // کلیک بسیار زودهنگام نباید پیش از پایان خواندن DataStore، تنظیمات قبلی را
+        // با WidgetConfig پیش‌فرض بازنویسی کند.
+        if (!cfgLoaded) return
         cfg = new
         ConfigStore.saveDebounced(context, new, widgetId)
     }
@@ -193,6 +197,8 @@ fun SettingsScreen(
         } catch (_: Exception) {
             // فایل/رام ناسازگار نباید صفحه را در شروع ببندد؛ پیش‌فرض امن قابل استفاده می‌ماند.
             testResult = "تنظیمات قبلی کامل خوانده نشد؛ برنامه با تنظیمات امن باز شد"
+        } finally {
+            cfgLoaded = true
         }
     }
 
@@ -258,33 +264,41 @@ fun SettingsScreen(
         if (uri != null) {
             scope.launch {
                 busy = true
-                val text = runSuspendCatching {
-                    withContext(Dispatchers.IO) {
-                        context.contentResolver.openInputStream(uri)?.use { inp ->
-                            inp.readUtf8Capped(MAX_BACKUP_BYTES)
-                        } ?: error("جریان ورودی باز نشد")
-                    }
-                }.getOrNull()
-                if (text == null) {
-                    backupResult = "❌ خواندن فایل ممکن نشد"
-                } else {
-                    val imported = runSuspendCatching { ConfigStore.importAll(context, text) }.getOrNull()
-                    if (imported == null) {
-                        backupResult = "❌ این فایل، بکاپ نبض بازار نیست یا خراب است"
+                try {
+                    val text = runSuspendCatching {
+                        withContext(Dispatchers.IO) {
+                            context.contentResolver.openInputStream(uri)?.use { inp ->
+                                inp.readUtf8Capped(MAX_BACKUP_BYTES)
+                            } ?: error("جریان ورودی باز نشد")
+                        }
+                    }.getOrNull()
+                    if (text == null) {
+                        backupResult = "❌ خواندن فایل ممکن نشد"
                     } else {
-                        backupResult = "✅ بازیابی شد (${Format.toPersianDigits("$imported")} ویجت) — تنظیمات تازه بارگذاری شد"
-                        cfg = ConfigStore.current(context, widgetId)
-                        customSources = ConfigStore.currentCustomSources(context)
-                        tseCustomSymbols = ConfigStore.currentTseSymbols(context)
-                        watchlists = ConfigStore.currentWatchlists(context)
-                        alertHistory = AlertHistoryStore.load(context)
-                        StockWidgetProvider.requestUpdate(context)
-                        // سرویس زنده/Worker هم مطابق تنظیمات بازیابی‌شده همگام شود —
-                        // وگرنه تا اولین تغییرِ دستی، به‌روزرسانی پس‌زمینه راه نمی‌افتد
-                        StockWidgetProvider.syncLiveService(context)
+                        val imported = runSuspendCatching {
+                            ConfigStore.importAll(context, text)
+                        }.getOrNull()
+                        if (imported == null) {
+                            backupResult = "❌ این فایل، بکاپ نبض بازار نیست یا خراب است"
+                        } else {
+                            backupResult = "✅ بازیابی شد (${Format.toPersianDigits("$imported")} ویجت) — تنظیمات تازه بارگذاری شد"
+                            cfg = ConfigStore.current(context, widgetId)
+                            customSources = ConfigStore.currentCustomSources(context)
+                            tseCustomSymbols = ConfigStore.currentTseSymbols(context)
+                            watchlists = ConfigStore.currentWatchlists(context)
+                            alertHistory = AlertHistoryStore.load(context)
+                            StockWidgetProvider.requestUpdate(context)
+                            // سرویس زنده/Worker هم مطابق تنظیمات بازیابی‌شده همگام شود.
+                            StockWidgetProvider.syncLiveService(context)
+                        }
                     }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    backupResult = "❌ بازیابی کامل نشد؛ فایل و فضای ذخیره‌سازی را بررسی کن"
+                } finally {
+                    busy = false
                 }
-                busy = false
             }
         }
     }
@@ -369,16 +383,18 @@ fun SettingsScreen(
                         onToggle = { src ->
                             val ids = selectedIds.toMutableList()
                             if (src.id in ids) {
-                                ids.remove(src.id)
-                                if (ids.isEmpty()) ids.add(src.id) // حداقل یک منبع روشن بماند
-                                persist(
-                                    cfg.copy(
-                                        sourceIds = ids,
-                                        sourceId = ids.first(),
-                                        symbols = cfg.symbols.filterNot { it.sourceId == src.id }
+                                // تنها منبع باید روشن بماند؛ کلیک دوباره نباید نمادهایش را پاک کند.
+                                if (ids.size > 1) {
+                                    ids.remove(src.id)
+                                    persist(
+                                        cfg.copy(
+                                            sourceIds = ids,
+                                            sourceId = ids.first(),
+                                            symbols = cfg.symbols.filterNot { it.sourceId == src.id }
+                                        )
                                     )
-                                )
-                            } else {
+                                }
+                            } else if (ids.size < MAX_SYMBOLS) {
                                 ids.add(src.id)
                                 val room = (MAX_SYMBOLS - cfg.symbols.size).coerceAtLeast(0)
                                 persist(
@@ -423,22 +439,30 @@ fun SettingsScreen(
                                 busy = true
                                 try {
                                     selectedSources.forEach { source ->
-                                        val symbols = cfg.symbolsOf(source.id).ifEmpty {
-                                            source.symbols.take(1).map { it.copy(sourceId = source.id) }
-                                        }
-                                        if (symbols.isEmpty()) {
+                                        try {
+                                            val symbols = cfg.symbolsOf(source.id).ifEmpty {
+                                                source.symbols.take(1).map { it.copy(sourceId = source.id) }
+                                            }
+                                            if (symbols.isEmpty()) {
+                                                SourceHealthStore.recordFailure(
+                                                    context, source.id, "نمادی برای آزمایش منبع وجود ندارد"
+                                                )
+                                            } else {
+                                                val started = System.currentTimeMillis()
+                                                val quotes = Fetcher.fetchAll(source, symbols)
+                                                SourceHealthStore.record(
+                                                    context,
+                                                    source.id,
+                                                    quotes,
+                                                    System.currentTimeMillis() - started,
+                                                    Fetcher.lastEndpoint(source.id)
+                                                )
+                                            }
+                                        } catch (cancelled: CancellationException) {
+                                            throw cancelled
+                                        } catch (_: Exception) {
                                             SourceHealthStore.recordFailure(
-                                                context, source.id, "نمادی برای آزمایش منبع وجود ندارد"
-                                            )
-                                        } else {
-                                            val started = System.currentTimeMillis()
-                                            val quotes = Fetcher.fetchAll(source, symbols)
-                                            SourceHealthStore.record(
-                                                context,
-                                                source.id,
-                                                quotes,
-                                                System.currentTimeMillis() - started,
-                                                Fetcher.lastEndpoint(source.id)
+                                                context, source.id, "آزمایش منبع کامل نشد"
                                             )
                                         }
                                     }
@@ -478,7 +502,7 @@ fun SettingsScreen(
                             val availableIds = watchlist.sourceIds.filter { id ->
                                 allSources.any { it.id == id }
                             }
-                            val ids = availableIds.ifEmpty { cfg.activeSourceIds }
+                            val ids = availableIds.ifEmpty { cfg.activeSourceIds }.take(MAX_SYMBOLS)
                             val symbols = watchlist.symbols.filter { symbol ->
                                 symbol.sourceId.isBlank() || symbol.sourceId in ids
                             }.take(MAX_SYMBOLS)
@@ -575,10 +599,13 @@ fun SettingsScreen(
                         cfg = cfg,
                         onChange = { new -> persist(new) },
                         onLiveToggle = { on ->
-                            persist(cfg.copy(liveService = on))
-                            scope.launch {
-                                ConfigStore.save(context, cfg.copy(liveService = on), widgetId)
-                                StockWidgetProvider.syncLiveService(context)
+                            if (cfgLoaded) {
+                                val new = cfg.copy(liveService = on)
+                                persist(new)
+                                scope.launch {
+                                    ConfigStore.save(context, new, widgetId)
+                                    StockWidgetProvider.syncLiveService(context)
+                                }
                             }
                         }
                     )
@@ -625,22 +652,32 @@ fun SettingsScreen(
                         alertOwnerKey = "widget_$widgetId",
                         onChange = { new -> persist(new) },
                         onAlertToggle = { enabled ->
-                            val new = cfg.copy(pumpAlertEnabled = enabled)
-                            persist(new)
-                            scope.launch {
-                                ConfigStore.save(context, new, widgetId)
-                                StockWidgetProvider.syncLiveService(context)
+                            if (cfgLoaded) {
+                                val new = cfg.copy(pumpAlertEnabled = enabled)
+                                persist(new)
+                                scope.launch {
+                                    ConfigStore.save(context, new, widgetId)
+                                    StockWidgetProvider.syncLiveService(context)
+                                }
                             }
                         },
                         onAddSymbol = { sym ->
                             // منبع کوین (کریپتو) اگر روشن نبود، خودکار روشن می‌شود؛
                             // وگرنه نماد اضافه می‌شد ولی هیچ‌وقت داده نمی‌گرفت
-                            val ids = if (sym.sourceId.isBlank() || sym.sourceId in cfg.activeSourceIds)
+                            val ids = if (sym.sourceId.isBlank() || sym.sourceId in cfg.activeSourceIds) {
                                 cfg.activeSourceIds
-                            else cfg.activeSourceIds + sym.sourceId
+                            } else {
+                                val active = cfg.activeSourceIds.toMutableList()
+                                if (active.size >= MAX_SYMBOLS) {
+                                    val used = cfg.symbols.mapTo(mutableSetOf()) { it.sourceId }
+                                    val removable = active.indexOfLast { it !in used }
+                                    if (removable >= 0) active.removeAt(removable)
+                                }
+                                (active + sym.sourceId).distinct().take(MAX_SYMBOLS)
+                            }
                             val list = cfg.symbols.toMutableList()
-                            if (list.size >= MAX_SYMBOLS) list.removeAt(list.size - 1)
                             if (list.none { it.code == sym.code && it.sourceId == sym.sourceId }) {
+                                if (list.size >= MAX_SYMBOLS) list.removeAt(list.size - 1)
                                 list.add(sym)
                             }
                             persist(cfg.copy(sourceIds = ids, sourceId = ids.first(), symbols = list))
@@ -687,31 +724,38 @@ fun SettingsScreen(
                                 busy = true
                                 testResult = "در حال تست…"
                                 scope.launch {
-                                    val byId = allSources.associateBy { it.id }
-                                    val selected = cfg.symbols.take(6)
-                                    val quoteByKey = mutableMapOf<Pair<String, String>, com.pulse.market.data.Quote>()
-                                    selected.groupBy { sym ->
-                                        sym.sourceId.ifBlank { cfg.activeSourceIds.firstOrNull().orEmpty() }
-                                    }.forEach { (sourceId, symbols) ->
-                                        byId[sourceId]?.let { source ->
-                                            Fetcher.fetchAll(source, symbols).forEach { quote ->
-                                                quoteByKey[sourceId to quote.code] = quote
+                                    try {
+                                        val byId = allSources.associateBy { it.id }
+                                        val selected = cfg.symbols.take(MAX_SYMBOLS)
+                                        val quoteByKey = mutableMapOf<Pair<String, String>, com.pulse.market.data.Quote>()
+                                        selected.groupBy { sym ->
+                                            sym.sourceId.ifBlank { cfg.activeSourceIds.firstOrNull().orEmpty() }
+                                        }.forEach { (sourceId, symbols) ->
+                                            byId[sourceId]?.let { source ->
+                                                Fetcher.fetchAll(source, symbols).forEach { quote ->
+                                                    quoteByKey[sourceId to quote.code] = quote
+                                                }
                                             }
                                         }
-                                    }
-                                    val lines = selected.map { sym ->
-                                        val sourceId = sym.sourceId.ifBlank {
-                                            cfg.activeSourceIds.firstOrNull().orEmpty()
+                                        val lines = selected.map { sym ->
+                                            val sourceId = sym.sourceId.ifBlank {
+                                                cfg.activeSourceIds.firstOrNull().orEmpty()
+                                            }
+                                            val q = quoteByKey[sourceId to sym.code]
+                                            val vol = q?.let { "  حجم ${QuoteText.volume(it)}" } ?: ""
+                                            if (q?.price != null)
+                                                "${q.label}: ${QuoteText.priceWithUnit(q)}  ${QuoteText.change(q)}$vol"
+                                            else
+                                                "${sym.label}: خطا — ${q?.error ?: "منبع پیدا نشد"}"
                                         }
-                                        val q = quoteByKey[sourceId to sym.code]
-                                        val vol = q?.let { "  حجم ${QuoteText.volume(it)}" } ?: ""
-                                        if (q?.price != null)
-                                            "${q.label}: ${QuoteText.priceWithUnit(q)}  ${QuoteText.change(q)}$vol"
-                                        else
-                                            "${sym.label}: خطا — ${q?.error ?: "منبع پیدا نشد"}"
+                                        testResult = lines.joinToString("\n")
+                                    } catch (cancelled: CancellationException) {
+                                        throw cancelled
+                                    } catch (_: Exception) {
+                                        testResult = "آزمایش داده کامل نشد؛ اتصال و تنظیمات منبع را بررسی کن"
+                                    } finally {
+                                        busy = false
                                     }
-                                    testResult = lines.joinToString("\n")
-                                    busy = false
                                 }
                             },
                             modifier = Modifier.weight(1f)
@@ -726,18 +770,25 @@ fun SettingsScreen(
                                 busy = true
                                 val finalConfig = cfg
                                 scope.launch {
-                                    // بستن صفحه فقط بعد از پایان ذخیره انجام می‌شود. قبلاً
-                                    // onApply بیرون coroutine بود و با finish شدن Activity،
-                                    // همین scope پیش از شروع ذخیره cancel می‌شد.
-                                    withContext(NonCancellable) {
-                                        ConfigStore.save(context, finalConfig, widgetId)
-                                        StockWidgetProvider.syncLiveService(context)
+                                    try {
+                                        // بستن صفحه فقط بعد از پایان ذخیره انجام می‌شود. قبلاً
+                                        // onApply بیرون coroutine بود و با finish شدن Activity،
+                                        // همین scope پیش از شروع ذخیره cancel می‌شد.
+                                        withContext(NonCancellable) {
+                                            ConfigStore.save(context, finalConfig, widgetId)
+                                            StockWidgetProvider.syncLiveService(context)
+                                        }
+                                        busy = false
+                                        onApply(finalConfig)
+                                    } catch (cancelled: CancellationException) {
+                                        throw cancelled
+                                    } catch (_: Exception) {
+                                        testResult = "ذخیره کامل نشد؛ دوباره تلاش کن"
+                                        busy = false
                                     }
-                                    busy = false
-                                    onApply(finalConfig)
                                 }
                             },
-                            enabled = !busy,
+                            enabled = cfgLoaded && !busy,
                             modifier = Modifier.weight(1.2f)
                         ) {
                             Icon(Icons.Default.Check, contentDescription = null)
@@ -773,15 +824,20 @@ fun SettingsScreen(
                     val list = customSources + newSource
                     ConfigStore.saveCustomSources(context, list)
                     customSources = list
-                    // منبع تازه خودکار روشن و نمادهایش انتخاب شود
-                    val ids = (cfg.activeSourceIds + newSource.id).distinct()
+                    // منبع تازه تا سقف منابع قابل‌نمایش خودکار روشن و نمادهایش انتخاب شود.
+                    val canActivate = cfg.activeSourceIds.size < MAX_SYMBOLS
+                    val ids = if (canActivate) {
+                        (cfg.activeSourceIds + newSource.id).distinct()
+                    } else cfg.activeSourceIds
                     val room = (MAX_SYMBOLS - cfg.symbols.size).coerceAtLeast(0)
                     persist(
                         cfg.copy(
                             sourceIds = ids,
                             sourceId = ids.first(),
-                            symbols = (cfg.symbols + newSource.symbols.take(room)
-                                .map { it.copy(sourceId = newSource.id) })
+                            symbols = if (canActivate) {
+                                cfg.symbols + newSource.symbols.take(room)
+                                    .map { it.copy(sourceId = newSource.id) }
+                            } else cfg.symbols
                         )
                     )
                     showAddDialog = false

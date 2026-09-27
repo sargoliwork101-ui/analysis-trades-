@@ -13,8 +13,8 @@ android {
         applicationId = "com.pulse.market"
         minSdk = 23          // اندروید ۶ به بالا
         targetSdk = 36
-        versionCode = 22
-        versionName = "1.21"
+        versionCode = 23
+        versionName = "1.22"
     }
 
     /**
@@ -64,6 +64,8 @@ android {
     }
 
     compileOptions {
+        // jsoup جدید روی Android 6 به core-library desugaring (NIO) نیاز دارد.
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -87,6 +89,8 @@ android {
 }
 
 dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.1.5")
+
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
     implementation("androidx.activity:activity-compose:1.9.2")
@@ -100,10 +104,10 @@ dependencies {
 
     // شبکه و پارس کردن داده
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("org.jsoup:jsoup:1.18.1")
+    implementation("org.jsoup:jsoup:1.23.2")
 
     // ذخیره‌ی تنظیمات و سریالایز
-    implementation("androidx.datastore:datastore-preferences:1.1.1")
+    implementation("androidx.datastore:datastore-preferences:1.1.7")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.1")
 
     // به‌روزرسانی پس‌زمینه

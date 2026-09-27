@@ -28,7 +28,10 @@ data class TseInstrument(
  */
 object TseUrlParser {
 
-    private val INS_CODE_PATTERN = Pattern.compile("(?:i=|/instInfo/|/Instrument/|^)(\\d{15,20})")
+    private val INS_CODE_PATTERN = Pattern.compile(
+        "(?:[?&](?:i|inscode)=|/instInfo/|/Instrument/|^)(\\d{8,20})",
+        Pattern.CASE_INSENSITIVE
+    )
     private val ISIN_PATTERN = Pattern.compile("(?:/instInfo/|^)(IRO[0-9A-Z]{9})", Pattern.CASE_INSENSITIVE)
 
     /**
@@ -41,7 +44,7 @@ object TseUrlParser {
         val insMatcher = INS_CODE_PATTERN.matcher(trimmed)
         if (insMatcher.find()) {
             val code = insMatcher.group(1)
-            if (code != null && code.length >= 15) {
+            if (code != null && code.length >= 8) {
                 return ParsedTseInput(insCode = code, rawQuery = code, isUrl = true)
             }
         }
@@ -98,10 +101,14 @@ object TseService {
      */
     private fun getBody(url: String): String? {
         val now = System.currentTimeMillis()
-        if (now < unavailableUntil) return null
+        val unavailableRemaining = unavailableUntil - now
+        if (unavailableRemaining in 1..NETWORK_COOLDOWN_MS) return null
+        if (unavailableRemaining > NETWORK_COOLDOWN_MS) unavailableUntil = 0L
+        val httpPreferenceRemaining = preferHttpUntil - now
+        if (httpPreferenceRemaining > HTTP_PREFERENCE_MS) preferHttpUntil = 0L
         val candidates = if (url.startsWith(HTTPS_BASE)) {
             val http = HTTP_BASE + url.removePrefix(HTTPS_BASE)
-            if (now < preferHttpUntil) listOf(http, url) else listOf(url, http)
+            if (preferHttpUntil - now in 1..HTTP_PREFERENCE_MS) listOf(http, url) else listOf(url, http)
         } else listOf(url)
         for (candidate in candidates) {
             val body = runCatching {
@@ -214,14 +221,16 @@ object TseService {
         val byIdentity = mutableMapOf<String, TseInstrument>()
         for (i in 0 until minOf(rows.length(), 10_000)) {
             val item = rows.optJSONObject(i) ?: continue
-            val insCode = item.optString("insCode").trim()
-            val symbol = item.optString("lva").ifBlank {
-                item.optString("lVal18AFC")
-            }.trim()
+            val insCode = item.optString("insCode").filter(Char::isDigit).take(20)
+            val symbol = PumpScanner.safeRemoteText(
+                item.optString("lva").ifBlank { item.optString("lVal18AFC") },
+                200
+            )
             if (symbol.isBlank() && insCode.isBlank()) continue
-            val name = item.optString("lvc").ifBlank {
-                item.optString("lVal30")
-            }.trim().ifBlank { symbol }
+            val name = PumpScanner.safeRemoteText(
+                item.optString("lvc").ifBlank { item.optString("lVal30") },
+                200
+            ).ifBlank { symbol }
             val close = positiveNumber(item, "pcl", "pClosing")
             val last = positiveNumber(item, "pdv", "pDrCotVal")
             val yesterday = positiveNumber(item, "py", "priceYesterday")
@@ -285,10 +294,12 @@ object TseService {
         }
 
         // ۲. فیلتر سریع در دیتابیس آماده‌ی پرمعامله‌ها
+        val normalizedQuery = normalizeSymbol(query)
         val localMatches = POPULAR_INSTRUMENTS.filter {
-            it.symbol.contains(query, ignoreCase = true) ||
-                    it.name.contains(query, ignoreCase = true) ||
-                    it.insCode == query
+            normalizedQuery.isNotEmpty() &&
+                    (normalizeSymbol(it.symbol).contains(normalizedQuery) ||
+                            normalizeSymbol(it.name).contains(normalizedQuery) ||
+                            it.insCode == query)
         }
         results.addAll(localMatches)
 
@@ -321,6 +332,7 @@ object TseService {
      * واکشی اطلاعات یک نماد با insCode
      */
     fun fetchByInsCode(insCode: String): TseInstrument? {
+        if (!insCode.matches(Regex("\\d{8,20}"))) return null
         // ابتدا اطلاعات بسته/آخرین قیمت را می‌خوانیم
         val priceUrl = "https://cdn.tsetmc.com/api/ClosingPrice/GetClosingPriceInfo/$insCode"
 
@@ -365,8 +377,10 @@ object TseService {
             val json = JSONObject(body)
             val info = json.optJSONObject("instrumentInfo")
             if (info != null) {
-                symbol = info.optString("lVal18AFC").ifBlank { insCode }
-                name = info.optString("lVal30").ifBlank { symbol }
+                symbol = PumpScanner.safeRemoteText(info.optString("lVal18AFC"), 200)
+                    .ifBlank { insCode }
+                name = PumpScanner.safeRemoteText(info.optString("lVal30"), 200)
+                    .ifBlank { symbol }
             }
         }
 
@@ -463,11 +477,14 @@ object TseService {
         val list = mutableListOf<TseInstrument>()
         val arr = parseArray(body, "instrumentSearch") ?: return list
 
-        for (i in 0 until arr.length()) {
+        for (i in 0 until minOf(arr.length(), 100)) {
             val item = arr.optJSONObject(i) ?: continue
-            val insCode = item.optString("insCode").trim()
-            val symbol = item.optString("lVal18AFC").trim().ifBlank { item.optString("l18") }
-            val name = item.optString("lVal30").trim().ifBlank { symbol }
+            val insCode = item.optString("insCode").filter(Char::isDigit).take(20)
+            val symbol = PumpScanner.safeRemoteText(
+                item.optString("lVal18AFC").ifBlank { item.optString("l18") },
+                200
+            )
+            val name = PumpScanner.safeRemoteText(item.optString("lVal30"), 200).ifBlank { symbol }
             val pClosing = item.optDouble("pClosing", 0.0).takeIf { it > 0 }
             val pLast = item.optDouble("pDrCotVal", 0.0).takeIf { it > 0 }
             val volume = item.optDouble("qTotTran5J", 0.0).takeIf { it > 0 }

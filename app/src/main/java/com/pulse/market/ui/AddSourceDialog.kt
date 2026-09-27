@@ -31,6 +31,7 @@ import com.pulse.market.data.ChangeMode
 import com.pulse.market.data.FetchKind
 import com.pulse.market.data.Num
 import com.pulse.market.data.SourceDef
+import com.pulse.market.data.SourceUrlPolicy
 import com.pulse.market.data.SymbolDef
 import com.pulse.market.ui.settings.DialogActionsRow
 import com.pulse.market.ui.settings.DialogShell
@@ -69,7 +70,7 @@ fun AddSourceDialog(
     var symbolsText by remember { mutableStateOf("") }
 
     val cleanUrl = url.trim()
-    val validUrl = cleanUrl.startsWith("https://") || cleanUrl.startsWith("http://")
+    val validUrl = SourceUrlPolicy.isValid(cleanUrl)
     val parsedScale = Num.parse(scale)?.takeIf { it > 0.0 }
     val canSave = title.isNotBlank() && validUrl && parsedScale != null &&
             (if (kind == FetchKind.JSON_REST) pricePath.isNotBlank() else cssSelector.isNotBlank())
@@ -110,11 +111,14 @@ fun AddSourceDialog(
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri)
                         )
                         Hint("مثلاً: https://api.example.com/price/{symbol}")
-                        if (url.trim().startsWith("http://")) {
+                        if (url.trim().startsWith("http://", ignoreCase = true)) {
                             Hint(
                                 "⚠️ آدرس http رمزنگاری نشده است؛ هر کسی در مسیر شبکه می‌تواند " +
                                         "مقدار قیمت را عوض کند. credential روی HTTP ارسال نمی‌شود؛ اگر سایت https دارد، حتماً https بگذار."
                             )
+                        }
+                        if (cleanUrl.isNotEmpty() && !validUrl) {
+                            Hint("آدرس باید HTTP(S) معتبر و دارای میزبان باشد؛ فقط {symbol} و {symbols} به‌عنوان جای‌خالی پذیرفته می‌شوند.")
                         }
                     }
                 }

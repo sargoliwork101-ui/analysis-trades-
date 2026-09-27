@@ -513,7 +513,7 @@ fun LookCategory(
             Column(modifier = Modifier.padding(16.dp)) {
                 OutlinedTextField(
                     value = cfg.title,
-                    onValueChange = { onChange(cfg.copy(title = it)) },
+                    onValueChange = { onChange(cfg.copy(title = it.take(200))) },
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("عنوان دلخواه ویجت", fontSize = 12.sp) },
                     placeholder = { Text("مثلاً: سبد من / طلا و ارز", fontSize = 12.sp) },
@@ -798,7 +798,7 @@ fun UpdateCategory(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Slider(
-                    value = cfg.intervalSec.toFloat(),
+                    value = cfg.intervalSec.coerceIn(5, 120).toFloat(),
                     onValueChange = { onChange(cfg.copy(intervalSec = it.toInt())) },
                     valueRange = 5f..120f,
                     steps = 22,

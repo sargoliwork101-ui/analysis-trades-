@@ -20,8 +20,10 @@ data class SourceHealth(
     val responseMs: Long = 0L,
     val anomalyCount: Int = 0
 ) {
+    /** سالم یعنی همه‌ی نمادهای همان دور پاسخ معتبر گرفته‌اند؛ موفقیت جزئی اختلال است. */
     val isHealthy: Boolean
-        get() = lastSuccessAt > 0L && consecutiveFailures == 0 && successCount > 0
+        get() = totalCount > 0 && successCount == totalCount &&
+                lastSuccessAt > 0L && consecutiveFailures == 0 && lastError.isBlank()
 }
 
 /** وضعیت آخرین دسترسی هر منبع؛ فقط اطلاعات فنی و نام میزبان ذخیره می‌شود، نه URL یا هدر حساس. */
@@ -55,12 +57,14 @@ object SourceHealthStore {
         val map = load(context).associateBy { it.sourceId }.toMutableMap()
         val old = map[sourceId] ?: SourceHealth(sourceId)
         val success = quotes.count { it.price?.isFinite() == true && it.error == null }
+        val complete = quotes.isNotEmpty() && success == quotes.size
         val error = safeError(quotes.firstOrNull { it.error != null }?.error.orEmpty())
         map[sourceId] = old.copy(
             lastCheckedAt = now,
             lastSuccessAt = if (success > 0) now else old.lastSuccessAt,
-            lastFailureAt = if (success == 0) now else old.lastFailureAt,
-            consecutiveFailures = if (success > 0) 0 else (old.consecutiveFailures + 1).coerceAtMost(9999),
+            lastFailureAt = if (complete) old.lastFailureAt else now,
+            consecutiveFailures = if (complete) 0 else
+                (old.consecutiveFailures + 1).coerceAtMost(9999),
             successCount = success,
             totalCount = quotes.size,
             lastError = when {

@@ -94,7 +94,22 @@ object Fetcher {
             val batchUrls = (listOfNotNull(source.batchTemplate) + source.urlFallbacks)
                 .map { it.replace("{symbols}", joined).replace("{symbol}", joined) }
             val json = gate.withPermit { parseJson(getAny(batchUrls, source)) }
-            symbols.map { quoteFromJson(source, it, json) }
+            val batch = symbols.map { quoteFromJson(source, it, json) }
+            val missing = batch.withIndex().filter { (_, quote) -> quote.price == null }
+            if (missing.isEmpty()) {
+                batch
+            } else {
+                // پاسخ گروهی ممکن است فقط بعضی نمادها را جا بیندازد؛ فقط همان‌ها
+                // تکی دوباره خوانده شوند، نه اینکه موفقیت جزئی «سالم» اعلام شود.
+                val retried = parallel(missing.map { symbols[it.index] }) { sym ->
+                    fetchOne(source, sym)
+                }
+                batch.toMutableList().apply {
+                    missing.forEachIndexed { retryIndex, indexed ->
+                        this[indexed.index] = retried[retryIndex]
+                    }
+                }
+            }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
@@ -108,7 +123,9 @@ object Fetcher {
      * اپراتورها و رام‌های کند را بسیار کمتر از درخواست جداگانه‌ی هر نماد می‌کند.
      */
     private suspend fun fetchTseBatch(source: SourceDef, symbols: List<SymbolDef>): List<Quote> {
-        val market = TseService.fetchMarketWatch(symbols.map { it.code })
+        val market = gate.withPermit {
+            TseService.fetchMarketWatch(symbols.map { it.code })
+        }
         if (market == null) {
             return symbols.map { sym ->
                 Quote(
@@ -128,7 +145,7 @@ object Fetcher {
                 quoteFromTse(source, sym, bulk)
             } else {
                 // نمادهای متوقف/تازه ممکن است در تابلوی bulk نباشند؛ فقط همان یکی مستقیم بررسی شود.
-                fetchTse(source, sym)
+                gate.withPermit { fetchTse(source, sym) }
             }
         }
         return out
@@ -175,6 +192,7 @@ object Fetcher {
             }
             val raw = if (source.cssAttr.isNullOrBlank()) el.text() else el.attr(source.cssAttr)
             val scaled = Num.parse(raw)?.let { it * scaleOf(source, sym) }
+                ?.takeIf { it.isFinite() && it > 0.0 }
             Quote(
                 code = sym.code, sourceId = source.id, label = sym.label, price = scaled,
                 unit = unitOf(source, sym),
@@ -196,9 +214,9 @@ object Fetcher {
         val change = readChange(json, source, sym, rawPrice)
         val spark = JsonPath.readDoubleList(json, source.sparkPath?.replace("{symbol}", sym.code))
             .map { it * scale }
-            .filter { it.isFinite() }
+            .filter { it.isFinite() && it > 0.0 }
             .let { if (it.size >= 3) it.takeLast(SPARK_HISTORY_MAX) else emptyList() }
-        val scaled = rawPrice?.let { it * scale }?.takeIf { it.isFinite() }
+        val scaled = rawPrice?.let { it * scale }?.takeIf { it.isFinite() && it > 0.0 }
         return Quote(
             code = sym.code, sourceId = source.id,
             label = sym.label,
@@ -217,8 +235,8 @@ object Fetcher {
         val path = source.volumePath?.replace("{symbol}", sym.code) ?: return null
         // scale برای تبدیل واحد «قیمت» است (ریال→تومان، سنت→دلار)؛ حجم تعداد/ارزش
         // معامله است و ضرب‌کردنش در ضریب قیمت، حجم را بی‌دلیل ده برابر کم‌وزیاد می‌کند.
-        JsonPath.readDouble(json, path)?.takeIf { it.isFinite() }?.let { return it }
-        val list = JsonPath.readDoubleList(json, path).filter { it.isFinite() }
+        JsonPath.readDouble(json, path)?.takeIf { it.isFinite() && it >= 0.0 }?.let { return it }
+        val list = JsonPath.readDoubleList(json, path).filter { it.isFinite() && it >= 0.0 }
         return if (list.isEmpty()) null else list.sum().takeIf { it.isFinite() }
     }
 

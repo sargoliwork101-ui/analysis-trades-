@@ -22,7 +22,7 @@ object Format {
     /** قیمت را خوانا می‌کند: ۱٬۲۵۰٬۰۰۰ / ۹۸٬۴۵۰ / ۰٫۰۰۰۱۲۳ — با compact: 64.2K / ۹۸٫۴ هزار
      *  مقادیر اعشاریِ بالای هزار گرد نمی‌شوند (کریپتو: 64,210.55)؛ اعداد صحیح (بورس/طلا) همیشه بدون اعشار */
     fun price(value: Double?, persian: Boolean = false, compact: Boolean = false): String {
-        if (value == null) return "—"
+        if (value == null || !value.isFinite()) return "—"
         if (compact && abs(value) >= 1000) return volume(value, persian)
         val a = abs(value)
         val text = when {
@@ -34,7 +34,7 @@ object Format {
     }
 
     fun pct(value: Double?, persian: Boolean = false): String {
-        if (value == null) return ""
+        if (value == null || !value.isFinite()) return ""
         val arrow = when {
             value > 0.0001 -> "▲"
             value < -0.0001 -> "▼"
@@ -46,7 +46,7 @@ object Format {
 
     /** حجم معاملات/حجم ۲۴ ساعت — فرمت فشرده: ۱۲٫۴ میلیون / 3.2B */
     fun volume(value: Double?, persian: Boolean = false): String {
-        if (value == null) return "—"
+        if (value == null || !value.isFinite()) return "—"
         val a = abs(value)
         return when {
             a >= 1_000_000_000 -> compactNum(value / 1_000_000_000, if (persian) " میلیارد" else "B", persian)

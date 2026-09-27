@@ -72,8 +72,8 @@ object QuoteRepo {
     private fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
 
-    /** کلید یکتای هر نماد: منبع + کد */
-    fun key(sourceId: String, code: String) = "$sourceId|$code"
+    /** کلید یکتای بدون برخورد: طول منبع مرز را مشخص می‌کند، حتی اگر متن `|` داشته باشد. */
+    fun key(sourceId: String, code: String) = "${sourceId.length}:$sourceId$code"
 
     // ───────────── کش ─────────────
 
@@ -85,7 +85,10 @@ object QuoteRepo {
             json.decodeFromString(ListSerializer(Quote.serializer()), raw)
         }.getOrDefault(emptyList())
         val map = list.asSequence()
-            .filter { it.sourceId.isNotBlank() && it.code.isNotBlank() && it.price?.isFinite() == true }
+            .filter {
+                it.sourceId.isNotBlank() && it.code.isNotBlank() &&
+                        it.price?.let { price -> price.isFinite() && price > 0.0 } == true
+            }
             .sortedByDescending { it.ts }
             .take(MAX_CACHED_SYMBOLS)
             .associateBy { key(it.sourceId, it.code) }
@@ -210,7 +213,9 @@ object QuoteRepo {
      * و بدون وابستگی به «تغییر قیمت» به‌تدریج شکل می‌گیرد.
      */
     private fun appendHistory(context: Context, fresh: List<Quote>): Map<String, List<Double>> {
-        val good = fresh.filter { it.price != null }
+        val good = fresh.filter { quote ->
+            quote.price?.let { it.isFinite() && it > 0.0 } == true
+        }
         if (good.isEmpty()) return loadHistory(context)
         val hist = loadHistory(context).toMutableMap()
         good.forEach { q ->
@@ -349,34 +354,55 @@ object QuoteRepo {
         val fetched = coroutineScope {
             bySource.map { (sid, syms) ->
                 async {
-                    val src = ConfigStore.resolveSource(context, sid)
-                    if (src == null) {
-                        SourceHealthStore.recordFailure(context, sid, "منبع پیدا نشد")
-                        return@async emptyList()
+                    try {
+                        val src = ConfigStore.resolveSource(context, sid)
+                        if (src == null) {
+                            SourceHealthStore.recordFailure(context, sid, "منبع پیدا نشد")
+                            return@async emptyList()
+                        }
+                        val started = System.currentTimeMillis()
+                        val quotes = Fetcher.fetchAll(src, syms)
+                        SourceHealthStore.record(
+                            context = context,
+                            sourceId = sid,
+                            quotes = quotes,
+                            responseMs = System.currentTimeMillis() - started,
+                            endpoint = Fetcher.lastEndpoint(sid)
+                        )
+                        quotes
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                        throw cancelled
+                    } catch (failure: Exception) {
+                        // خرابی یک منبع دلخواه نباید تازه‌سازی همه‌ی منابع/ویجت‌ها را لغو کند.
+                        SourceHealthStore.recordFailure(
+                            context,
+                            sid,
+                            SensitiveText.redact(failure.message.orEmpty(), 160)
+                                .ifBlank { "خواندن منبع ممکن نشد" }
+                        )
+                        emptyList()
                     }
-                    val started = System.currentTimeMillis()
-                    val quotes = Fetcher.fetchAll(src, syms)
-                    SourceHealthStore.record(
-                        context = context,
-                        sourceId = sid,
-                        quotes = quotes,
-                        responseMs = System.currentTimeMillis() - started,
-                        endpoint = Fetcher.lastEndpoint(sid)
-                    )
-                    quotes
                 }
             }.awaitAll().flatten()
         }
 
         val cached = loadCachedMap(context)
-        val screened = screenAnomalies(context, fetched, cached)
+        val safeFetched = fetched.map { quote ->
+            val valid = quote.price?.let { it.isFinite() && it > 0.0 }
+            if (quote.price != null && valid != true) {
+                quote.copy(price = null, error = quote.error ?: "قیمت نامعتبر دریافت شد")
+            } else quote
+        }
+        val screened = screenAnomalies(context, safeFetched, cached)
         val anomalyBySource = screened.rejected.values.groupingBy { it.sourceId }.eachCount()
         anomalyBySource.forEach { (sourceId, count) ->
             SourceHealthStore.recordAnomalies(context, sourceId, count)
         }
 
         // کش دائمی فقط با داده‌ی سالم و تأییدشده تازه می‌شود (+ تاریخچه‌ی نمودار).
-        val good = screened.accepted.filter { it.price != null }
+        val good = screened.accepted.filter { quote ->
+            quote.price?.let { it.isFinite() && it > 0.0 } == true
+        }
         if (good.isNotEmpty()) {
             persist(context, good, appendHistory(context, good))
         }

@@ -140,7 +140,9 @@ object PumpAiReviewer {
             if (config.providerSearch) {
                 // افزونه‌ی جست‌وجوی دو ارائه‌دهنده‌ی رایج؛ سایر سرویس‌ها می‌توانند
                 // جست‌وجو را با قابلیت داخلی خود مدل و بر اساس prompt انجام دهند.
-                val host = runCatching { URI(endpoint).host.orEmpty().lowercase() }.getOrDefault("")
+                val host = runCatching {
+                    URI(endpoint).host.orEmpty().lowercase(Locale.ROOT)
+                }.getOrDefault("")
                 when {
                     host == "api.openai.com" -> put(
                         "web_search_options",
@@ -228,7 +230,7 @@ object PumpAiReviewer {
             val item = element as? JsonObject ?: return@mapNotNull null
             val url = item.string("url").trim().take(1000)
             val uri = runCatching { URI(url) }.getOrNull()
-            val host = uri?.host?.lowercase().orEmpty()
+            val host = uri?.host?.lowercase(Locale.ROOT).orEmpty()
             val title = safeDisplayText(item.string("title"), 240)
             // خبر HTTP قابل دست‌کاری است و نام میزبان برای مقابله با عنوان/منبع جعلی نمایش داده می‌شود.
             if (title.isBlank() || !uri?.scheme.equals("https", true) || host.isBlank() ||

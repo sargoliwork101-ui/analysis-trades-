@@ -78,7 +78,8 @@ object PumpAlertEngine {
         val keySeen = "seen_$safeKey"
         val keyNotified = "notified_$safeKey"
         val store = prefs(context)
-        if (scan.at <= store.getLong(keySeen, 0L)) return false
+        val now = System.currentTimeMillis()
+        if (!shouldEvaluateScan(scan.at, store.getLong(keySeen, 0L), now)) return false
 
         val matches = scan.coins.filter {
             (it.change24h ?: Double.NEGATIVE_INFINITY) >= cfg.pumpMinChange
@@ -87,7 +88,6 @@ object PumpAlertEngine {
         store.edit().putLong(keySeen, scan.at).apply()
         val top = selectCandidate(scan.coins, cfg.pumpMinChange) ?: return false
 
-        val now = System.currentTimeMillis()
         val cooldownMs = cfg.pumpAlertCooldownMin.coerceIn(15, 24 * 60) * 60_000L
         if (!TimePolicy.cooldownElapsed(now, store.getLong(keyNotified, 0L), cooldownMs)) return false
 
@@ -104,6 +104,31 @@ object PumpAlertEngine {
         .asSequence()
         .filter { (it.change24h ?: Double.NEGATIVE_INFINITY) >= minChange24h }
         .maxByOrNull { it.score }
+
+    /** timestamp برابر تکراری است؛ timestamp تازه حتی پس از rollback ساعت پذیرفته می‌شود. */
+    internal fun shouldEvaluateScan(scanAt: Long, lastSeen: Long, now: Long): Boolean =
+        scanAt > 0L && scanAt != lastSeen && TimePolicy.isFresh(now, scanAt, 5 * 60_000L)
+
+    /** فضای بزرگ شناسه، احتمال جایگزین‌شدن اعلان ویجت‌های متفاوت را بسیار کم می‌کند. */
+    internal fun notificationId(ownerKey: String): Int =
+        0x6000_0000 or (ownerKey.hashCode() and 0x0FFF_FFFF)
+
+    /** state ویجت حذف‌شده نباید در SharedPreferences باقی بماند. */
+    @Synchronized
+    fun pruneOwners(context: Context, activeOwnerKeys: Set<String>) {
+        val safeOwners = activeOwnerKeys.mapTo(mutableSetOf()) { it.take(100) }
+        val store = prefs(context)
+        val stale = store.all.keys.filter { key ->
+            when {
+                key.startsWith("seen_") -> key.removePrefix("seen_") !in safeOwners
+                key.startsWith("notified_") -> key.removePrefix("notified_") !in safeOwners
+                else -> false
+            }
+        }
+        if (stale.isNotEmpty()) {
+            store.edit().also { editor -> stale.forEach(editor::remove) }.apply()
+        }
+    }
 
     private fun notify(
         context: Context,
@@ -124,7 +149,7 @@ object PumpAlertEngine {
 
         val open = PendingIntent.getActivity(
             context,
-            ownerKey.hashCode(),
+            notificationId(ownerKey),
             Intent(context, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -140,7 +165,7 @@ object PumpAlertEngine {
             .build()
         return runCatching {
             context.getSystemService(NotificationManager::class.java)
-                .notify(7000 + abs(ownerKey.hashCode() % 1000), notification)
+                .notify(notificationId(ownerKey), notification)
         }.isSuccess
     }
 

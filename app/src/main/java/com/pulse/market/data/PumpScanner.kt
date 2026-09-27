@@ -7,6 +7,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import org.json.JSONArray
+import java.util.Locale
 
 /**
  * ─────────────────────────────────────────────────────────────────────────
@@ -60,7 +61,7 @@ object PumpScanner {
     ) {
         /** «سولانا (SOL)» — نام نمایشی برای ویجت و فهرست‌ها */
         val displayName: String
-            get() = if (symbol.isBlank()) name else "$name (${symbol.uppercase()})"
+            get() = if (symbol.isBlank()) name else "$name (${symbol.uppercase(Locale.ROOT)})"
 
         /** تبدیل به نماد قابل افزودن به ویجت (منبع: کریپتو CoinGecko) */
         fun toSymbolDef(sourceId: String = CRYPTO_SOURCE_ID): SymbolDef =
@@ -110,7 +111,9 @@ object PumpScanner {
     ) {
         /** کوین‌هایی که آستانه‌ی پامپ را رد کرده‌اند */
         val matches: List<PumpCoin>
-            get() = coins.filter { (it.change24h ?: 0.0) >= minChange }
+            get() = coins.filter {
+                (it.change24h ?: Double.NEGATIVE_INFINITY) >= minChange
+            }
 
         val isEmpty: Boolean get() = coins.isEmpty()
     }
@@ -148,7 +151,7 @@ object PumpScanner {
         force: Boolean = false
     ): PumpScan = withContext(Dispatchers.IO) {
         val size = universe.coerceIn(10, 250)
-        val threshold = minChange.coerceIn(0.0, 100.0)
+        val threshold = minChange.takeIf { it.isFinite() }?.coerceIn(0.0, 100.0) ?: 8.0
 
         if (!force) {
             cached(context)?.let { old ->

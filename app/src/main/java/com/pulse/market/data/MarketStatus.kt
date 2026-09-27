@@ -71,7 +71,8 @@ object MarketStatus {
         val cal = Calendar.getInstance(TimeZone.getTimeZone(zone))
         if (cal.get(Calendar.DAY_OF_WEEK) !in workDays) return false
         val minute = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
-        return minute in fromMinute..toMinute
+        // زمان پایان، لحظه‌ی بسته‌شدن است (مثلاً ۱۲:۳۰ دیگر «باز» نشان داده نشود).
+        return minute >= fromMinute && minute < toMinute
     }
 
     /** بازارِ هر منبع — از ماژول مرجع MarketKind؛ منبع دلخواه بازار ندارد */

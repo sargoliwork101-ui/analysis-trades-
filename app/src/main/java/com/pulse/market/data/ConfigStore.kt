@@ -11,11 +11,14 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
@@ -92,7 +95,9 @@ object ConfigStore {
             .map { it.trim().take(200) }
             .filter { it.isNotEmpty() }
             .distinct()
-            .take(100)
+            // هر ویجت حداکثر MAX_SYMBOLS ردیف دارد؛ منبع بیشتر فقط UI/DataStore را
+            // سنگین می‌کند و هیچ نمادی از آن به نمایش نمی‌رسد.
+            .take(MAX_SYMBOLS)
             .ifEmpty { listOf("crypto_coingecko") }
         val symbols = cfg.symbols.asSequence()
             .filter { it.code.isNotBlank() }
@@ -138,7 +143,7 @@ object ConfigStore {
             sourceIds = ids,
             symbols = symbols,
             alerts = alerts,
-            intervalSec = cfg.intervalSec.coerceIn(5, 3600),
+            intervalSec = cfg.intervalSec.coerceIn(5, 120),
             fontScale = safeFontScale,
             sparkPoints = cfg.sparkPoints.coerceIn(6, 60),
             rows = cfg.rows.coerceIn(1, MAX_SYMBOLS),
@@ -162,7 +167,13 @@ object ConfigStore {
     suspend fun current(context: Context, widgetId: Int = 0): WidgetConfig =
         configFlow(context, widgetId).first()
 
+    /** ذخیره‌ی صریح: ابتدا نوبت debounce قدیمی‌تر همان ویجت را کامل لغو می‌کند. */
     suspend fun save(context: Context, cfg: WidgetConfig, widgetId: Int = 0) {
+        cancelPendingAndJoin(widgetId)
+        writeConfig(context, cfg, widgetId)
+    }
+
+    private suspend fun writeConfig(context: Context, cfg: WidgetConfig, widgetId: Int) {
         val migrated = migrate(cfg)
         context.dataStore.edit { prefs ->
             val file = loadFile(prefs)
@@ -193,13 +204,19 @@ object ConfigStore {
     @Synchronized
     private fun enqueueSave(context: Context, cfg: WidgetConfig, widgetId: Int, delayMs: Long) {
         // فقط نوبتِ همان ویجت جایگزین می‌شود؛ نوبت ویجت‌های دیگر دست‌نخورده می‌ماند.
-        pendingSaves.remove(widgetId)?.cancel()
+        val previous = pendingSaves.remove(widgetId)
+        previous?.cancel()
         // LAZY مهم است: Job باید پیش از شروع در نقشه ثبت شود؛ در حالت delay=0 ممکن
         // بود coroutine زودتر تمام شود و Job تکمیل‌شده برای همیشه در نقشه بماند.
         val job = ioScope.launch(start = CoroutineStart.LAZY) {
             try {
+                // اگر نوبت قبلی از delay گذشته و وارد DataStore شده، پیش از نوشتن
+                // مقدار تازه تا پایان cancellation آن صبر می‌کنیم.
+                if (previous != null) {
+                    withContext(NonCancellable) { previous.join() }
+                }
                 if (delayMs > 0) delay(delayMs)
-                save(context.applicationContext, cfg, widgetId)
+                writeConfig(context.applicationContext, cfg, widgetId)
             } finally {
                 val mine = currentCoroutineContext()[Job]
                 if (mine != null) pendingSaves.remove(widgetId, mine)
@@ -231,7 +248,7 @@ object ConfigStore {
 
     /** پاک کردن تنظیمات ویجتِ حذف‌شده از صفحه */
     suspend fun deleteWidget(context: Context, widgetId: Int) {
-        cancelPending(widgetId)
+        cancelPendingAndJoin(widgetId)
         context.dataStore.edit { prefs ->
             val file = loadFile(prefs)
             if (file.widgets.containsKey(widgetId.toString())) {
@@ -280,18 +297,18 @@ object ConfigStore {
         list.asSequence()
             .filter {
                 it.id.isNotBlank() && SourceCatalog.byId(it.id.trim()) == null &&
-                        isWebUrl(it.urlTemplate)
+                        SourceUrlPolicy.isValid(it.urlTemplate)
             }
             .map { source ->
                 source.copy(
                     id = source.id.trim().take(200),
                     title = source.title.trim().ifBlank { "منبع دلخواه" }.take(200),
                     subtitle = source.subtitle.take(300),
-                    urlTemplate = source.urlTemplate.trim().take(4096),
-                    batchTemplate = source.batchTemplate?.trim()?.take(4096)
-                        ?.takeIf(::isWebUrl),
-                    urlFallbacks = source.urlFallbacks.map { it.trim().take(4096) }
-                        .filter(::isWebUrl).distinct().take(5),
+                    urlTemplate = source.urlTemplate.trim().take(2_000),
+                    batchTemplate = source.batchTemplate?.trim()?.take(2_000)
+                        ?.takeIf(SourceUrlPolicy::isValid),
+                    urlFallbacks = source.urlFallbacks.map { it.trim().take(2_000) }
+                        .filter(SourceUrlPolicy::isValid).distinct().take(5),
                     scale = source.scale.takeIf { it.isFinite() && it > 0.0 } ?: 1.0,
                     unit = source.unit.trim().take(40),
                     symbols = source.symbols.asSequence()
@@ -320,11 +337,6 @@ object ConfigStore {
             .distinctBy { it.id }
             .take(100)
             .toList()
-
-    private fun isWebUrl(url: String): Boolean {
-        val clean = url.trim()
-        return clean.startsWith("https://") || clean.startsWith("http://")
-    }
 
     private fun isSafeCustomHeaderName(name: String): Boolean {
         val reserved = setOf("connection", "content-length", "host", "transfer-encoding")
@@ -397,7 +409,7 @@ object ConfigStore {
             .filter { it.id.isNotBlank() && it.name.isNotBlank() }
             .map { watchlist ->
                 val ids = watchlist.sourceIds.map { it.trim().take(200) }
-                    .filter { it.isNotBlank() }.distinct().take(20)
+                    .filter { it.isNotBlank() }.distinct().take(MAX_SYMBOLS)
                 val symbols = watchlist.symbols.asSequence()
                     .filter { it.code.isNotBlank() }
                     .map { symbol ->
@@ -416,7 +428,7 @@ object ConfigStore {
                     id = watchlist.id.trim().take(200),
                     name = watchlist.name.trim().take(80),
                     sourceIds = (ids + symbols.map { it.sourceId }.filter { it.isNotBlank() })
-                        .distinct().take(20),
+                        .distinct().take(MAX_SYMBOLS),
                     symbols = symbols,
                     updatedAt = watchlist.updatedAt.coerceAtLeast(0L)
                 )
@@ -426,15 +438,19 @@ object ConfigStore {
             .take(30)
             .toList()
 
-    @Synchronized
-    private fun cancelPending(widgetId: Int) {
-        pendingSaves.remove(widgetId)?.cancel()
+    /**
+     * منتظر پایان واقعی job هم می‌مانیم؛ cancel بدون join می‌توانست وقتی job وارد
+     * DataStore شده بود، حذف ویجت یا import را با تنظیمات قدیمی بازنویسی کند.
+     */
+    private suspend fun cancelPendingAndJoin(widgetId: Int) {
+        pendingSaves.remove(widgetId)?.cancelAndJoin()
     }
 
-    @Synchronized
-    private fun cancelAllPending() {
-        pendingSaves.values.forEach { it.cancel() }
+    private suspend fun cancelAllPendingAndJoin() {
+        val jobs = pendingSaves.values.toList()
         pendingSaves.clear()
+        jobs.forEach { it.cancel() }
+        jobs.forEach { it.join() }
     }
 
     // ───────────── بکاپ و بازگردانی ─────────────
@@ -475,7 +491,7 @@ object ConfigStore {
         if (dump.version != 1) error("نسخه‌ی فایل بکاپ پشتیبانی نمی‌شود")
         // ذخیره‌ی debounce شده‌ی صفحه نباید بعد از بازیابی، فایل تازه را دوباره با
         // تنظیمات قدیمی بازنویسی کند.
-        cancelAllPending()
+        cancelAllPendingAndJoin()
         val safeSources = sanitizeCustom(dump.customSources)
         val safeWidgets = WidgetsFile(
             template = migrate(dump.widgets.template),

@@ -25,7 +25,7 @@ object WebSymbolSearch {
      */
     suspend fun search(sourceId: String, query: String): List<SymbolDef>? =
         withContext(Dispatchers.IO) {
-            val q = query.trim()
+            val q = query.trim().take(200)
             if (q.isEmpty()) return@withContext null
             try {
                 when (marketKindOf(sourceId)) {
@@ -49,9 +49,10 @@ object WebSymbolSearch {
         val out = mutableListOf<SymbolDef>()
         for (i in 0 until arr.length()) {
             val o = arr.optJSONObject(i) ?: continue
-            val id = o.optString("id").trim()
+            val id = PumpScanner.safeRemoteText(o.optString("id"), 200)
             if (id.isEmpty()) continue
-            out += SymbolDef(id, o.optString("name").ifBlank { id }, sourceId)
+            val name = PumpScanner.safeRemoteText(o.optString("name"), 200).ifBlank { id }
+            out += SymbolDef(id, name, sourceId)
         }
         return out.take(15)
     }

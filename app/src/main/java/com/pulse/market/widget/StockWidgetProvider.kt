@@ -176,6 +176,14 @@ open class StockWidgetProvider : AppWidgetProvider() {
 
             val cfgs = ids.map { it to ConfigStore.current(context, it) }
 
+            // state ضداسپم فقط برای ویجت‌ها/قوانین نصب‌شده بماند؛ حذف ویجت یا
+            // قانون نباید SharedPreferences را بی‌انتها بزرگ کند.
+            AlertEngine.pruneState(
+                context,
+                cfgs.associate { (id, cfg) -> "widget_$id" to cfg.alerts }
+            )
+            PumpAlertEngine.pruneOwners(context, ids.mapTo(mutableSetOf()) { "widget_$it" })
+
             // نمادهای هر ویجت همیشه برای «نمایش» محاسبه می‌شوند؛
             // فقط «گرفتن از شبکه» به تنظیمات هر ویجت احترام می‌گذارد:
             // بیرون از بازه‌ی ساعتی یا ویجتِ «دستی» (به‌روزرسانی خودکار خاموش) این نوبت شبکه نمی‌خواهد
@@ -212,7 +220,7 @@ open class StockWidgetProvider : AppWidgetProvider() {
             // فاصله‌ی تازگی فقط از ویجت‌هایی که واقعاً شبکه می‌خواهند
             val minInterval = (cfgs.filterIndexed { i, _ -> wantedNet[i].isNotEmpty() }
                 .minOfOrNull { it.second.intervalSec } ?: cfgs.minOf { it.second.intervalSec })
-                .coerceIn(5, 3600)
+                .coerceIn(5, 120)
             val stale = !TimePolicy.isFresh(
                 System.currentTimeMillis(),
                 QuoteRepo.lastUpdated(context),
@@ -345,6 +353,11 @@ open class StockWidgetProvider : AppWidgetProvider() {
             val cfgs = ids.map { it to ConfigStore.current(context, it) }
             val wanted = cfgs.map { (_, cfg) -> QuoteRepo.wantedFor(context, cfg) }
             QuoteRepo.pruneUnused(context, retainedKeysFor(cfgs, wanted))
+            AlertEngine.pruneState(
+                context,
+                cfgs.associate { (id, cfg) -> "widget_$id" to cfg.alerts }
+            )
+            PumpAlertEngine.pruneOwners(context, ids.mapTo(mutableSetOf()) { "widget_$it" })
         }
 
         private fun retainedKeysFor(
@@ -392,7 +405,7 @@ open class StockWidgetProvider : AppWidgetProvider() {
             return ids.map { ConfigStore.current(context, it) }
                 .filter { it.liveService }
                 .minOfOrNull { it.intervalSec }
-                ?.coerceIn(5, 3600)
+                ?.coerceIn(5, 120)
                 ?: 15
         }
 

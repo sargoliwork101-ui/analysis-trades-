@@ -20,6 +20,7 @@ com.pulse.market
 │   ├─ Model.kt              مدل‌ها: SourceDef / SymbolDef / Quote / WidgetConfig
 │   ├─ MarketKind.kt    ★    تنها مرجع «هر منبع مال کدام بازار است»
 │   ├─ SourceCatalog.kt      منابع آماده (تنها جا که id منابع «معنی» پیدا می‌کند)
+│   ├─ SourceUrlPolicy.kt    اعتبارسنجی واحد URL دلخواه و placeholderهای نماد
 │   ├─ Http.kt          ★    تنها نقطه‌ی ورود شبکه (OkHttp مشترک، فقط http/https، سقف حجم)
 │   ├─ InternalGuard.kt      توکن خصوصی پیام‌های داخلی ویجت (ضد جعل از بیرون)
 │   ├─ Fetcher.kt            موتور گرفتن (JSON / HTML / TSE) — واحد را روی Quote می‌نشان‌د
@@ -29,7 +30,9 @@ com.pulse.market
 │   ├─ TseModel.kt           سرویس بورس تهران (جستجو/قیمت/لایه‌های fallback)
 │   ├─ WebSymbolSearch.kt    جستجوی آنلاین نماد (کریپتو/آمریکا) — با MarketKind
 │   ├─ MarketStatus.kt       باز/بسته بودن بازارها — با MarketKind
-│   ├─ Alert.kt / AlertEngine.kt   هشدار قیمت + نوتیف
+│   ├─ Alert.kt / AlertEngine.kt   هشدار قیمت + نوتیف و state مستقل هر ویجت
+│   ├─ SourceHealthStore.kt   سلامت کامل/جزئی منبع و endpoint فعال
+│   ├─ PumpAlertEngine.kt / PumpAi*   هشدار پامپ + AI اختیاری on-demand
 │   └─ JsonPath.kt / Num.kt  مسیریابی JSON و پاک‌سازی اعداد فارسی
 │
 ├─ ui/                       ← ظاهر
@@ -91,11 +94,13 @@ QuoteText.volume(q)                 // «۱۲٫۴ میلیون»
   استفاده می‌کنند و فقط اسکیم `http`/`https` با سقف حجم پاسخ (۸ مگابایت) پذیرفته می‌شود.
 - redirect فقط محدود و برای GET دنبال می‌شود؛ downgrade از HTTPS به HTTP رد می‌شود و credential روی HTTP یا تغییر میزبان حذف می‌شود.
 - خطا = `stale` (چراغ قرمز) روی آخرین مقدار سالم؛ نه پاک‌کردن.
-- کش فقط با داده‌ی سالم merge می‌شود؛ فقط کلیدهای ویجت/هشدار فعال نگه داشته می‌شوند و نوشتن دیسک در حالت زنده حداکثر هر ۳۰ ثانیه است.
+- URL منبع دلخواه فقط با `SourceUrlPolicy` پذیرفته می‌شود تا UI، import و DataStore policy یکسان داشته باشند.
+- کش فقط با داده‌ی سالم merge می‌شود؛ کلید طول‌دارِ منبع/نماد برخورد رشته‌ای ندارد، فقط کلیدهای ویجت/هشدار فعال نگه داشته می‌شوند و نوشتن دیسک در حالت زنده حداکثر هر ۳۰ ثانیه است.
+- خطای یک منبع داخل refresh ایزوله می‌شود؛ موفقیت جزئی در `SourceHealthStore` سالم محسوب نمی‌شود.
 
 ### ۵) هر منطق خالصی که می‌شود، تست JVM دارد
 - `app/src/test/java/com/pulse/market/data/` — `JsonPath`، `Num`، `AppUpdater`،
-  `PumpScanner`، `Fetcher` (واحد/ضریب نماد).
+  `PumpScanner`، `Fetcher`، URL/security policy، state چندویجتی و سیاست cache.
 - CI برای APK انتشار بهینه، `assembleRelease`، تست‌های JVM و `lintRelease` را اجرا می‌کند؛ امضا و سقف حجم ۱۵ MiB نیز اجباری‌اند.
 
 ---

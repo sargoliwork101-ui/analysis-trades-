@@ -60,7 +60,10 @@ import com.pulse.market.data.SymbolDef
 import com.pulse.market.data.WidgetConfig
 import com.pulse.market.ui.Format
 import com.pulse.market.ui.QuoteText
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * بخش «پامپ‌های کریپتو» — دو کار را با هم می‌کند:
@@ -92,11 +95,13 @@ fun PumpsCategory(
     var aiReviews by remember { mutableStateOf<Map<String, PumpAiReviewer.Review>>(emptyMap()) }
     var aiErrors by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var aiStorageError by remember { mutableStateOf(false) }
+    var aiEdited by remember { mutableStateOf(false) }
     var showHelp by remember { mutableStateOf(false) }
     var showAllResults by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        aiConfig = PumpAiConfigStore.load(context)
+        val loaded = withContext(Dispatchers.IO) { PumpAiConfigStore.load(context) }
+        if (!aiEdited) aiConfig = loaded
     }
 
     fun saveAiConfig(new: PumpAiConfig) {
@@ -104,8 +109,11 @@ fun PumpsCategory(
             aiReviews = emptyMap()
             aiErrors = emptyMap()
         }
+        aiEdited = true
         aiConfig = new
-        aiStorageError = !PumpAiConfigStore.save(context, new)
+        PumpAiConfigStore.saveDebounced(context, new) { saved ->
+            aiStorageError = !saved
+        }
     }
 
     fun runAiReview(coin: PumpScanner.PumpCoin) {
@@ -114,10 +122,13 @@ fun PumpsCategory(
         aiBusyIds = aiBusyIds + coin.id
         aiErrors = aiErrors - coin.id
         scope.launch {
-            val outcome = PumpAiReviewer.review(config, coin)
-            outcome.review?.let { aiReviews = aiReviews + (coin.id to it) }
-            outcome.error?.let { aiErrors = aiErrors + (coin.id to it) }
-            aiBusyIds = aiBusyIds - coin.id
+            try {
+                val outcome = PumpAiReviewer.review(config, coin)
+                outcome.review?.let { aiReviews = aiReviews + (coin.id to it) }
+                outcome.error?.let { aiErrors = aiErrors + (coin.id to it) }
+            } finally {
+                aiBusyIds = aiBusyIds - coin.id
+            }
         }
     }
 
@@ -127,8 +138,15 @@ fun PumpsCategory(
         scan = cached
         if (cached == null) {
             busy = true
-            scan = PumpScanner.scan(context, cfg.pumpUniverse, cfg.pumpMinChange)
-            busy = false
+            try {
+                scan = PumpScanner.scan(context, cfg.pumpUniverse, cfg.pumpMinChange)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                note = "⚠️ اسکن پامپ کامل نشد؛ اتصال را بررسی کن"
+            } finally {
+                busy = false
+            }
         }
     }
 
@@ -136,11 +154,20 @@ fun PumpsCategory(
         busy = true
         note = ""
         scope.launch {
-            val res = PumpScanner.scan(context, cfg.pumpUniverse, cfg.pumpMinChange, force = force)
-            scan = res
-            if (res.error == null) PumpAlertEngine.evaluateScan(context, alertOwnerKey, cfg, res)
-            busy = false
-            note = res.error?.let { "⚠️ اسکن تازه نگرفت — $it (فهرست قبلی نمایش داده می‌شود)" } ?: ""
+            try {
+                val res = PumpScanner.scan(context, cfg.pumpUniverse, cfg.pumpMinChange, force = force)
+                scan = res
+                if (res.error == null) PumpAlertEngine.evaluateScan(context, alertOwnerKey, cfg, res)
+                note = res.error?.let {
+                    "⚠️ اسکن تازه نگرفت — $it (فهرست قبلی نمایش داده می‌شود)"
+                } ?: ""
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                note = "⚠️ اسکن پامپ کامل نشد؛ اتصال را بررسی کن"
+            } finally {
+                busy = false
+            }
         }
     }
 
@@ -302,7 +329,7 @@ fun PumpsCategory(
                 InnerRow {
                     OutlinedTextField(
                         value = aiConfig.endpoint,
-                        onValueChange = { saveAiConfig(aiConfig.copy(endpoint = it)) },
+                        onValueChange = { saveAiConfig(aiConfig.copy(endpoint = it.take(500))) },
                         label = { Text("آدرس API سازگار") },
                         placeholder = { Text("https://example.com/v1") },
                         singleLine = true,
@@ -310,7 +337,7 @@ fun PumpsCategory(
                     )
                     OutlinedTextField(
                         value = aiConfig.model,
-                        onValueChange = { saveAiConfig(aiConfig.copy(model = it)) },
+                        onValueChange = { saveAiConfig(aiConfig.copy(model = it.take(150))) },
                         label = { Text("نام مدل") },
                         placeholder = { Text("نام مدل سرویس") },
                         singleLine = true,
@@ -318,7 +345,7 @@ fun PumpsCategory(
                     )
                     OutlinedTextField(
                         value = aiConfig.apiKey,
-                        onValueChange = { saveAiConfig(aiConfig.copy(apiKey = it)) },
+                        onValueChange = { saveAiConfig(aiConfig.copy(apiKey = it.take(1_000))) },
                         label = { Text("API Key (اگر سرویس لازم دارد)") },
                         visualTransformation = PasswordVisualTransformation(),
                         singleLine = true,
@@ -399,8 +426,12 @@ fun PumpsCategory(
                     PumpRow(
                         coin = coin,
                         persian = cfg.persianDigits,
-                        canAdd = cfg.symbols.none { it.code == coin.id } && room > 0,
-                        alreadyAdded = cfg.symbols.any { it.code == coin.id },
+                        canAdd = cfg.symbols.none {
+                            it.code == coin.id && it.sourceId == PumpScanner.CRYPTO_SOURCE_ID
+                        } && room > 0,
+                        alreadyAdded = cfg.symbols.any {
+                            it.code == coin.id && it.sourceId == PumpScanner.CRYPTO_SOURCE_ID
+                        },
                         aiEnabled = aiConfig.enabled,
                         aiReady = aiConfig.isReady,
                         aiBusy = coin.id in aiBusyIds,

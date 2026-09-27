@@ -1,6 +1,13 @@
 package com.pulse.market.data
 
 import android.content.Context
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.net.URI
 
@@ -37,7 +44,10 @@ data class PumpAiConfig(
 object PumpAiConfigStore {
     private const val PREF = "pulse_pump_ai"
     private const val KEY_CONFIG = "config"
+    private val saveScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    @Volatile private var pendingSave: Job? = null
 
+    @Synchronized
     fun load(context: Context): PumpAiConfig {
         val prefs = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
         val raw = prefs.getString(KEY_CONFIG, null) ?: return PumpAiConfig()
@@ -67,7 +77,27 @@ object PumpAiConfigStore {
         }.getOrDefault(PumpAiConfig())
     }
 
+    /**
+     * ذخیره‌ی خارج از thread اصلی با debounce؛ با خروج از صفحه لغو نمی‌شود و Keystore
+     * روی هر حرف تایپ‌شده اجرا نمی‌شود.
+     */
+    @Synchronized
+    fun saveDebounced(
+        context: Context,
+        config: PumpAiConfig,
+        onResult: (Boolean) -> Unit = {}
+    ) {
+        pendingSave?.cancel()
+        val appContext = context.applicationContext
+        pendingSave = saveScope.launch {
+            delay(400)
+            val result = save(appContext, config)
+            withContext(Dispatchers.Main) { onResult(result) }
+        }
+    }
+
     /** false یعنی Keystore کلید تازه را نپذیرفت؛ هیچ plaintextی روی دیسک نوشته نمی‌شود. */
+    @Synchronized
     fun save(context: Context, config: PumpAiConfig): Boolean {
         val safe = sanitize(config)
         val prefs = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
