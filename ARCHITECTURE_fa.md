@@ -101,7 +101,7 @@ QuoteText.volume(q)                 // «۱۲٫۴ میلیون»
 ### ۵) هر منطق خالصی که می‌شود، تست JVM دارد
 - `app/src/test/java/com/pulse/market/data/` — `JsonPath`، `Num`، `AppUpdater`،
   `PumpScanner`، `Fetcher`، URL/security policy، state چندویجتی و سیاست cache.
-- CI برای APK انتشار بهینه، `assembleRelease`، تست‌های JVM و `lintRelease` را اجرا می‌کند؛ امضا و سقف حجم ۱۵ MiB نیز اجباری‌اند.
+- CI برای APK انتشار بهینه، `assembleRelease`، تست‌های JVM و `lintRelease` را اجرا می‌کند؛ امضا و از نسخه‌ی ۱٫۲۵ سقف حجم سخت‌گیرانه‌ی ۲ MiB نیز اجباری‌اند تا کاهش حدود ۹۰٪ حجم حفظ شود.
 
 ---
 

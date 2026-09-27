@@ -81,11 +81,12 @@ Two built-in ways; both give the **USD** price of one troy ounce:
 - **Every change**, including small fixes and documentation updates, must bump both `versionCode` and `versionName`; no change set is recorded without a new version. Published versions use a GitHub Release (`v*` tag) so the in-app updater can pick them up.
 - CI builds the APK on every push: [Actions tab](https://github.com/sargoliwork101-ui/analysis-trades-/actions).
   - The installable file lands in that run's **Artifacts** as `PulseMarket-Android-APK` (containing `PulseMarket-vX.Y.apk`).
-  - Since 1.21 CI builds the optimized **release APK**, runs unit tests and release lint, verifies its signature, and rejects APKs larger than 15 MiB. Since 1.23, an unreadable signature is a hard failure rather than a warning.
+  - Since 1.21 CI builds the optimized **release APK**, runs unit tests and release lint, and verifies its signature. Since 1.23 an unreadable signature is a hard failure, and since 1.25 APKs larger than 2 MiB are rejected to preserve the roughly 90% size reduction.
 - **Every version is signed with one stable key** (`app/ci-debug.keystore`) so a new APK installs *over* the existing app and the in-app updater works. This is a debug/sideload key, not a Play Store key.
 - ⚠️ Versions 1.0–1.3 were signed with the CI runner's throwaway key; installing **1.4** over them needs one uninstall/reinstall. After 1.4 that is no longer needed.
 
 **Version history**
+- **1.25** — restored precise R8 shrinking by removing a package-wide keep rule and tightened CI's APK limit to 2 MiB so dependency growth cannot undo the roughly 90% footprint reduction; no UI or product behavior changed.
 - **1.24** — recorded the completed release-build, unit-test, release-lint, size, artifact and stable-signature verification for the audit; no runtime behavior or UI design changed from 1.23.
 - **1.23** — full reliability/security audit: fixed settings delete/import write races, isolated per-source refresh failures, collision-safe cache/history identifiers, per-widget alert-history IDs and stale-state cleanup, clock-rollback-safe pump evaluation, complete source-health reporting, strict custom-URL parsing and hardened CI signature verification; updated Kotlin, jsoup and DataStore without changing the UI design.
 - **1.21** — lightweight audit: optimized R8/resource-shrunk release APK, unused UI dependencies removed, bounded active-symbol cache, stale-history cleanup and throttled disk writes in live mode.
