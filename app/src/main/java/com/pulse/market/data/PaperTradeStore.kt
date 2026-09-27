@@ -24,6 +24,9 @@ object PaperTradeStore {
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
+    /** رواداری مقایسه‌ی قیمت با سطح حد سود/ضرر (خطای اعشار شناور) */
+    private const val LEVEL_TOLERANCE = 1e-9
+
     /** دلیل بسته‌شدن معامله */
     enum class CloseReason(val label: String) {
         MANUAL("فروش دستی"),
@@ -208,8 +211,10 @@ object PaperTradeStore {
         val takeProfit = trade.takeProfitPrice
         val stopLoss = trade.stopLossPrice
         // اگر هر دو در یک به‌روزرسانی فعال شده باشند، محافظه‌کارانه حد ضرر مقدم است.
-        if (stopLoss != null && price <= stopLoss) return CloseReason.STOP_LOSS
-        if (takeProfit != null && price >= takeProfit) return CloseReason.TAKE_PROFIT
+        // مقایسه‌ی اعشاری با رواداری کوچک: entry*(1+10/100) ممکن است ۱۱۰٫۰۰۰۰۰۰۰۰۰۰۰۰۰۱ شود
+        // و دقیقاً روی همان سطح، حد سود فعال نمی‌شد.
+        if (stopLoss != null && price <= stopLoss * (1.0 + LEVEL_TOLERANCE)) return CloseReason.STOP_LOSS
+        if (takeProfit != null && price >= takeProfit * (1.0 - LEVEL_TOLERANCE)) return CloseReason.TAKE_PROFIT
         return null
     }
 

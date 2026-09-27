@@ -42,6 +42,8 @@ class PaperTradeStoreTest {
         assertNull(PaperTradeStore.closeReasonFor(t, 105.0))
         assertEquals(PaperTradeStore.CloseReason.TAKE_PROFIT, PaperTradeStore.closeReasonFor(t, 110.0))
         assertEquals(PaperTradeStore.CloseReason.STOP_LOSS, PaperTradeStore.closeReasonFor(t, 94.0))
+        assertEquals(PaperTradeStore.CloseReason.STOP_LOSS, PaperTradeStore.closeReasonFor(t, 95.0))
+        assertEquals(PaperTradeStore.CloseReason.TAKE_PROFIT, PaperTradeStore.closeReasonFor(t, 111.0))
         // اگر هر دو سطح در یک به‌روزرسانی رد شده باشند، حد ضرر محافظه‌کارانه مقدم است.
         val wide = trade(tp = 1.0, sl = 1.0)
         assertEquals(PaperTradeStore.CloseReason.STOP_LOSS, PaperTradeStore.closeReasonFor(wide, 50.0))
