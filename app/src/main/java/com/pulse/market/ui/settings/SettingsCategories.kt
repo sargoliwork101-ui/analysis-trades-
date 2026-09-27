@@ -120,7 +120,7 @@ fun SourcesCategory(
             )
         }
         RowsCard {
-            allSources.forEachIndexed { i, src ->
+            for ((i, src) in allSources.withIndex()) {
                 if (i > 0) RowDivider()
                 SourceRow(
                     src = src,
@@ -229,7 +229,7 @@ fun SymbolsCategory(
                     modifier = Modifier.padding(16.dp)
                 )
             } else {
-                selectedSymbols.forEachIndexed { i, sym ->
+                for ((i, sym) in selectedSymbols.withIndex()) {
                     if (i > 0) RowDivider()
                     SelectedSymbolRow(
                         index = i + 1,
@@ -256,11 +256,11 @@ fun SymbolsCategory(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    listOf(
+                    for ((mode, label) in listOf(
                         SymbolSort.MANUAL to "دستی (فلش‌ها)",
                         SymbolSort.BIGGEST_CHANGE to "بیشترین تغییر",
                         SymbolSort.ALPHABET to "الفبا"
-                    ).forEach { (mode, label) ->
+                    )) {
                         FilterChip(
                             selected = sortMode == mode,
                             onClick = { onSortMode(mode) },
@@ -282,7 +282,7 @@ fun SymbolsCategory(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    (1..6).forEach { n ->
+                    for (n in 1..6) {
                         FilterChip(
                             selected = rows == n,
                             onClick = { onRows(n) },
@@ -315,7 +315,7 @@ fun SymbolsCategory(
                 "با 🗑 از فهرست حذف می‌شوند"
             )
             RowsCard {
-                tseCustomSymbols.forEachIndexed { i, sym ->
+                for ((i, sym) in tseCustomSymbols.withIndex()) {
                     if (i > 0) RowDivider()
                     Row(
                         modifier = Modifier
@@ -341,7 +341,7 @@ fun SymbolsCategory(
         }
 
         // ── نمادهای آماده‌ی هر منبع ──
-        selectedSources.forEach { src ->
+        for (src in selectedSources) {
             val available = if (src.marketKind == MarketKind.TSE) {
                 (src.symbols + tseCustomSymbols).distinctBy { it.code }
             } else {
@@ -355,7 +355,7 @@ fun SymbolsCategory(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    available.forEach { sym ->
+                    for (sym in available) {
                         val selected = selectedSymbols.any {
                             it.code == sym.code && (it.sourceId.isEmpty() || it.sourceId == src.id)
                         }
@@ -530,7 +530,7 @@ fun LookCategory(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    WidgetTheme.entries.forEach { t ->
+                    for (t in WidgetTheme.entries) {
                         ThemeSwatch(
                             theme = t,
                             selected = cfg.theme == t,
@@ -571,7 +571,7 @@ fun LookCategory(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    (1..6).forEach { n ->
+                    for (n in 1..6) {
                         FilterChip(
                             selected = cfg.rows == n,
                             onClick = { onChange(cfg.copy(rows = n)) },
@@ -764,7 +764,7 @@ private fun PreviewSpark(up: Boolean, modifier: Modifier = Modifier) {
         val fractions = listOf(0.78f, 0.60f, 0.68f, 0.48f, 0.55f, 0.32f)
             .map { if (up) 1f - it else it }
         val path = Path()
-        fractions.forEachIndexed { i, f ->
+        for ((i, f) in fractions.withIndex()) {
             val x = size.width * i / (fractions.size - 1)
             val y = size.height * f
             if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
@@ -870,7 +870,7 @@ fun SourceHealthCategory(
             InfoCard("منبع فعالی برای آزمایش وجود ندارد.")
         } else {
             RowsCard {
-                sources.forEachIndexed { index, source ->
+                for ((index, source) in sources.withIndex()) {
                     if (index > 0) RowDivider()
                     val item = byId[source.id]
                     InnerRow {
@@ -984,7 +984,7 @@ fun WatchlistsCategory(
             InfoCard("هنوز ترکیب آماده‌ای ذخیره نشده است. ابتدا نمادهای دلخواه را در بخش «نمادها» انتخاب کن.")
         } else {
             RowsCard {
-                watchlists.forEachIndexed { index, watchlist ->
+                for ((index, watchlist) in watchlists.withIndex()) {
                     if (index > 0) RowDivider()
                     InnerRow {
                         Text(
@@ -1069,7 +1069,7 @@ fun AlertsCategory(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf(15 to "۱۵ دقیقه", 30 to "۳۰ دقیقه", 60 to "۱ ساعت").forEach { (m, label) ->
+                        for ((m, label) in listOf(15 to "۱۵ دقیقه", 30 to "۳۰ دقیقه", 60 to "۱ ساعت")) {
                             OutlinedButton(
                                 onClick = { onSnooze(m) },
                                 modifier = Modifier.weight(1f)
@@ -1087,7 +1087,7 @@ fun AlertsCategory(
         if (cfg.alerts.isEmpty()) {
             InfoCard("هنوز هشداری ثبت نشده. مثلاً: «وقتی بیت‌کوین از ۱۰۰٬۰۰۰ گذشت به من خبر بده».")
         } else {
-            cfg.alerts.forEach { rule ->
+            for (rule in cfg.alerts) {
                 // واحدِ خود نماد بر واحد منبع مقدم است (TGJU هم تومان دارد هم دلار).
                 val ruleSource = sources.firstOrNull { it.id == rule.sourceId }
                 val ruleSymbol = cfg.symbols.firstOrNull {
@@ -1129,7 +1129,7 @@ fun AlertsCategory(
             InfoCard("هنوز هشداری فعال نشده است.")
         } else {
             RowsCard {
-                history.take(30).forEachIndexed { index, event ->
+                for ((index, event) in history.take(30).withIndex()) {
                     if (index > 0) RowDivider()
                     InnerRow {
                         Text(

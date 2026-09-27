@@ -59,8 +59,8 @@ object AlertEngine {
     @Synchronized
     fun pruneState(context: Context, activeRulesByOwner: Map<String, List<AlertRule>>) {
         val keep = buildSet {
-            activeRulesByOwner.forEach { (owner, rules) ->
-                rules.forEach { rule ->
+            for ((owner, rules) in activeRulesByOwner) {
+                for (rule in rules) {
                     add(metricKey(owner, rule))
                     add(notifiedKey(owner, rule.id))
                 }
@@ -71,7 +71,9 @@ object AlertEngine {
             (key.startsWith("last_metric_") || key.startsWith("last_notified_")) && key !in keep
         }
         if (stale.isNotEmpty()) {
-            store.edit().also { editor -> stale.forEach(editor::remove) }.apply()
+            store.edit().also { editor ->
+                for (key in stale) editor.remove(key)
+            }.apply()
         }
     }
 

@@ -241,7 +241,7 @@ object ConfigStore {
         while (true) {
             val snapshot = pendingSaves.values.toList()
             if (snapshot.isEmpty()) return
-            snapshot.forEach { it.join() }
+            for (job in snapshot) job.join()
             if (pendingSaves.isEmpty()) return
         }
     }
@@ -449,8 +449,8 @@ object ConfigStore {
     private suspend fun cancelAllPendingAndJoin() {
         val jobs = pendingSaves.values.toList()
         pendingSaves.clear()
-        jobs.forEach { it.cancel() }
-        jobs.forEach { it.join() }
+        for (job in jobs) job.cancel()
+        for (job in jobs) job.join()
     }
 
     // ───────────── بکاپ و بازگردانی ─────────────

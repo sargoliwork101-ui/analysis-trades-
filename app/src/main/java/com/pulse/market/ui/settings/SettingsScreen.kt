@@ -438,7 +438,7 @@ fun SettingsScreen(
                             scope.launch {
                                 busy = true
                                 try {
-                                    selectedSources.forEach { source ->
+                                    for (source in selectedSources) {
                                         try {
                                             val symbols = cfg.symbolsOf(source.id).ifEmpty {
                                                 source.symbols.take(1).map { it.copy(sourceId = source.id) }
@@ -728,11 +728,12 @@ fun SettingsScreen(
                                         val byId = allSources.associateBy { it.id }
                                         val selected = cfg.symbols.take(MAX_SYMBOLS)
                                         val quoteByKey = mutableMapOf<Pair<String, String>, com.pulse.market.data.Quote>()
-                                        selected.groupBy { sym ->
+                                        val symbolsBySource = selected.groupBy { sym ->
                                             sym.sourceId.ifBlank { cfg.activeSourceIds.firstOrNull().orEmpty() }
-                                        }.forEach { (sourceId, symbols) ->
+                                        }
+                                        for ((sourceId, symbols) in symbolsBySource) {
                                             byId[sourceId]?.let { source ->
-                                                Fetcher.fetchAll(source, symbols).forEach { quote ->
+                                                for (quote in Fetcher.fetchAll(source, symbols)) {
                                                     quoteByKey[sourceId to quote.code] = quote
                                                 }
                                             }

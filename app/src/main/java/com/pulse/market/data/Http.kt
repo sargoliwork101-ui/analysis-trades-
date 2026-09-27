@@ -96,8 +96,9 @@ object Http {
                         current.url.host == next.host && current.url.port == next.port
                 current = current.newBuilder().url(next).apply {
                     if (!sameOrigin) {
-                        current.headers.names().filter(::isSensitiveHeader)
-                            .forEach { name -> removeHeader(name) }
+                        for (name in current.headers.names().filter(::isSensitiveHeader)) {
+                            removeHeader(name)
+                        }
                     }
                 }.build()
                 rejectSensitiveCleartext(current)
@@ -141,7 +142,9 @@ object Http {
             .header("User-Agent", userAgent)
             .header("Accept-Language", "fa,en;q=0.8")
             .header("Accept", accept)
-            .apply { safeHeadersForUrl(url, headers).forEach { (k, v) -> header(k, v) } }
+            .apply {
+                for ((name, value) in safeHeadersForUrl(url, headers)) header(name, value)
+            }
             .build()
 
         return execute(request, maxBytes)

@@ -26,7 +26,7 @@ object Sparkline {
         val dx = widthPx.toFloat() / (values.size - 1).toFloat()
 
         val line = Path()
-        values.forEachIndexed { i, v ->
+        for ((i, v) in values.withIndex()) {
             val x = i * dx
             val y = pad + (usable - ((v - min) / span * usable)).toFloat()
             if (i == 0) line.moveTo(x, y) else line.lineTo(x, y)

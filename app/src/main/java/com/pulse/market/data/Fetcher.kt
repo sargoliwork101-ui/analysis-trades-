@@ -129,7 +129,7 @@ object Fetcher {
                     fetchOne(source, sym)
                 }
                 batch.toMutableList().apply {
-                    missing.forEachIndexed { retryIndex, indexed ->
+                    for ((retryIndex, indexed) in missing.withIndex()) {
                         this[indexed.index] = retried[retryIndex]
                     }
                 }

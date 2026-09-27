@@ -164,7 +164,7 @@ fun SymbolSearchDialog(
         // ─── انتخاب منبعِ جستجو (وقتی چند منبع در ویجت فعال است) ───
         if (sources.size > 1) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                sources.forEach { src ->
+                for (src in sources) {
                     FilterChip(
                         selected = activeSource?.id == src.id,
                         onClick = { activeSource = src },

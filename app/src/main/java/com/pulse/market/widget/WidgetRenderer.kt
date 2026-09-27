@@ -183,7 +183,7 @@ object WidgetRenderer {
             row.setViewVisibility(R.id.row_spark, View.GONE)
             views.addView(R.id.rows, row)
         } else {
-            shown.forEachIndexed { i, q ->
+            for ((i, q) in shown.withIndex()) {
                 views.addView(
                     R.id.rows,
                     buildRow(

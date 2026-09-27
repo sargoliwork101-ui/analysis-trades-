@@ -111,7 +111,7 @@ open class StockWidgetProvider : AppWidgetProvider() {
         scope.launch {
             try {
                 safely {
-                    appWidgetIds.forEach { ConfigStore.deleteWidget(context, it) }
+                    for (appWidgetId in appWidgetIds) ConfigStore.deleteWidget(context, appWidgetId)
                     pruneCacheForInstalledWidgets(context, appWidgetIds.toSet())
                     // هم سرویس زنده و هم Worker دوره‌ای مطابق ویجت‌های باقی‌مانده همگام شوند —
                     // حذفِ آخرین ویجت باید هر دو را خاموش کند (وگرنه Worker هر ۱۵ دقیقه
@@ -232,7 +232,8 @@ open class StockWidgetProvider : AppWidgetProvider() {
 
             val quoteMap = if (needNetwork) QuoteRepo.refreshMany(context, wantedNet) else cached
 
-            cfgs.forEachIndexed { i, (id, cfg) ->
+            for ((i, entry) in cfgs.withIndex()) {
+                val (id, cfg) = entry
                 val quotes = wantedAll[i].mapNotNull { quoteMap[QuoteRepo.key(it.first, it.second.code)] }
                 renderOne(context, id, cfg, quotes)
                 // هشدار فقط بعد از یک نوبت واقعی شبکه و فقط با Quote سالمِ همان
@@ -364,11 +365,11 @@ open class StockWidgetProvider : AppWidgetProvider() {
             cfgs: List<Pair<Int, WidgetConfig>>,
             wantedAll: List<List<Pair<String, SymbolDef>>>
         ): Set<String> = buildSet {
-            wantedAll.flatten().forEach { (sourceId, symbol) ->
+            for ((sourceId, symbol) in wantedAll.flatten()) {
                 add(QuoteRepo.key(sourceId, symbol.code))
             }
-            cfgs.forEach { (_, cfg) ->
-                cfg.alerts.filter { it.enabled }.forEach { rule ->
+            for ((_, cfg) in cfgs) {
+                for (rule in cfg.alerts.filter { it.enabled }) {
                     val sourceId = rule.sourceId.ifBlank {
                         cfg.activeSourceIds.firstOrNull().orEmpty()
                     }

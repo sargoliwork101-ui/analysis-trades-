@@ -44,7 +44,7 @@ object PumpAlertEngine {
             val threshold = eligible.minOf { it.second.pumpMinChange }.coerceIn(0.0, 100.0)
             val scan = PumpScanner.scan(appContext, universe, threshold, force = true)
             if (scan.error != null) return@withLock
-            eligible.forEach { (widgetId, cfg) ->
+            for ((widgetId, cfg) in eligible) {
                 evaluateScan(appContext, "widget_$widgetId", cfg, scan)
             }
         }
@@ -126,7 +126,9 @@ object PumpAlertEngine {
             }
         }
         if (stale.isNotEmpty()) {
-            store.edit().also { editor -> stale.forEach(editor::remove) }.apply()
+            store.edit().also { editor ->
+                for (key in stale) editor.remove(key)
+            }.apply()
         }
     }
 

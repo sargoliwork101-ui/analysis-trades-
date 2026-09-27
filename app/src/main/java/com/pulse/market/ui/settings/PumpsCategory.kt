@@ -218,7 +218,7 @@ fun PumpsCategory(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    PumpScanner.UNIVERSE_CHOICES.forEach { n ->
+                    for (n in PumpScanner.UNIVERSE_CHOICES) {
                         FilterChip(
                             selected = cfg.pumpUniverse == n,
                             onClick = { onChange(cfg.copy(pumpUniverse = n)) },
@@ -237,7 +237,7 @@ fun PumpsCategory(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    listOf(3.0, 5.0, 8.0, 15.0, 25.0).forEach { t ->
+                    for (t in listOf(3.0, 5.0, 8.0, 15.0, 25.0)) {
                         FilterChip(
                             selected = cfg.pumpMinChange == t,
                             onClick = { onChange(cfg.copy(pumpMinChange = t)) },
@@ -277,7 +277,7 @@ fun PumpsCategory(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        listOf(30, 60, 180, 360).forEach { minutes ->
+                        for (minutes in listOf(30, 60, 180, 360)) {
                             val label = if (minutes < 60) "$minutes دقیقه" else "${minutes / 60} ساعت"
                             FilterChip(
                                 selected = cfg.pumpAlertCooldownMin == minutes,
@@ -404,11 +404,11 @@ fun PumpsCategory(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        listOf(
+                        for ((period, label) in listOf(
                             PumpSortPeriod.ONE_HOUR to "۱ ساعت",
                             PumpSortPeriod.ONE_DAY to "۱ روز",
                             PumpSortPeriod.ONE_MONTH to "۱ ماه"
-                        ).forEach { (period, label) ->
+                        )) {
                             FilterChip(
                                 selected = cfg.pumpSortPeriod == period,
                                 onClick = { onChange(cfg.copy(pumpSortPeriod = period)) },
@@ -421,7 +421,7 @@ fun PumpsCategory(
             }
 
             RowsCard {
-                visibleCoins.forEachIndexed { i, coin ->
+                for ((i, coin) in visibleCoins.withIndex()) {
                     if (i > 0) RowDivider()
                     PumpRow(
                         coin = coin,
@@ -804,7 +804,7 @@ private fun PumpRow(
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
-                                review.news.forEach { news ->
+                                for (news in review.news) {
                                     TextButton(onClick = { onOpenNews(news.url) }) {
                                         Column(modifier = Modifier.fillMaxWidth()) {
                                             Text(news.title, fontSize = 10.5.sp)

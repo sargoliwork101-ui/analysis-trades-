@@ -182,12 +182,12 @@ fun AddSourceDialog(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                listOf(
+                                for ((m, label) in listOf(
                                     ChangeMode.PERCENT to "درصد",
                                     ChangeMode.ABSOLUTE to "مقدار",
                                     ChangeMode.PREV_CLOSE to "قیمت دیروز",
                                     ChangeMode.NONE to "ندارم"
-                                ).forEach { (m, label) ->
+                                )) {
                                     FilterChip(
                                         selected = changeMode == m,
                                         onClick = { changeMode = m },

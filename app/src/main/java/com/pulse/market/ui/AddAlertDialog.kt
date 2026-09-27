@@ -141,7 +141,7 @@ fun AddAlertDialog(
                         }
                     } else {
                         InnerRow {
-                            symbolsPerSource.forEach { (src, syms) ->
+                            for ((src, syms) in symbolsPerSource) {
                                 if (syms.isNotEmpty()) {
                                     Text(
                                         src.title.substringBefore(" —"),
@@ -149,7 +149,7 @@ fun AddAlertDialog(
                                         color = MaterialTheme.colorScheme.secondary
                                     )
                                     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        syms.forEach { sym ->
+                                        for (sym in syms) {
                                             val selected = symbolCode == sym.code && symbolSourceId == src.id
                                             FilterChip(
                                                 selected = selected,
@@ -176,13 +176,13 @@ fun AddAlertDialog(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf(
+                            for ((c, label) in listOf(
                                 AlertCondition.ABOVE to "قیمت بالاتر از",
                                 AlertCondition.BELOW to "قیمت پایین‌تر از",
                                 AlertCondition.PCT_UP to "رشد بیش از ٪",
                                 AlertCondition.PCT_DOWN to "افت بیش از ٪",
                                 AlertCondition.VOLUME_SPIKE to "جهش حجم ٪"
-                            ).forEach { (c, label) ->
+                            )) {
                                 FilterChip(
                                     selected = condition == c,
                                     onClick = { condition = c },
@@ -248,7 +248,7 @@ fun AddAlertDialog(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                (0..6).forEach { d ->
+                                for (d in 0..6) {
                                     FilterChip(
                                         selected = d in days,
                                         onClick = { days = if (d in days) days - d else days + d },
@@ -272,8 +272,7 @@ fun AddAlertDialog(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf(1 to "۱ دقیقه", 5 to "۵ دقیقه", 15 to "۱۵ دقیقه", 30 to "۳۰ دقیقه", 60 to "۱ ساعت", 180 to "۳ ساعت")
-                                .forEach { (m, label) ->
+                            for ((m, label) in listOf(1 to "۱ دقیقه", 5 to "۵ دقیقه", 15 to "۱۵ دقیقه", 30 to "۳۰ دقیقه", 60 to "۱ ساعت", 180 to "۳ ساعت")) {
                                     FilterChip(
                                         selected = cooldown == m,
                                         onClick = { cooldown = m },

@@ -104,7 +104,7 @@ object QuoteRepo {
     private fun persist(context: Context, healthy: List<Quote>, history: Map<String, List<Double>>) {
         val now = System.currentTimeMillis()
         val merged = loadCachedMap(context).toMutableMap()
-        healthy.forEach { merged[key(it.sourceId, it.code)] = it }
+        for (quote in healthy) merged[key(quote.sourceId, quote.code)] = quote
         val bounded = merged.values.asSequence()
             .sortedByDescending { it.ts }
             .take(MAX_CACHED_SYMBOLS)
@@ -218,7 +218,7 @@ object QuoteRepo {
         }
         if (good.isEmpty()) return loadHistory(context)
         val hist = loadHistory(context).toMutableMap()
-        good.forEach { q ->
+        for (q in good) {
             val k = key(q.sourceId, q.code)
             val series = (hist[k] ?: emptyList()).toMutableList()
             series += q.price!!
@@ -262,11 +262,11 @@ object QuoteRepo {
         val now = System.currentTimeMillis()
         var changed = false
 
-        fetched.forEach { quote ->
+        for (quote in fetched) {
             val current = quote.price
             if (current == null) {
                 accepted += quote
-                return@forEach
+                continue
             }
             val k = key(quote.sourceId, quote.code)
             val previous = cached[k]?.price
@@ -395,7 +395,7 @@ object QuoteRepo {
         }
         val screened = screenAnomalies(context, safeFetched, cached)
         val anomalyBySource = screened.rejected.values.groupingBy { it.sourceId }.eachCount()
-        anomalyBySource.forEach { (sourceId, count) ->
+        for ((sourceId, count) in anomalyBySource) {
             SourceHealthStore.recordAnomalies(context, sourceId, count)
         }
 
@@ -412,7 +412,7 @@ object QuoteRepo {
         // ts همان «آخرین داده‌ی سالم» می‌ماند (نه زمانِ تلاشِ ناموفق) تا ساعتِ هر ویجت
         // و چراغ‌هایش وضعیت واقعی همان ویجت را نشان دهند.
         val out = mutableMapOf<String, Quote>()
-        (cached.keys + fresh.keys + screened.rejected.keys).forEach { k ->
+        for (k in cached.keys + fresh.keys + screened.rejected.keys) {
             val f = fresh[k]
             val c = cached[k]
             val anomaly = screened.rejected[k]
@@ -436,7 +436,7 @@ object QuoteRepo {
         // همچنان وارد کش دائمی نمی‌شود.
         synchronized(this) {
             val current = (memQuotes ?: cached).toMutableMap()
-            out.forEach { (k, quote) ->
+            for ((k, quote) in out) {
                 if (quote.price != null) current[k] = quote
             }
             memQuotes = current
