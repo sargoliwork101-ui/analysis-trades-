@@ -178,4 +178,19 @@ class PumpScannerTest {
         assertEquals(0.5, coin.rangePosition24h ?: -1.0, 0.0001)
         assertTrue(coin.thinMarket)
     }
+
+    @Test
+    fun cacheKeepsChartsOnlyForTopCoins() {
+        val spark = listOf(1.0, 2.0, 3.0)
+        val coins = (1..70).map {
+            PumpScanner.PumpCoin(id = "c$it", symbol = "c$it", name = "C$it", spark = spark)
+        }
+        val trimmed = PumpScanner.trimSparkForCache(
+            PumpScanner.PumpScan(at = 1L, coins = coins)
+        )
+        assertEquals(spark, trimmed.coins.first().spark)
+        assertEquals(spark, trimmed.coins[PumpScanner.SPARK_CACHED_COINS - 1].spark)
+        assertTrue(trimmed.coins[PumpScanner.SPARK_CACHED_COINS].spark.isEmpty())
+        assertTrue(trimmed.coins.last().spark.isEmpty())
+    }
 }

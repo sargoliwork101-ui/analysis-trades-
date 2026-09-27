@@ -89,10 +89,11 @@ object AlertEngine {
         if (!cfg.showNotification) return
         // اگر کاربر مجوز/اعلان‌های برنامه را بسته، عبور از حد را «تحویل‌شده» ثبت نکن؛
         // بعد از فعال‌کردن اعلان‌ها باید هشدار جاری امکان نمایش داشته باشد.
-        val manager = context.getSystemService(NotificationManager::class.java)
+        // روی بعضی پروفایل‌ها/رام‌ها این سرویس null است و دسترسی مستقیم NPE می‌داد.
+        val manager: NotificationManager? = context.getSystemService(NotificationManager::class.java)
         if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-            manager.getNotificationChannel(CHANNEL_ID)?.importance == NotificationManager.IMPORTANCE_NONE
+            manager?.getNotificationChannel(CHANNEL_ID)?.importance == NotificationManager.IMPORTANCE_NONE
         ) return
         evaluateMutex.withLock { evaluateLocked(context, ownerKey, cfg, quotes) }
     }

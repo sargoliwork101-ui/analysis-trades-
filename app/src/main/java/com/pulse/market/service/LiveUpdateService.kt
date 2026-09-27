@@ -37,7 +37,17 @@ class LiveUpdateService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(NOTIF_ID, buildNotification("در حال به‌روزرسانی قیمت‌ها…"))
+        // اندروید ۱۲+ اگر سرویس از پس‌زمینه شروع شده باشد
+        // ForegroundServiceStartNotAllowedException می‌اندازد و نبودِ این محافظ،
+        // کل پروسه را crash می‌کرد. در آن حالت فقط سرویس متوقف می‌شود و رفرش
+        // دوره‌ای با WorkManager ادامه پیدا می‌کند.
+        val started = runCatching {
+            startForeground(NOTIF_ID, buildNotification("در حال به‌روزرسانی قیمت‌ها…"))
+        }.isSuccess
+        if (!started) {
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
         if (loopJob == null) loopJob = scope.launch { loop() }
         return START_STICKY
     }
@@ -83,8 +93,10 @@ class LiveUpdateService : Service() {
     // ───────────── اعلان ─────────────
 
     private fun buildNotification(text: String): Notification {
-        val manager = getSystemService(NotificationManager::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        val manager: NotificationManager? = getSystemService(NotificationManager::class.java)
+        if (manager != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            manager.getNotificationChannel(CHANNEL_ID) == null
+        ) {
             val channel = NotificationChannel(
                 CHANNEL_ID, "\u200Fبه‌روزرسانی زنده‌ی قیمت‌ها", NotificationManager.IMPORTANCE_MIN
             ).apply {
@@ -116,8 +128,8 @@ class LiveUpdateService : Service() {
     }
 
     private fun updateNotification(text: String) {
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.notify(NOTIF_ID, buildNotification(text))
+        val manager = getSystemService(NotificationManager::class.java) ?: return
+        runCatching { manager.notify(NOTIF_ID, buildNotification(text)) }
     }
 
     companion object {

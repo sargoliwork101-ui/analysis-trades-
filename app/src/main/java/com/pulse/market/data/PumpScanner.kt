@@ -256,7 +256,10 @@ object PumpScanner {
                 // هر کوین معلوم شود قبلاً هم در فهرست پامپ بوده یا تازه آمده است.
                 rememberPrevious(context, cached(context))
                 prefs(context).edit()
-                    .putString(KEY_LAST, json.encodeToString(PumpScan.serializer(), scan))
+                    .putString(
+                        KEY_LAST,
+                        json.encodeToString(PumpScan.serializer(), trimSparkForCache(scan))
+                    )
                     .apply()
                 scan
             },
@@ -424,6 +427,16 @@ object PumpScanner {
 
     /** حداکثر نقطه‌ی نمودار ذخیره‌شده برای هر کوین */
     internal const val SPARK_POINTS = 40
+
+    /** فقط برای این تعداد کوینِ بالای فهرست نمودار ذخیره می‌شود (بقیه کش را بی‌دلیل بزرگ می‌کردند). */
+    internal const val SPARK_CACHED_COINS = 60
+
+    /** پیش از نوشتن روی دیسک، نمودار کوین‌های پایین فهرست حذف می‌شود. */
+    internal fun trimSparkForCache(scan: PumpScan): PumpScan = scan.copy(
+        coins = scan.coins.mapIndexed { index, coin ->
+            if (index < SPARK_CACHED_COINS || coin.spark.isEmpty()) coin else coin.copy(spark = emptyList())
+        }
+    )
 
     /** خواندن آرایه‌ی ۷ روزه‌ی CoinGecko و نمونه‌برداری یکنواخت تا سقف [SPARK_POINTS]. */
     internal fun sparkOf(node: org.json.JSONObject?): List<Double> {
