@@ -86,6 +86,7 @@ Two built-in ways; both give the **USD** price of one troy ounce:
 - ⚠️ Versions 1.0–1.3 were signed with the CI runner's throwaway key; installing **1.4** over them needs one uninstall/reinstall. After 1.4 that is no longer needed.
 
 **Version history**
+- **1.42** — the AI prompt is now expert-grade: numeric technical read, entry/stop/target/timeframe/invalidation levels, project backing, team and tokenomics, news catalysts and a short expert verdict; the 7-day chart gained an Ichimoku cloud (tenkan, kijun, cloud) whose state is also fed to the model; adds an LLMsRelay (Claude) preset that sends the Anthropic headers.
 - **1.41** — keeps both Gemini routes side by side: requests go through the native path first and automatically repeat over Google OpenAI-compatible path when the answer comes back empty (e.g. MALFORMED_FUNCTION_CALL); the OpenAI-compatible Gemini preset is back, the connection test reports which route answered, and key/quota/region errors no longer retry pointlessly.
 - **1.40** — fixes Gemini's `MALFORMED_FUNCTION_CALL` failure: the review now requests structured output (`responseMimeType` + `responseSchema`), automatically retries once in plain-text mode when it still happens, and shows a clear Persian explanation.
 - **1.39** — fixes the empty-answer failure on Google thinking models: thought parts are skipped, the output budget grew to 4096 (512 for the connection test), and the vague message is replaced by the real cause (MAX_TOKENS, safety filter, missing candidate, OpenAI-style refusal).

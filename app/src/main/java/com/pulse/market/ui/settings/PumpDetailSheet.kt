@@ -35,14 +35,17 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.pulse.market.data.Ichimoku
 import com.pulse.market.data.PumpAiReviewer
 import com.pulse.market.data.PumpScanner
 import com.pulse.market.ui.Format
@@ -140,13 +143,28 @@ fun PumpDetailSheet(
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
+                        val ichimoku = remember(coin.id, coin.spark) { Ichimoku.of(coin.spark) }
                         Spacer(Modifier.height(8.dp))
                         PriceSparkline(
                             values = coin.spark,
                             rising = (coin.change7d ?: 0.0) >= 0.0,
+                            ichimoku = ichimoku,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(76.dp)
+                                .height(110.dp)
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "ایچیموکو: ${Ichimoku.summary(coin.price, ichimoku)}",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            "خط آبی = تنکان (کوتاه‌مدت)، خط نارنجی = کیجون (میان‌مدت)، ناحیه‌ی رنگی = ابر. " +
+                                    "قیمت بالای ابر یعنی روند صعودی و زیر ابر یعنی نزولی.",
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
@@ -346,6 +364,31 @@ fun PumpDetailSheet(
                                 fontSize = 10.5.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            if (review.summary.isNotBlank()) {
+                                Text(
+                                    review.summary,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            if (review.action.isNotBlank()) {
+                                Text(
+                                    "کار پیشنهادی: ${review.action}",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            AiField("محدوده‌ی ورود", review.entry)
+                            AiField("حد ضرر", review.stopLoss)
+                            AiField("هدف‌ها", review.targets)
+                            AiField("افق زمانی", review.timeframe)
+                            AiField("باطل‌کننده‌ی سناریو", review.invalidation)
+                            AiField("تحلیل تکنیکال", review.technical)
+                            AiField("پشتوانه و پروژه", review.project)
+                            AiField("محرک‌های خبری", review.catalysts)
+                            AiField("ریسک‌ها", review.risks)
                             Text(
                                 "دلیل AI: ${review.reason}",
                                 fontSize = 11.sp,
@@ -432,6 +475,18 @@ fun PumpDetailSheet(
     }
 }
 
+/** یک فیلد تحلیل AI؛ اگر مدل آن را پر نکرده باشد اصلاً نمایش داده نمی‌شود. */
+@Composable
+private fun AiField(label: String, value: String) {
+    if (value.isBlank() || value.trim() == "نامشخص") return
+    Text(
+        "$label: $value",
+        fontSize = 10.5.sp,
+        color = MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier.padding(top = 1.dp)
+    )
+}
+
 @Composable
 private fun Section(title: String) {
     Text(
@@ -514,33 +569,85 @@ private fun ScoreBar(label: String, value: Double, total: Double, persian: Boole
     }
 }
 
-/** نمودار ساده‌ی قیمت برای Compose (نسخه‌ی ویجت جداگانه Bitmap می‌سازد). */
+/**
+ * نمودار قیمت + ابر ایچیموکو.
+ * مقیاس عمودی روی همه‌ی سری‌ها (قیمت، تنکان، کیجون و ابر) حساب می‌شود تا هیچ خطی
+ * بیرون کادر نیفتد؛ بخش جلوتر از آخرین قیمت، پیش‌بینیِ ابر است.
+ */
 @Composable
-private fun PriceSparkline(values: List<Double>, rising: Boolean, modifier: Modifier) {
-    val color = if (rising) Color(0xFF16A34A) else Color(0xFFDC2626)
+private fun PriceSparkline(
+    values: List<Double>,
+    rising: Boolean,
+    ichimoku: Ichimoku.Series?,
+    modifier: Modifier
+) {
+    val priceColor = if (rising) Color(0xFF16A34A) else Color(0xFFDC2626)
+    val tenkanColor = Color(0xFF3B82F6)
+    val kijunColor = Color(0xFFF59E0B)
+    val bullCloud = Color(0xFF22C55E)
+    val bearCloud = Color(0xFFF43F5E)
     Canvas(modifier = modifier) {
         if (values.size < 2) return@Canvas
-        val min = values.minOrNull() ?: return@Canvas
-        val max = values.maxOrNull() ?: return@Canvas
-        val span = (max - min).takeIf { it > 0.0 } ?: 1.0
-        val dx = size.width / (values.size - 1).toFloat()
-        val pad = size.height * 0.1f
-        val usable = size.height - pad * 2f
-        var previous: Offset? = null
-        for ((index, value) in values.withIndex()) {
-            val x = index * dx
-            val y = pad + (usable - (((value - min) / span).toFloat() * usable))
-            val point = Offset(x, y)
-            previous?.let { start ->
-                drawLine(
-                    color = color,
-                    start = start,
-                    end = point,
-                    strokeWidth = 3.5f,
-                    cap = StrokeCap.Round
-                )
-            }
-            previous = point
+        val spanA = ichimoku?.spanA.orEmpty()
+        val spanB = ichimoku?.spanB.orEmpty()
+        val total = maxOf(values.size, spanA.size, spanB.size)
+        val all = buildList {
+            addAll(values)
+            addAll(spanA.filterNotNull())
+            addAll(spanB.filterNotNull())
+            ichimoku?.tenkan?.let { addAll(it.filterNotNull()) }
+            ichimoku?.kijun?.let { addAll(it.filterNotNull()) }
         }
+        val min = all.minOrNull() ?: return@Canvas
+        val max = all.maxOrNull() ?: return@Canvas
+        val range = (max - min).takeIf { it > 0.0 } ?: 1.0
+        val pad = size.height * 0.08f
+        val usable = size.height - pad * 2f
+        val dx = size.width / (total - 1).coerceAtLeast(1).toFloat()
+
+        fun yOf(value: Double): Float = pad + (usable - (((value - min) / range).toFloat() * usable))
+        fun xOf(index: Int): Float = index * dx
+
+        // ابر: بین اسپن A و B پر می‌شود؛ رنگ سبز یعنی A بالای B (ابر صعودی).
+        var i = 0
+        while (i < total - 1) {
+            val a1 = spanA.getOrNull(i)
+            val b1 = spanB.getOrNull(i)
+            val a2 = spanA.getOrNull(i + 1)
+            val b2 = spanB.getOrNull(i + 1)
+            if (a1 != null && b1 != null && a2 != null && b2 != null) {
+                val path = Path().apply {
+                    moveTo(xOf(i), yOf(a1))
+                    lineTo(xOf(i + 1), yOf(a2))
+                    lineTo(xOf(i + 1), yOf(b2))
+                    lineTo(xOf(i), yOf(b1))
+                    close()
+                }
+                val bullish = (a1 + a2) >= (b1 + b2)
+                drawPath(path, color = (if (bullish) bullCloud else bearCloud).copy(alpha = 0.22f))
+            }
+            i++
+        }
+
+        fun drawSeries(series: List<Double?>, color: Color, width: Float) {
+            var previous: Offset? = null
+            for ((index, value) in series.withIndex()) {
+                if (value == null) {
+                    previous = null
+                    continue
+                }
+                val point = Offset(xOf(index), yOf(value))
+                previous?.let { start ->
+                    drawLine(color, start, point, strokeWidth = width, cap = StrokeCap.Round)
+                }
+                previous = point
+            }
+        }
+
+        ichimoku?.let {
+            drawSeries(it.tenkan, tenkanColor, 2.5f)
+            drawSeries(it.kijun, kijunColor, 2.5f)
+        }
+        drawSeries(values.map { it }, priceColor, 3.5f)
     }
 }

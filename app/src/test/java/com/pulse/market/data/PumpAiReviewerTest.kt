@@ -263,4 +263,56 @@ class PumpAiReviewerTest {
         assertTrue(PumpAiReviewer.isFatalServiceError(Http.HttpException(401, "HTTP 401"), "کلید"))
         assertTrue(!PumpAiReviewer.isFatalServiceError(Http.HttpException(400, "HTTP 400"), "خطا"))
     }
+
+    @Test
+    fun reviewParsesTheTechnicalDecisionFields() {
+        val review = PumpAiReviewer.parseReview(
+            """
+            {"verdict":"محتاط‌تر","recommendation":"صبر کن؛ ورود عجولانه نکن",
+             "action":"ورود پله‌ای فقط بالای ۱٫۲۰ دلار","entry":"۱٫۱۰ تا ۱٫۱۵ دلار",
+             "stopLoss":"۱٫۰۲ دلار","targets":"هدف ۱: ۱٫۳۵ | هدف ۲: ۱٫۵۰","timeframe":"۲۴ تا ۷۲ ساعت",
+             "invalidation":"بسته‌شدن زیر کف ۲۴ ساعته","technical":"قیمت بالای ابر ایچیموکو",
+             "project":"تیم X روی شبکه Y","catalysts":"آنلاک توکن هفته‌ی آینده","risks":"نقدشوندگی کم",
+             "summary":"حرکت ادامه دارد ولی ورود در سقف پرریسک است.","confidence":62,"news":[]}
+            """.trimIndent()
+        )
+        assertEquals("۱٫۰۲ دلار", review.stopLoss)
+        assertTrue(review.action.contains("پله‌ای"))
+        assertTrue(review.targets.contains("هدف ۲"))
+        assertTrue(review.project.contains("شبکه"))
+        assertTrue(review.summary.isNotBlank())
+        assertEquals(62, review.confidence)
+    }
+
+    @Test
+    fun onlyGuaranteedProfitClaimsAreRejected() {
+        val ok = PumpAiReviewer.parseReview(
+            """{"verdict":"همسو","recommendation":"فعلاً فقط زیر نظر بگیر","reason":"در صورت تثبیت، خرید پله‌ای منطقی است","news":[]}"""
+        )
+        assertTrue(ok.reason.contains("خرید پله‌ای"))
+
+        val blocked = PumpAiReviewer.parseReview(
+            """{"verdict":"همسو","recommendation":"فعلاً فقط زیر نظر بگیر","reason":"سود تضمینی دارد","news":[]}"""
+        )
+        assertTrue(blocked.reason.contains("سود تضمینی/بدون ریسک"))
+    }
+
+    @Test
+    fun promptCarriesTechnicalContextIncludingIchimoku() {
+        val coin = PumpScanner.PumpCoin(
+            id = "sol", symbol = "sol", name = "Solana",
+            price = 150.0, change1h = 1.0, change24h = 12.0,
+            high24h = 155.0, low24h = 135.0, volume = 5e8, marketCap = 7e10,
+            spark = (1..40).map { 100.0 + it }
+        )
+        val prompt = PumpAiReviewer.userPrompt(coin)
+        assertTrue(prompt.contains("ایچیموکو"))
+        assertTrue(prompt.contains("فاصله تا ATH") || prompt.contains("سقف ۲۴ ساعته"))
+        assertTrue(prompt.contains("گردش حجم"))
+
+        val system = PumpAiReviewer.systemPrompt()
+        assertTrue(system.contains("stopLoss"))
+        assertTrue(system.contains("project"))
+        assertTrue(system.contains("کلی‌گویی ممنوع"))
+    }
 }

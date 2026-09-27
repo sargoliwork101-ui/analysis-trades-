@@ -79,6 +79,15 @@ data class PumpAiConfig(
                 providerSearch = false
             ),
             Preset(
+                id = "llmsrelay",
+                title = "LLMsRelay (Claude)",
+                endpoint = "https://api.llmsrelay.com/v1",
+                model = "claude-sonnet-4.6",
+                hint = "کلید sk-cs4-* از LLMsRelay؛ مسیر سازگار با OpenAI همین سرویس استفاده می‌شود " +
+                        "و هدرهای Anthropic هم فرستاده می‌شوند. مدل Opus هم از همین مسیر در دسترس است.",
+                providerSearch = false
+            ),
+            Preset(
                 id = "openai",
                 title = "OpenAI",
                 endpoint = "https://api.openai.com/v1",
