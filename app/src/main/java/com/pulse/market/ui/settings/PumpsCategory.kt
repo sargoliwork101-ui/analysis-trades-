@@ -149,8 +149,13 @@ fun PumpsCategory(
     // فهرست قبلی (ذخیره‌شده روی گوشی) فوراً نشان داده می‌شود؛ اگر نبود یک بار اسکن می‌کنیم
     LaunchedEffect(Unit) {
         previousMatches = withContext(Dispatchers.IO) { PumpScanner.previousMatches(context) }
-        trades = withContext(Dispatchers.IO) { PaperTradeStore.all(context) }
         val cached = PumpScanner.cached(context)
+        // با باز شدن صفحه هم حد سود/ضرر با آخرین قیمت کش‌شده بررسی می‌شود.
+        trades = withContext(Dispatchers.IO) {
+            cached?.coins?.mapNotNull { coin -> coin.price?.let { coin.id to it } }?.toMap()
+                ?.let { PaperTradeStore.settle(context, it) }
+            PaperTradeStore.all(context)
+        }
         scan = cached
         if (cached == null) {
             busy = true

@@ -86,6 +86,7 @@ Two built-in ways; both give the **USD** price of one troy ounce:
 - ⚠️ Versions 1.0–1.3 were signed with the CI runner's throwaway key; installing **1.4** over them needs one uninstall/reinstall. After 1.4 that is no longer needed.
 
 **Version history**
+- **1.44** — paper-trade take-profit/stop-loss levels are now also evaluated against the cached prices when the page opens, not only after a fresh scan.
 - **1.43** — adds a paper-trading simulator: record a simulated buy with amount, take-profit and stop-loss percentages, sell manually, auto-close positions when a later scan crosses those levels, and review a wallet card with realized profit, open profit, win rate and history; each coin detail also reports whether it trades on Nobitex (cached for 24h).
 - **1.42** — the AI prompt is now expert-grade: numeric technical read, entry/stop/target/timeframe/invalidation levels, project backing, team and tokenomics, news catalysts and a short expert verdict; the 7-day chart gained an Ichimoku cloud (tenkan, kijun, cloud) whose state is also fed to the model; adds an LLMsRelay (Claude) preset that sends the Anthropic headers.
 - **1.41** — keeps both Gemini routes side by side: requests go through the native path first and automatically repeat over Google OpenAI-compatible path when the answer comes back empty (e.g. MALFORMED_FUNCTION_CALL); the OpenAI-compatible Gemini preset is back, the connection test reports which route answered, and key/quota/region errors no longer retry pointlessly.
