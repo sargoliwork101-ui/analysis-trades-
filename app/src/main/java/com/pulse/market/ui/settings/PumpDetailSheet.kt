@@ -874,7 +874,7 @@ private fun CandleChart(
         modifier = modifier.pointerInput(candles) {
             detectTransformGestures { _, pan, gestureZoom, _ ->
                 zoom = (zoom * gestureZoom).coerceIn(1f, 8f)
-                val step = (size.width / visibleCount.coerceAtLeast(1)).coerceAtLeast(1f)
+                val step = (size.width.toFloat() / visibleCount.coerceAtLeast(1)).coerceAtLeast(1f)
                 offset = (offset - pan.x / step).coerceIn(0f, maxStart.toFloat())
             }
         }
