@@ -206,4 +206,24 @@ class PumpAiReviewerTest {
         )
         assertTrue(openAiLength.contains("سقف طول پاسخ"))
     }
+
+    @Test
+    fun geminiUsesStructuredOutputAndRetriesMalformedFunctionCalls() {
+        val structured = PumpAiReviewer.geminiBody("s", "u", 4096, jsonOutput = true).toString()
+        assertTrue(structured.contains("responseMimeType"))
+        assertTrue(structured.contains("responseSchema"))
+        assertTrue(structured.contains("recommendation"))
+
+        val plain = PumpAiReviewer.geminiBody("s", "u", 512).toString()
+        assertTrue(!plain.contains("responseSchema"))
+
+        val malformed = """{"candidates":[{"finishReason":"MALFORMED_FUNCTION_CALL","content":{"parts":[]}}]}"""
+        assertTrue(PumpAiReviewer.isRetryableEmptyAnswer(malformed))
+        assertTrue(PumpAiReviewer.emptyContentReason(malformed).contains("فراخوانی تابع"))
+        assertTrue(
+            !PumpAiReviewer.isRetryableEmptyAnswer(
+                """{"candidates":[{"finishReason":"SAFETY","content":{"parts":[]}}]}"""
+            )
+        )
+    }
 }

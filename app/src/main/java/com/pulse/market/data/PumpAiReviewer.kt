@@ -59,16 +59,25 @@ object PumpAiReviewer {
             val gemini = isGeminiNative(config.endpoint)
             val endpoint = if (gemini) geminiEndpoint(config.endpoint, config.model)
             else chatCompletionsEndpoint(config.endpoint)
-            val payload = if (gemini) geminiBody(systemPrompt(), userPrompt(coin), 4096)
-            else requestBody(config, coin, endpoint)
-            val outer = Http.execute(
-                buildRequest(config, endpoint, payload),
+            fun payloadFor(structured: Boolean): JsonObject =
+                if (gemini) geminiBody(systemPrompt(), userPrompt(coin), 4096, jsonOutput = structured)
+                else requestBody(config, coin, endpoint)
+
+            fun call(structured: Boolean): String = Http.execute(
+                buildRequest(config, endpoint, payloadFor(structured)),
                 maxBytes = 512L * 1024,
                 // جست‌وجوی وب و مدل‌های کند گاهی بیش از ۲۵ ثانیه‌ی پیش‌فرض طول می‌کشند.
                 callTimeoutSeconds = REQUEST_TIMEOUT_SECONDS
             )
-            val content = (if (gemini) extractGeminiContent(outer) else extractAssistantContent(outer))
-                ?: return@withContext Outcome(error = emptyContentReason(outer))
+
+            var outer = call(gemini)
+            var content = if (gemini) extractGeminiContent(outer) else extractAssistantContent(outer)
+            // اگر مدل به‌جای متن یک فراخوانی تابعِ خراب ساخت، یک بار در حالت متن ساده تکرار می‌کنیم.
+            if (content == null && gemini && isRetryableEmptyAnswer(outer)) {
+                outer = call(false)
+                content = extractGeminiContent(outer)
+            }
+            if (content == null) return@withContext Outcome(error = emptyContentReason(outer))
             Outcome(review = parseReview(content, config.providerSearch))
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -144,22 +153,65 @@ object PumpAiReviewer {
     }
 
     /** بدنه‌ی مسیر بومی Gemini (contents/systemInstruction/generationConfig). */
-    internal fun geminiBody(system: String, user: String, maxTokens: Int): JsonObject =
-        buildJsonObject {
-            put("systemInstruction", buildJsonObject {
-                put("parts", buildJsonArray { add(buildJsonObject { put("text", system) }) })
+    internal fun geminiBody(
+        system: String,
+        user: String,
+        maxTokens: Int,
+        /**
+         * خروجی ساختاریافته. مدل‌های 2.5 وقتی JSON را «در متن» از آن‌ها بخواهی گاهی
+         * به‌جای متن، یک فراخوانی تابعِ خراب تولید می‌کنند و پاسخ با
+         * MALFORMED_FUNCTION_CALL بی‌متن برمی‌گردد؛ با responseSchema این اتفاق نمی‌افتد.
+         */
+        jsonOutput: Boolean = false
+    ): JsonObject = buildJsonObject {
+        put("systemInstruction", buildJsonObject {
+            put("parts", buildJsonArray { add(buildJsonObject { put("text", system) }) })
+        })
+        put("contents", buildJsonArray {
+            add(buildJsonObject {
+                put("role", "user")
+                put("parts", buildJsonArray { add(buildJsonObject { put("text", user) }) })
             })
-            put("contents", buildJsonArray {
-                add(buildJsonObject {
-                    put("role", "user")
-                    put("parts", buildJsonArray { add(buildJsonObject { put("text", user) }) })
+        })
+        put("generationConfig", buildJsonObject {
+            put("temperature", 0.2)
+            put("maxOutputTokens", maxTokens)
+            if (jsonOutput) {
+                put("responseMimeType", "application/json")
+                put("responseSchema", reviewSchema())
+            }
+        })
+    }
+
+    /** ساختار پاسخ برای حالت خروجی ساختاریافته‌ی Gemini (زیرمجموعه‌ی OpenAPI). */
+    private fun reviewSchema(): JsonObject = buildJsonObject {
+        put("type", "OBJECT")
+        put("properties", buildJsonObject {
+            put("verdict", buildJsonObject { put("type", "STRING") })
+            put("recommendation", buildJsonObject { put("type", "STRING") })
+            put("reason", buildJsonObject { put("type", "STRING") })
+            put("confidence", buildJsonObject { put("type", "INTEGER") })
+            put("news", buildJsonObject {
+                put("type", "ARRAY")
+                put("items", buildJsonObject {
+                    put("type", "OBJECT")
+                    put("properties", buildJsonObject {
+                        put("title", buildJsonObject { put("type", "STRING") })
+                        put("url", buildJsonObject { put("type", "STRING") })
+                        put("relation", buildJsonObject { put("type", "STRING") })
+                        put("source", buildJsonObject { put("type", "STRING") })
+                        put("publishedAt", buildJsonObject { put("type", "STRING") })
+                    })
+                    put("required", buildJsonArray { add(JsonPrimitive("title")); add(JsonPrimitive("url")) })
                 })
             })
-            put("generationConfig", buildJsonObject {
-                put("temperature", 0.2)
-                put("maxOutputTokens", maxTokens)
-            })
-        }
+        })
+        put("required", buildJsonArray {
+            add(JsonPrimitive("verdict"))
+            add(JsonPrimitive("recommendation"))
+            add(JsonPrimitive("reason"))
+        })
+    }
 
     /**
      * متن پاسخ مسیر بومی Gemini: candidates[0].content.parts[].text
@@ -181,6 +233,14 @@ object PumpAiReviewer {
      * چرا پاسخ متن نداشت؟ متداول‌ترین حالت، تمام‌شدن سقف توکن روی مدل‌های «thinking»
      * است (کل بودجه صرف تفکر می‌شود و بخش متن خالی می‌ماند).
      */
+    /** پاسخ بی‌متنی که تکرار درخواست ممکن است حلش کند (فراخوانی تابع خراب). */
+    internal fun isRetryableEmptyAnswer(raw: String): Boolean {
+        val root = runCatching { json.parseToJsonElement(raw) as? JsonObject }.getOrNull() ?: return false
+        val candidate = (root["candidates"] as? JsonArray)?.firstOrNull() as? JsonObject ?: return false
+        val finish = (candidate["finishReason"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+        return finish.equals("MALFORMED_FUNCTION_CALL", true) || finish.equals("OTHER", true)
+    }
+
     internal fun emptyContentReason(raw: String): String {
         val root = runCatching { json.parseToJsonElement(raw) as? JsonObject }.getOrNull()
             ?: return "پاسخ سرویس قابل خواندن نبود (JSON معتبر نبود)"
@@ -212,6 +272,9 @@ object PumpAiReviewer {
                         "این اتفاق می‌افتد؛ مدل سبک‌تر (مثل gemini-2.0-flash) را امتحان کن"
             finish.equals("SAFETY", true) || finish.equals("content_filter", true) ->
                 "پاسخ توسط فیلتر ایمنی سرویس حذف شد"
+            finish.equals("MALFORMED_FUNCTION_CALL", true) ->
+                "مدل به‌جای متن یک فراخوانی تابعِ خراب تولید کرد؛ برنامه یک بار دوباره تلاش کرد. " +
+                        "اگر تکرار شد، مدل را به gemini-2.0-flash تغییر بده."
             finish.equals("RECITATION", true) ->
                 "سرویس پاسخ را به‌خاطر شباهت به محتوای دارای حق نشر حذف کرد"
             candidate == null -> "سرویس هیچ پاسخی (candidate) برنگرداند؛ نام مدل را بررسی کن"
