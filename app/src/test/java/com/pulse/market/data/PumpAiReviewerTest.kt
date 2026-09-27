@@ -143,4 +143,42 @@ class PumpAiReviewerTest {
             PumpAiReviewer.serviceMessage("""{"error":{"message":"API key not valid."}}""")
         )
     }
+
+    @Test
+    fun googleAiStudioKeysUseTheNativeGeminiPath() {
+        assertTrue(PumpAiReviewer.isGeminiNative("https://generativelanguage.googleapis.com/v1beta"))
+        assertTrue(
+            !PumpAiReviewer.isGeminiNative("https://generativelanguage.googleapis.com/v1beta/openai")
+        )
+        assertTrue(!PumpAiReviewer.isGeminiNative("https://api.openai.com/v1"))
+
+        assertEquals(
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent",
+            PumpAiReviewer.geminiEndpoint(
+                "https://generativelanguage.googleapis.com/v1beta/",
+                "models/gemini-flash-latest"
+            )
+        )
+        assertEquals(
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+            PumpAiReviewer.geminiEndpoint(
+                "https://generativelanguage.googleapis.com",
+                "gemini-2.5-flash"
+            )
+        )
+    }
+
+    @Test
+    fun geminiRequestAndResponseShapesAreHandled() {
+        val body = PumpAiReviewer.geminiBody("system text", "user text", 32).toString()
+        assertTrue(body.contains("systemInstruction"))
+        assertTrue(body.contains("\"maxOutputTokens\":32"))
+        assertTrue(body.contains("user text"))
+
+        val text = PumpAiReviewer.extractGeminiContent(
+            """{"candidates":[{"content":{"role":"model","parts":[{"text":"OK"}]}}]}"""
+        )
+        assertEquals("OK", text)
+        assertNull(PumpAiReviewer.extractGeminiContent("""{"candidates":[]}"""))
+    }
 }

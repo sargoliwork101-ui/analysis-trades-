@@ -56,15 +56,18 @@ object PumpAiReviewer {
         if (!config.enabled) return@withContext Outcome(error = "بررسی هوش مصنوعی خاموش است")
         if (!config.isReady) return@withContext Outcome(error = "آدرس API و نام مدل را کامل کن")
         try {
-            val endpoint = chatCompletionsEndpoint(config.endpoint)
-            val payload = requestBody(config, coin, endpoint)
+            val gemini = isGeminiNative(config.endpoint)
+            val endpoint = if (gemini) geminiEndpoint(config.endpoint, config.model)
+            else chatCompletionsEndpoint(config.endpoint)
+            val payload = if (gemini) geminiBody(systemPrompt(), userPrompt(coin), 1200)
+            else requestBody(config, coin, endpoint)
             val outer = Http.execute(
                 buildRequest(config, endpoint, payload),
                 maxBytes = 512L * 1024,
                 // جست‌وجوی وب و مدل‌های کند گاهی بیش از ۲۵ ثانیه‌ی پیش‌فرض طول می‌کشند.
                 callTimeoutSeconds = REQUEST_TIMEOUT_SECONDS
             )
-            val content = extractAssistantContent(outer)
+            val content = (if (gemini) extractGeminiContent(outer) else extractAssistantContent(outer))
                 ?: return@withContext Outcome(error = "پاسخ سرویس AI متن قابل‌خواندن نداشت")
             Outcome(review = parseReview(content, config.providerSearch))
         } catch (cancelled: CancellationException) {
@@ -99,6 +102,11 @@ object PumpAiReviewer {
             .header("Accept", "application/json")
             .apply {
                 if (config.apiKey.isNotBlank()) {
+                    if (isGeminiNative(endpoint)) {
+                        // کلید AI Studio فقط با این هدر پذیرفته می‌شود.
+                        header("X-goog-api-key", config.apiKey)
+                        return@apply
+                    }
                     header("Authorization", "Bearer ${config.apiKey}")
                     // Anthropic هم هدر اختصاصی خودش را می‌پذیرد و هم Bearer؛ فرستادن هر دو
                     // جلوی خطای «authentication» در مسیر سازگار با OpenAI را می‌گیرد.
@@ -109,6 +117,60 @@ object PumpAiReviewer {
                 }
             }
             .build()
+
+    /**
+     * کلیدهای Google AI Studio روی مسیر بومی Gemini کار می‌کنند
+     * (`/v1beta/models/{model}:generateContent` + هدر `X-goog-api-key`).
+     * اگر کاربر آدرس گوگل را بدون بخش `/openai` بدهد، همین مسیر استفاده می‌شود.
+     */
+    internal fun isGeminiNative(endpoint: String): Boolean =
+        hostOf(endpoint).endsWith("generativelanguage.googleapis.com") &&
+                !endpoint.contains("/openai", ignoreCase = true)
+
+    private val MODEL_SAFE = Regex("[^A-Za-z0-9._-]")
+
+    /** ساخت آدرس نهایی مسیر بومی Gemini از روی آدرس پایه و نام مدل. */
+    internal fun geminiEndpoint(raw: String, model: String): String {
+        require(PumpAiConfig.isValidEndpoint(raw)) { "آدرس API نامعتبر است" }
+        val clean = raw.trim().trimEnd('/')
+        val base = when {
+            VERSIONED_PATH.containsMatchIn(clean) -> clean
+            clean.endsWith("/models", ignoreCase = true) -> clean.removeSuffix("/models")
+            else -> "$clean/v1beta"
+        }
+        val name = MODEL_SAFE.replace(model.trim().removePrefix("models/"), "")
+        require(name.isNotEmpty()) { "نام مدل نامعتبر است" }
+        return "$base/models/$name:generateContent"
+    }
+
+    /** بدنه‌ی مسیر بومی Gemini (contents/systemInstruction/generationConfig). */
+    internal fun geminiBody(system: String, user: String, maxTokens: Int): JsonObject =
+        buildJsonObject {
+            put("systemInstruction", buildJsonObject {
+                put("parts", buildJsonArray { add(buildJsonObject { put("text", system) }) })
+            })
+            put("contents", buildJsonArray {
+                add(buildJsonObject {
+                    put("role", "user")
+                    put("parts", buildJsonArray { add(buildJsonObject { put("text", user) }) })
+                })
+            })
+            put("generationConfig", buildJsonObject {
+                put("temperature", 0.2)
+                put("maxOutputTokens", maxTokens)
+            })
+        }
+
+    /** متن پاسخ مسیر بومی Gemini: candidates[0].content.parts[].text */
+    internal fun extractGeminiContent(raw: String): String? {
+        val root = runCatching { json.parseToJsonElement(raw) as? JsonObject }.getOrNull() ?: return null
+        val first = (root["candidates"] as? JsonArray)?.firstOrNull() as? JsonObject ?: return null
+        val parts = (first["content"] as? JsonObject)?.get("parts") as? JsonArray ?: return null
+        val text = parts.mapNotNull { part ->
+            ((part as? JsonObject)?.get("text") as? JsonPrimitive)?.contentOrNull
+        }.joinToString("\n").trim()
+        return text.takeIf { it.isNotBlank() }
+    }
 
     private fun hostOf(endpoint: String): String = runCatching {
         URI(endpoint).host.orEmpty().lowercase(Locale.ROOT)
@@ -212,9 +274,15 @@ object PumpAiReviewer {
                 "روی آدرس HTTP کلید فرستاده نمی‌شود؛ آدرس HTTPS بگذار"
             )
         }
-        val endpoint = runCatching { chatCompletionsEndpoint(config.endpoint) }.getOrNull()
+        val gemini = isGeminiNative(config.endpoint)
+        val endpoint = runCatching {
+            if (gemini) geminiEndpoint(config.endpoint, config.model)
+            else chatCompletionsEndpoint(config.endpoint)
+        }.getOrNull()
             ?: return@withContext TestResult(false, "ساختن آدرس نهایی از روی این آدرس ممکن نشد")
-        val payload = buildJsonObject {
+        val payload = if (gemini) {
+            geminiBody("Answer with one short word.", "Reply with exactly: OK", 16)
+        } else buildJsonObject {
             put("model", config.model)
             put("max_tokens", 16)
             put("temperature", 0.0)
@@ -231,7 +299,8 @@ object PumpAiReviewer {
                 maxBytes = 64L * 1024,
                 callTimeoutSeconds = 45
             )
-            val content = extractAssistantContent(raw)?.trim().orEmpty()
+            val content = (if (gemini) extractGeminiContent(raw) else extractAssistantContent(raw))
+                ?.trim().orEmpty()
             val shown = content.take(40).ifBlank { "(پاسخ متنی نداشت)" }
             TestResult(
                 ok = content.isNotBlank(),
@@ -250,13 +319,9 @@ object PumpAiReviewer {
         }
     }
 
-    private fun requestBody(
-        config: PumpAiConfig,
-        coin: PumpScanner.PumpCoin,
-        endpoint: String
-    ): JsonObject {
-        val advice = coin.advice
-        val system = """
+    /** متن نقش سیستم — بین مسیر OpenAI-compatible و مسیر بومی Gemini مشترک است. */
+    internal fun systemPrompt(): String =
+"""
             تو یک تحلیل‌گر ریسک رمزارز هستی و فقط «نظر دوم احتیاطی» می‌دهی، نه سیگنال خرید یا تضمین سود.
             پیشنهاد پایه‌ی برنامه را با داده‌ها بررسی کن. recommendation باید دقیقاً یکی از این سه عبارت باشد:
             «فعلاً فقط زیر نظر بگیر»، «صبر کن؛ ورود عجولانه نکن»، «فعلاً وارد نشو؛ قیمت را تعقیب نکن».
@@ -266,7 +331,11 @@ object PumpAiReviewer {
             فقط JSON معتبر و بدون markdown برگردان:
             {"verdict":"همسو|محتاط‌تر|نامطمئن","recommendation":"...","reason":"دلیل روشن فارسی","confidence":0,"news":[{"title":"...","url":"https://...","relation":"ارتباط خبر با حرکت قیمت","source":"...","publishedAt":"..."}]}
         """.trimIndent()
-        val user = buildString {
+
+    /** داده‌های همین کوین برای مدل؛ هیچ اطلاعات شخصی‌ای فرستاده نمی‌شود. */
+    internal fun userPrompt(coin: PumpScanner.PumpCoin): String {
+        val advice = coin.advice
+        return buildString {
             appendLine("کوین: ${coin.displayName}")
             appendLine("رتبه بازار: ${coin.rank}")
             appendLine("قیمت: ${number(coin.price)} دلار")
@@ -281,6 +350,15 @@ object PumpAiReviewer {
             appendLine("پیشنهاد پایه: ${advice.recommendation.label}")
             append("دلیل پایه: ${advice.reason}")
         }
+    }
+
+    private fun requestBody(
+        config: PumpAiConfig,
+        coin: PumpScanner.PumpCoin,
+        endpoint: String
+    ): JsonObject {
+        val system = systemPrompt()
+        val user = userPrompt(coin)
         return buildJsonObject {
             put("model", config.model)
             put("temperature", 0.2)
