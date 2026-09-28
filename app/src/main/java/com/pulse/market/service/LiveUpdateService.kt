@@ -42,7 +42,7 @@ class LiveUpdateService : Service() {
         // کل پروسه را crash می‌کرد. در آن حالت فقط سرویس متوقف می‌شود و رفرش
         // دوره‌ای با WorkManager ادامه پیدا می‌کند.
         val started = runCatching {
-            startForeground(NOTIF_ID, buildNotification("در حال به‌روزرسانی قیمت‌ها…"))
+            startForeground(NOTIF_ID, buildNotification())
         }.isSuccess
         if (!started) {
             stopSelf(startId)
@@ -67,8 +67,8 @@ class LiveUpdateService : Service() {
             } catch (_: Exception) {
                 // آخرین داده‌ی سالم روی ویجت می‌ماند؛ حلقه در نوبت بعد دوباره تلاش می‌کند.
             }
+            // نوتیف عمداً هر دور بازنویسی نمی‌شود — متنِ ثابت و کم‌رنگ می‌ماند تا جلب توجه نکند.
             val sec = StockWidgetProvider.liveInterval(this)
-            updateNotification("قیمت‌ها هر $sec ثانیه تازه می‌شوند")
             delay(sec * 1000L)
         }
     }
@@ -92,20 +92,23 @@ class LiveUpdateService : Service() {
 
     // ───────────── اعلان ─────────────
 
-    private fun buildNotification(text: String): Notification {
+    private fun buildNotification(): Notification {
         val manager: NotificationManager? = getSystemService(NotificationManager::class.java)
-        if (manager != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-            manager.getNotificationChannel(CHANNEL_ID) == null
-        ) {
-            val channel = NotificationChannel(
-                CHANNEL_ID, "\u200Fبه‌روزرسانی زنده‌ی قیمت‌ها", NotificationManager.IMPORTANCE_MIN
-            ).apply {
-                description = "\u200Fسرویس پس‌زمینه‌ی ویجت نبض بازار"
-                setShowBadge(false)
-                enableLights(false)
-                enableVibration(false)
+        if (manager != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // کانالِ قدیمی (ممکن بود روی بعضی رام‌ها آیکنِ نوار وضعیت نشان دهد) حذف و
+            // کانالِ کم‌اهمیتِ جدید ساخته می‌شود تا نوتیف تا حد ممکن بی‌سروصدا بماند.
+            runCatching { manager.deleteNotificationChannel(CHANNEL_ID_OLD) }
+            if (manager.getNotificationChannel(CHANNEL_ID) == null) {
+                val channel = NotificationChannel(
+                    CHANNEL_ID, "\u200Fبه‌روزرسانی زنده‌ی قیمت‌ها", NotificationManager.IMPORTANCE_MIN
+                ).apply {
+                    description = "\u200Fسرویس پس‌زمینه‌ی ویجت نبض بازار"
+                    setShowBadge(false)
+                    enableLights(false)
+                    enableVibration(false)
+                }
+                manager.createNotificationChannel(channel)
             }
-            manager.createNotificationChannel(channel)
         }
 
         val open = PendingIntent.getActivity(
@@ -117,23 +120,21 @@ class LiveUpdateService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_pulse)
             .setContentTitle("\u200Fنبض بازار")
-            .setContentText("\u200F$text")
+            .setContentText("\u200Fبه‌روزرسانی زنده فعال است")
             .setOngoing(true)
             .setSilent(true)
+            .setShowWhen(false)
             .setOnlyAlertOnce(true)
+            .setLocalOnly(true)
             .setPriority(NotificationCompat.PRIORITY_MIN)
-            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_DEFERRED)
             .setContentIntent(open)
             .build()
     }
 
-    private fun updateNotification(text: String) {
-        val manager = getSystemService(NotificationManager::class.java) ?: return
-        runCatching { manager.notify(NOTIF_ID, buildNotification(text)) }
-    }
-
     companion object {
-        private const val CHANNEL_ID = "pulse_live"
+        private const val CHANNEL_ID = "pulse_live_v2"
+        private const val CHANNEL_ID_OLD = "pulse_live"
         private const val NOTIF_ID = 4711
 
         fun start(context: Context) {

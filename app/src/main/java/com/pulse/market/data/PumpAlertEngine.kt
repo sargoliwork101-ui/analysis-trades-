@@ -18,7 +18,11 @@ import kotlin.math.abs
 /** اعلان دوره‌ای پامپ؛ اسکن را حداکثر هر ۱۵ دقیقه انجام می‌دهد تا CoinGecko اسپم نشود. */
 object PumpAlertEngine {
     private const val PREF = "pulse_pump_alerts"
+    // دو کانال: با لرزش و بی‌لرزش (کاربر از تنظیمات هشدار انتخاب می‌کند).
     private const val CHANNEL_ID = "pulse_pump_alerts_v1"
+    private const val CHANNEL_ID_SILENT = "pulse_pump_alerts_novib_v1"
+    private val VIBRATION_PATTERN = longArrayOf(0L, 70L)
+    private fun channelId(vibrate: Boolean) = if (vibrate) CHANNEL_ID else CHANNEL_ID_SILENT
     private const val LAST_BACKGROUND_CHECK = "last_background_check"
     private const val MIN_SCAN_INTERVAL_MS = 15 * 60 * 1000L
     private val mutex = Mutex()
@@ -67,12 +71,12 @@ object PumpAlertEngine {
         scan: PumpScanner.PumpScan
     ): Boolean {
         if (!cfg.pumpAlertEnabled || scan.error != null || scan.at <= 0L) return false
-        ensureChannel(context)
+        ensureChannel(context, cfg.alertVibrate)
         // روی بعضی دستگاه‌ها/پروفایل‌ها این سرویس در دسترس نیست و مقدار null برمی‌گرداند.
         val manager: NotificationManager? = context.getSystemService(NotificationManager::class.java)
         if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return false
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-            manager?.getNotificationChannel(CHANNEL_ID)?.importance == NotificationManager.IMPORTANCE_NONE
+            manager?.getNotificationChannel(channelId(cfg.alertVibrate))?.importance == NotificationManager.IMPORTANCE_NONE
         ) return false
 
         val safeKey = ownerKey.take(100)
@@ -156,13 +160,14 @@ object PumpAlertEngine {
             Intent(context, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+        val notification = NotificationCompat.Builder(context, channelId(cfg.alertVibrate))
             .setSmallIcon(R.drawable.ic_stat_pulse)
             .setContentTitle(title)
             .setContentText(shortText)
             .setStyle(NotificationCompat.BigTextStyle().bigText(longText))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
+            .apply { if (cfg.alertVibrate) setVibrate(VIBRATION_PATTERN) else setVibrate(longArrayOf(0L)) }
             .setAutoCancel(true)
             .setContentIntent(open)
             .build()
@@ -171,17 +176,19 @@ object PumpAlertEngine {
         return runCatching { manager.notify(notificationId(ownerKey), notification) }.isSuccess
     }
 
-    private fun ensureChannel(context: Context) {
+    private fun ensureChannel(context: Context, vibrate: Boolean) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
-        if (manager.getNotificationChannel(CHANNEL_ID) != null) return
+        val id = channelId(vibrate)
+        if (manager.getNotificationChannel(id) != null) return
         val channel = NotificationChannel(
-            CHANNEL_ID,
-            "\u200Fهشدار پامپ‌های کریپتو",
+            id,
+            if (vibrate) "\u200Fهشدار پامپ‌های کریپتو" else "\u200Fهشدار پامپ‌های کریپتو (بی‌لرزش)",
             NotificationManager.IMPORTANCE_HIGH
         ).apply {
             description = "\u200Fهشدار رشد شارپ همراه با پیشنهاد احتیاطی و دلیل"
-            enableVibration(true)
+            enableVibration(vibrate)
+            if (vibrate) vibrationPattern = VIBRATION_PATTERN
         }
         manager.createNotificationChannel(channel)
     }

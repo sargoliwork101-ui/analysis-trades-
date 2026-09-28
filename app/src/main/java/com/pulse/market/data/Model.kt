@@ -176,6 +176,8 @@ data class WidgetConfig(
     val rows: Int = 3,
     val persianDigits: Boolean = false,
     val showNotification: Boolean = true,
+    /** هشدارهای قیمت با لرزش گوشی همراه باشند؟ (کاربر می‌تواند خاموش کند) */
+    val alertVibrate: Boolean = true,
     /** قانون‌های هشدار قیمت */
     val alerts: List<AlertRule> = emptyList(),
 

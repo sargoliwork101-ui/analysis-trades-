@@ -1031,11 +1031,23 @@ fun AlertsCategory(
     onEditAlert: (AlertRule) -> Unit,
     onDeleteAlert: (AlertRule) -> Unit,
     onAddAlert: () -> Unit,
+    onToggleVibrate: (Boolean) -> Unit = {},
     onTestNotification: () -> Unit,
     history: List<AlertEvent> = emptyList(),
     onClearHistory: () -> Unit = {}
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+
+        // ── تنظیمات اعلان ──
+        SectionHeader("تنظیمات اعلان", "روی نوتیفِ هر هشدار دکمه‌ی «یادآوری بعداً» هم هست")
+        RowsCard {
+            SwitchRow(
+                "لرزش هنگام هشدار",
+                "اگر خاموش کنی، هشدار می‌آید ولی گوشی نمی‌لرزد",
+                cfg.alertVibrate,
+                onToggleVibrate
+            )
+        }
 
         // ── خواب موقت: نوتیف‌ها فعلاً می‌خوابند ──
         SectionHeader(

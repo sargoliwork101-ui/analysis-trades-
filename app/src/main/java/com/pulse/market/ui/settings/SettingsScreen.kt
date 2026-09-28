@@ -643,7 +643,8 @@ fun SettingsScreen(
                             persistAlerts(cfg.alerts.filterNot { it.id == rule.id })
                         },
                         onAddAlert = { editingAlert = null; alertDialogOpen = true },
-                        onTestNotification = { AlertEngine.notifyTest(context) },
+                        onToggleVibrate = { on -> persist(cfg.copy(alertVibrate = on)) },
+                        onTestNotification = { AlertEngine.notifyTest(context, cfg.alertVibrate) },
                         history = alertHistory,
                         onClearHistory = {
                             AlertHistoryStore.clear(context)

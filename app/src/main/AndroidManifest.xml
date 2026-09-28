@@ -102,6 +102,11 @@
              رسیور نمی‌رسید و ویجت‌ها بعد از ری‌استارت گوشی تا باز شدن دستی برنامه
              تازه نمی‌شدند. هر دو اکشن protected-broadcast سیستم‌اند، پس exported
              بودن راه نفوذ باز نمی‌کند. -->
+        <!-- دکمه‌های نوتیفِ هشدار (اسنوز/یادآوری) و آلارمِ یادآوری؛ فقط داخلی -->
+        <receiver
+            android:name=".service.AlertActionReceiver"
+            android:exported="false" />
+
         <receiver
             android:name=".service.BootReceiver"
             android:exported="true">

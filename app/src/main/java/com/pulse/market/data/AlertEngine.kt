@@ -1,5 +1,6 @@
 package com.pulse.market.data
 
+import android.app.AlarmManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -9,6 +10,7 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.pulse.market.R
+import com.pulse.market.service.AlertActionReceiver
 import com.pulse.market.ui.Format
 import com.pulse.market.ui.MainActivity
 import java.util.Calendar
@@ -28,8 +30,15 @@ import kotlin.math.abs
 object AlertEngine {
 
     private const val PREF = "pulse_alerts"
-    // کانال جدید — الگوی ویبره‌ی قدیمیِ طولانی برای همه تعویض شود
+    // دو کانال: یکی با لرزش، یکی بی‌لرزش. در اندروید ۸+ لرزش را کانال تعیین می‌کند
+    // (نه تک‌تک نوتیف‌ها)، پس برای اختیاری‌کردنِ لرزش باید کانالِ مناسب انتخاب شود.
     private const val CHANNEL_ID = "pulse_price_alerts_v2"
+    private const val CHANNEL_ID_SILENT = "pulse_price_alerts_novib_v2"
+
+    /** پیش‌فرض «یادآوری بعداً» روی نوتیف (دقیقه) */
+    const val SNOOZE_DEFAULT_MIN = 15
+
+    private fun channelId(vibrate: Boolean) = if (vibrate) CHANNEL_ID else CHANNEL_ID_SILENT
 
     /** یک «تپ» کوتاه و محتاطانه (۷۰ میلی‌ثانیه) — بدون ویبره‌ی طولانی و تکراری */
     private val VIBRATION_PATTERN = longArrayOf(0L, 70L)
@@ -93,7 +102,7 @@ object AlertEngine {
         val manager: NotificationManager? = context.getSystemService(NotificationManager::class.java)
         if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-            manager?.getNotificationChannel(CHANNEL_ID)?.importance == NotificationManager.IMPORTANCE_NONE
+            manager?.getNotificationChannel(channelId(cfg.alertVibrate))?.importance == NotificationManager.IMPORTANCE_NONE
         ) return
         evaluateMutex.withLock { evaluateLocked(context, ownerKey, cfg, quotes) }
     }
@@ -258,8 +267,6 @@ object AlertEngine {
         quote: Quote,
         observedValue: Double? = null
     ): Boolean {
-        ensureChannel(context)
-
         val priceText = Format.price(quote.price, cfg.persianDigits)
         val unit = quote.unit.ifBlank { "" }
         // RLM باعث می‌شود عنوان فارسی حتی با ایموجی یا نماد لاتین از راست آغاز شود.
@@ -284,26 +291,42 @@ object AlertEngine {
         }
 
         val notificationId = "$ownerKey|${rule.id}".hashCode()
+        val bigText = "$thresholdText\nبازه‌ی فعال: ${rule.scheduleText()}"
+        return postAlertNotification(context, notificationId, title, thresholdText, bigText, cfg.alertVibrate)
+    }
+
+    /**
+     * ساختِ واقعیِ نوتیفِ هشدار (هم برای هشدار تازه، هم برای «یادآوری» اسنوز استفاده می‌شود).
+     * دکمه‌ی «یادآوری بعد از N دقیقه» را هم می‌چسباند.
+     */
+    private fun postAlertNotification(
+        context: Context,
+        notificationId: Int,
+        title: String,
+        text: String,
+        bigText: String,
+        vibrate: Boolean
+    ): Boolean {
+        ensureChannel(context, vibrate)
         val open = PendingIntent.getActivity(
             context, notificationId,
             Intent(context, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+        val notification = NotificationCompat.Builder(context, channelId(vibrate))
             .setSmallIcon(R.drawable.ic_stat_pulse)
             .setContentTitle(title)
-            .setContentText(thresholdText)
-            .setStyle(
-                NotificationCompat.BigTextStyle().bigText(
-                    "$thresholdText\nبازه‌ی فعال: ${rule.scheduleText()}"
-                )
-            )
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(bigText))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
-            .setVibrate(VIBRATION_PATTERN)
+            .apply { if (vibrate) setVibrate(VIBRATION_PATTERN) else setVibrate(longArrayOf(0L)) }
             .setAutoCancel(true)
             .setContentIntent(open)
+            .addAction(
+                snoozeAction(context, notificationId, title, text, bigText, vibrate, SNOOZE_DEFAULT_MIN)
+            )
             .build()
 
         return runCatching {
@@ -312,20 +335,92 @@ object AlertEngine {
         }.isSuccess
     }
 
+    /** دکمه‌ی «یادآوری بعد از N دقیقه» روی نوتیف. */
+    private fun snoozeAction(
+        context: Context,
+        notificationId: Int,
+        title: String,
+        text: String,
+        bigText: String,
+        vibrate: Boolean,
+        minutes: Int
+    ): NotificationCompat.Action {
+        val intent = Intent(context, AlertActionReceiver::class.java).apply {
+            action = AlertActionReceiver.ACTION_SNOOZE
+            putExtra(AlertActionReceiver.EXTRA_NOTIF_ID, notificationId)
+            putExtra(AlertActionReceiver.EXTRA_TITLE, title)
+            putExtra(AlertActionReceiver.EXTRA_TEXT, text)
+            putExtra(AlertActionReceiver.EXTRA_BIGTEXT, bigText)
+            putExtra(AlertActionReceiver.EXTRA_VIBRATE, vibrate)
+            putExtra(AlertActionReceiver.EXTRA_MINUTES, minutes)
+        }
+        val pi = PendingIntent.getBroadcast(
+            context, notificationId xor 0x5A02E,
+            intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val label = "⏰ ${Format.toPersianDigits("$minutes")} دقیقه دیگر"
+        return NotificationCompat.Action.Builder(0, label, pi).build()
+    }
+
+    /** کاربر روی «یادآوری بعداً» زد: نوتیف بسته و آلارمِ یادآوری ثبت می‌شود. */
+    fun handleSnooze(context: Context, intent: Intent) {
+        val notifId = intent.getIntExtra(AlertActionReceiver.EXTRA_NOTIF_ID, 0)
+        runCatching {
+            context.getSystemService(NotificationManager::class.java)?.cancel(notifId)
+        }
+        val minutes = intent.getIntExtra(AlertActionReceiver.EXTRA_MINUTES, SNOOZE_DEFAULT_MIN)
+            .coerceIn(1, 24 * 60)
+        val am = context.getSystemService(AlarmManager::class.java) ?: return
+        val remind = Intent(context, AlertActionReceiver::class.java).apply {
+            action = AlertActionReceiver.ACTION_REMIND
+            putExtra(AlertActionReceiver.EXTRA_NOTIF_ID, notifId)
+            putExtra(AlertActionReceiver.EXTRA_TITLE, intent.getStringExtra(AlertActionReceiver.EXTRA_TITLE))
+            putExtra(AlertActionReceiver.EXTRA_TEXT, intent.getStringExtra(AlertActionReceiver.EXTRA_TEXT))
+            putExtra(AlertActionReceiver.EXTRA_BIGTEXT, intent.getStringExtra(AlertActionReceiver.EXTRA_BIGTEXT))
+            putExtra(
+                AlertActionReceiver.EXTRA_VIBRATE,
+                intent.getBooleanExtra(AlertActionReceiver.EXTRA_VIBRATE, true)
+            )
+        }
+        val pi = PendingIntent.getBroadcast(
+            context, notifId, remind,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val triggerAt = System.currentTimeMillis() + minutes * 60_000L
+        // آلارمِ نادقیق (بدون نیاز به مجوز SCHEDULE_EXACT_ALARM) و مقاوم در Doze.
+        runCatching { am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi) }
+    }
+
+    /** آلارمِ یادآوری سررسید: همان هشدار دوباره نمایش داده می‌شود. */
+    fun handleRemind(context: Context, intent: Intent) {
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
+        val notifId = intent.getIntExtra(AlertActionReceiver.EXTRA_NOTIF_ID, 0)
+        val rtl = "\u200F"
+        val title = intent.getStringExtra(AlertActionReceiver.EXTRA_TITLE) ?: "${rtl}🔔 یادآوری هشدار"
+        val text = intent.getStringExtra(AlertActionReceiver.EXTRA_TEXT).orEmpty()
+        val bigText = intent.getStringExtra(AlertActionReceiver.EXTRA_BIGTEXT).orEmpty().ifBlank { text }
+        val vibrate = intent.getBooleanExtra(AlertActionReceiver.EXTRA_VIBRATE, true)
+        val reminderTitle = if (title.contains("یادآوری")) title else "$rtl⏰ یادآوری • ${title.removePrefix(rtl)}"
+        postAlertNotification(context, notifId, reminderTitle, text, bigText, vibrate)
+    }
+
     /** برای دکمه‌ی «تست هشدار» در تنظیمات */
-    fun notifyTest(context: Context) {
-        ensureChannel(context)
+    fun notifyTest(context: Context, vibrate: Boolean = true) {
+        ensureChannel(context, vibrate)
         val open = PendingIntent.getActivity(
             context, 7,
             Intent(context, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val n = NotificationCompat.Builder(context, CHANNEL_ID)
+        val n = NotificationCompat.Builder(context, channelId(vibrate))
             .setSmallIcon(R.drawable.ic_stat_pulse)
             .setContentTitle("\u200F🔔 نوتیف تستی")
-            .setContentText("\u200Fاگر این را می‌بینی، هشدارها درست کار می‌کنند.")
+            .setContentText(
+                if (vibrate) "\u200Fاگر این را می‌بینی (و گوشی لرزید)، هشدارها درست کار می‌کنند."
+                else "\u200Fاگر این را می‌بینی، هشدارها درست کار می‌کنند (لرزش خاموش است)."
+            )
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setVibrate(VIBRATION_PATTERN)
+            .apply { if (vibrate) setVibrate(VIBRATION_PATTERN) else setVibrate(longArrayOf(0L)) }
             .setAutoCancel(true)
             .setContentIntent(open)
             .build()
@@ -334,16 +429,19 @@ object AlertEngine {
         }
     }
 
-    private fun ensureChannel(context: Context) {
+    private fun ensureChannel(context: Context, vibrate: Boolean) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
-        if (manager.getNotificationChannel(CHANNEL_ID) != null) return
+        val id = channelId(vibrate)
+        if (manager.getNotificationChannel(id) != null) return
         val channel = NotificationChannel(
-            CHANNEL_ID, "\u200Fهشدار قیمت", NotificationManager.IMPORTANCE_HIGH
+            id,
+            if (vibrate) "\u200Fهشدار قیمت" else "\u200Fهشدار قیمت (بی‌لرزش)",
+            NotificationManager.IMPORTANCE_HIGH
         ).apply {
             description = "\u200Fوقتی نماد به حدی که تعیین کرده‌ای رسید"
-            enableVibration(true)
-            vibrationPattern = VIBRATION_PATTERN
+            enableVibration(vibrate)
+            if (vibrate) vibrationPattern = VIBRATION_PATTERN
         }
         manager.createNotificationChannel(channel)
     }
