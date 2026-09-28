@@ -1,10 +1,13 @@
 package com.pulse.market.data
 
+import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.Cache
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
+import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
@@ -48,12 +51,38 @@ object Http {
     /** سقف پیش‌فرض صفحه‌ی HTML — صفحات سنگین اسکرپ هم جا شوند */
     const val MAX_HTML_BYTES = 8L * 1024 * 1024
 
+    /**
+     * سقف کش دیسکِ HTTP (۵ مگابایت). کش فقط پاسخ‌های GET ای را نگه می‌دارد که خودِ سرور
+     * با هدرهای `Cache-Control`/`ETag` قابل‌کش اعلام کرده است؛ پس داده‌ی قیمتِ زنده که
+     * سرور آن را no-cache می‌فرستد هرگز کهنه سرو نمی‌شود. سود اصلی: درخواست‌های شرطی
+     * (If-None-Match / 304 Not Modified) پهنای‌باند و مصرف داده را کم می‌کنند، و اگر
+     * سرور یک TTL کوتاه بدهد، تازه‌سازی‌های پشت‌سرهم دوباره از شبکه نمی‌گیرند.
+     */
+    private const val MAX_CACHE_BYTES = 5L * 1024 * 1024
+
+    /** مسیر کش؛ یک‌بار در [init] از روی [Context] ست می‌شود (پیش از اولین درخواست). */
+    @Volatile
+    private var cacheDir: File? = null
+
+    /**
+     * یک‌بار در `Application.onCreate` صدا زده می‌شود تا کش دیسک پیش از ساخته‌شدنِ
+     * تنبلِ [client] آماده باشد. بی‌ضرر است اگر چند بار صدا زده شود.
+     */
+    fun init(context: Context) {
+        if (cacheDir == null) {
+            cacheDir = runCatching { File(context.applicationContext.cacheDir, "http_cache") }.getOrNull()
+        }
+    }
+
     private val client: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .connectTimeout(12, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
             .callTimeout(25, TimeUnit.SECONDS)
             .retryOnConnectionFailure(true)
+            // کش دیسک اختیاری است؛ اگر init صدا نخورده باشد، کلاینت بدون کش کار می‌کند
+            // (رفتار قبلی). سرور تصمیم می‌گیرد چه چیزی و چند وقت کش شود.
+            .apply { cacheDir?.let { cache(Cache(it, MAX_CACHE_BYTES)) } }
             // redirect خودکار می‌تواند هدر سفارشی مثل X-API-Key را به میزبان دیگری
             // ببرد. redirectهای GET را پایین‌تر خودمان، محدود و بدون credential دنبال می‌کنیم.
             .followRedirects(false)

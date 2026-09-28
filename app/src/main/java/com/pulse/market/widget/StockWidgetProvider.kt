@@ -427,10 +427,28 @@ open class StockWidgetProvider : AppWidgetProvider() {
             }
 
             if (anyPeriodicWidget(context)) {
-                LiveUpdateWorker.schedule(context)
+                LiveUpdateWorker.schedule(context, periodicIntervalMinutes(context))
             } else {
                 LiveUpdateWorker.cancel(context)
             }
+        }
+
+        /**
+         * بازه‌ی مناسب Worker دوره‌ای (دقیقه):
+         *  • هر ویجت زنده‌ای که باشد → ۱۵ دقیقه (کمینه‌ی مجاز)، تا اگر سرویس زنده کشته شد
+         *    قیمت‌ها زود تازه شوند.
+         *  • در نبود ویجت زنده و وجود فقط آلارم پامپ → با کمترین cooldownِ آلارم هم‌تراز
+         *    می‌شود (چون اسکنِ زودتر از cooldown اعلان تازه‌ای نمی‌سازد)، تا باتری/داده صرفه شود.
+         */
+        suspend fun periodicIntervalMinutes(context: Context): Long {
+            val ids = WidgetRenderer.allWidgetIds(context)
+            val cfgs = ids.map { ConfigStore.current(context, it) }
+            if (cfgs.any { it.liveService }) return LiveUpdateWorker.MIN_PERIOD_MINUTES
+            val pumpCooldown = cfgs.filter { it.pumpAlertEnabled }
+                .minOfOrNull { it.pumpAlertCooldownMin }
+            return pumpCooldown?.toLong()?.coerceIn(
+                LiveUpdateWorker.MIN_PERIOD_MINUTES, LiveUpdateWorker.MAX_PERIOD_MINUTES
+            ) ?: LiveUpdateWorker.MIN_PERIOD_MINUTES
         }
 
         /** وقتی می‌خواهیم از بیرون (اپ/سرویس) رندر تازه بزنیم */

@@ -40,8 +40,21 @@ class LiveUpdateWorker(context: Context, params: WorkerParameters) :
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
 
-        fun schedule(context: Context) {
-            val request = PeriodicWorkRequestBuilder<LiveUpdateWorker>(15, TimeUnit.MINUTES)
+        /** کمترین بازه‌ی مجاز اندروید برای کار دوره‌ای. */
+        const val MIN_PERIOD_MINUTES = 15L
+
+        /** سقف منطقی بازه؛ آلارم پامپ با cooldown بلند نباید بازه را بی‌نهایت کند. */
+        const val MAX_PERIOD_MINUTES = 360L
+
+        /**
+         * بازه با نیاز واقعی ویجت‌ها وفق داده می‌شود: ویجت زنده = هر ۱۵ دقیقه (پشتیبانِ
+         * تنگ برای وقتی سرویس زنده کشته شود)؛ اگر فقط آلارم پامپ فعال باشد، بازه با
+         * cooldown آلارم هم‌تراز می‌شود تا بیهوده هر ۱۵ دقیقه بیدار نشود و باتری/داده کمتر
+         * مصرف شود. پیش‌فرض [MIN_PERIOD_MINUTES] رفتار قبلی را حفظ می‌کند.
+         */
+        fun schedule(context: Context, periodMinutes: Long = MIN_PERIOD_MINUTES) {
+            val period = periodMinutes.coerceIn(MIN_PERIOD_MINUTES, MAX_PERIOD_MINUTES)
+            val request = PeriodicWorkRequestBuilder<LiveUpdateWorker>(period, TimeUnit.MINUTES)
                 .setInitialDelay(1, TimeUnit.MINUTES)
                 .setConstraints(connected)
                 .build()

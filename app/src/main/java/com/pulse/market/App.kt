@@ -1,6 +1,7 @@
 package com.pulse.market
 
 import android.app.Application
+import com.pulse.market.data.Http
 import com.pulse.market.widget.StockWidgetProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -19,6 +20,8 @@ class App : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // پیش از هر درخواست شبکه، کش دیسکِ HTTP آماده می‌شود (بدون کار سنگین/شبکه).
+        Http.init(this)
         appScope.launch {
             try {
                 // بالا آمدن پروسه ممکن است از Worker/رسیورِ پس‌زمینه باشد؛ در آن حالت
