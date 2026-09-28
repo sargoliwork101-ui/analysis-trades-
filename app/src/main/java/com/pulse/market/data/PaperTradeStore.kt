@@ -1,6 +1,7 @@
 package com.pulse.market.data
 
 import android.content.Context
+import androidx.compose.runtime.Immutable
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
@@ -44,6 +45,7 @@ object PaperTradeStore {
      * یک «پله»ی خرید در محدوده‌ی ورود (شبیه سفارش خرید پله‌ای نوبیتکس).
      * پله وقتی «پر» می‌شود که قیمت بازار به قیمت هدفِ آن پله یا پایین‌تر برسد.
      */
+    @Immutable
     @Serializable
     data class LadderStep(
         /** قیمت هدف این پله (خرید محدود، دلار) */
@@ -54,6 +56,7 @@ object PaperTradeStore {
         val filledAt: Long? = null
     )
 
+    @Immutable
     @Serializable
     data class Trade(
         val id: String,

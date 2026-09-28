@@ -35,6 +35,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -46,6 +47,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -227,6 +229,12 @@ fun PumpsCategory(
     val shown = PumpScanner.sortByPeriod(matchingCoins, cfg.pumpSortPeriod)
     val visibleCoins = if (showAllResults) shown else shown.take(5)
 
+    // قیمت‌های زنده‌ی همین اسکن یک‌بار ساخته می‌شوند و در کیف/فروش دوباره استفاده
+    // می‌شوند تا از ساختِ تکراریِ Map جلوگیری شود.
+    val livePrices = remember(scan) {
+        scan?.coins.orEmpty().mapNotNull { c -> c.price?.let { c.id to it } }.toMap()
+    }
+
     LaunchedEffect(scan?.at, cfg.pumpMinChange, cfg.pumpSortPeriod) {
         showAllResults = false
     }
@@ -282,6 +290,17 @@ fun PumpsCategory(
                     }
                 )
             }
+        }
+
+        // بازخورد بصری هنگام اسکن — روی هر تبی که باشی نشان داده می‌شود.
+        if (busy) {
+            LinearProgressIndicator(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(50)),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.surfaceVariant
+            )
         }
 
         when (pumpTab) {
@@ -346,15 +365,17 @@ fun PumpsCategory(
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         for (coin in visibleCoins) {
-                            PumpRow(
-                                coin = coin,
-                                persian = cfg.persianDigits,
-                                alreadyAdded = cfg.symbols.any {
-                                    it.code == coin.id && it.sourceId == PumpScanner.CRYPTO_SOURCE_ID
-                                },
-                                aiReviewed = aiReviews[coin.id] != null,
-                                onClick = { selectedCoinId = coin.id }
-                            )
+                            key(coin.id) {
+                                PumpRow(
+                                    coin = coin,
+                                    persian = cfg.persianDigits,
+                                    alreadyAdded = cfg.symbols.any {
+                                        it.code == coin.id && it.sourceId == PumpScanner.CRYPTO_SOURCE_ID
+                                    },
+                                    aiReviewed = aiReviews[coin.id] != null,
+                                    onClick = { selectedCoinId = coin.id }
+                                )
+                            }
                         }
                     }
                     if (shown.size > 5) {
@@ -655,14 +676,12 @@ fun PumpsCategory(
             else -> {
                 PaperWalletCard(
                     trades = trades,
-                    prices = (scan?.coins ?: emptyList()).mapNotNull { coin ->
-                        coin.price?.let { coin.id to it }
-                    }.toMap(),
+                    prices = livePrices,
                     persian = cfg.persianDigits,
                     notice = tradeNotice,
                     onSell = { trade ->
                         scope.launch {
-                            val price = scan?.coins?.firstOrNull { it.id == trade.coinId }?.price
+                            val price = livePrices[trade.coinId]
                             val closed = withContext(Dispatchers.IO) {
                                 PaperTradeStore.sell(context, trade.id, price)
                             }

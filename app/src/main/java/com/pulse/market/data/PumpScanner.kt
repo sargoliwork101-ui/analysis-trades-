@@ -1,6 +1,7 @@
 package com.pulse.market.data
 
 import android.content.Context
+import androidx.compose.runtime.Immutable
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -46,6 +47,7 @@ object PumpScanner {
         context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
 
     /** یک کوین با نشانه‌های پامپ */
+    @Immutable
     @Serializable
     data class PumpCoin(
         val id: String,
@@ -211,6 +213,7 @@ object PumpScanner {
     }
 
     /** نتیجه‌ی یک اسکن */
+    @Immutable
     @Serializable
     data class PumpScan(
         val at: Long = 0L,
