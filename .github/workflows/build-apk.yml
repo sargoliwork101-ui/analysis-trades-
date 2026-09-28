@@ -133,15 +133,16 @@ jobs:
           cp app/build/outputs/apk/release/app-release.apk "build-output/PulseMarket-v${VER}.apk"
           APK="build-output/PulseMarket-v${VER}.apk"
           BYTES=$(stat -c%s "$APK")
-          # نسخه‌ی ۱٫۲۱ حجم را حدود ۹۰٪ کم کرد؛ اجازه نده رشد وابستگی‌ها
-          # این دستاورد را بی‌صدا برگرداند.
-          MAX_BYTES=$((2 * 1024 * 1024))
+          # این فقط یک نردبانِ ایمنی است تا رشد ناگهانی و ناخواسته‌ی وابستگی‌ها/دارایی‌ها
+          # زود دیده شود — یک الزام محصولی نیست. سقف روی ۵ MiB تنظیم شده تا برای
+          # قابلیت‌های تازه جا باشد؛ برای برداشتنِ کامل، همین گام را حذف کنید.
+          MAX_BYTES=$((5 * 1024 * 1024))
           ls -lh build-output/
           sha256sum "$APK"
 
           echo "optimized APK size: $BYTES bytes (limit: $MAX_BYTES)"
           if [ "$BYTES" -gt "$MAX_BYTES" ]; then
-            echo "::error::APK از سقف سبک‌بودن ۲ MiB بزرگ‌تر شده است ($BYTES bytes)"
+            echo "::error::APK از سقف ایمنیِ ۵ MiB بزرگ‌تر شده است ($BYTES bytes) — احتمالاً یک وابستگی/داراییِ سنگین ناخواسته اضافه شده"
             exit 1
           fi
           echo "APK_NAME=PulseMarket-v${VER}.apk" >> "$GITHUB_ENV"

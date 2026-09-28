@@ -1062,6 +1062,7 @@ internal fun riskColor(risk: PumpScanner.Risk): Color = when (risk) {
 }
 
 /** کیف آزمایشی: معامله‌های باز، نتیجه‌ی معامله‌های بسته و خلاصه‌ی عملکرد. */
+
 @Composable
 private fun PaperWalletCard(
     trades: List<PaperTradeStore.Trade>,
@@ -1071,110 +1072,63 @@ private fun PaperWalletCard(
     onSell: (PaperTradeStore.Trade) -> Unit,
     onClearHistory: () -> Unit
 ) {
-    if (trades.isEmpty() && notice == null) return
+    if (trades.isEmpty() && notice.isNullOrBlank()) {
+        InfoCard(
+            "هنوز معامله‌ای نداری. در تب «پامپ‌ها» روی یک کوین بزن و یک خرید آزمایشی ثبت کن؛ " +
+                    "از آن‌جا به بعد زمان و قیمتِ خرید/فروش و سود هر معامله همین‌جا دیده می‌شود."
+        )
+        return
+    }
     val summary = PaperTradeStore.summarize(trades, prices)
     val open = trades.filter { it.isOpen }
     val closed = trades.filterNot { it.isOpen }.take(10)
+
     SectionHeader(
         "کیف آزمایشی",
-        "خلاصه‌ی معامله‌ها؛ جزئیات کامل و تاریخچه در تب «معامله‌های من» است."
+        "زمان و قیمتِ خرید/فروش و سود هر معامله. مدیریت کامل در تب «معامله‌های من» است."
     )
-    RowsCard {
-        if (!notice.isNullOrBlank()) {
-            InnerRow { Hint(notice) }
-            RowDivider()
-        }
-        InnerRow {
-            Text(
-                "سود محقق‌شده: ${money(summary.realizedUsd, persian)} • " +
-                        "سود باز: ${money(summary.openUsd, persian)}",
-                fontSize = 12.5.sp,
-                fontWeight = FontWeight.Bold,
-                color = if (summary.realizedUsd + summary.openUsd >= 0.0) Color(0xFF16A34A)
-                else Color(0xFFDC2626)
-            )
-            Text(
-                "کارمزد پرداخت‌شده: ${Format.price(PaperTradeStore.totalFees(trades, prices), persian)} دلار",
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                "معامله‌ی باز: ${Format.toPersianDigits("${summary.openCount}")} • " +
-                        "بسته‌شده: ${Format.toPersianDigits("${summary.closedCount}")} • " +
-                        "برد: ${Format.toPersianDigits("${summary.wins}")} / " +
-                        "باخت: ${Format.toPersianDigits("${summary.losses}")}",
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        for (trade in open) {
-            RowDivider()
-            InnerRow {
-                Text(
-                    "${trade.name} (${trade.symbol})",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    "خرید در ${QuoteText.priceWithUnit(trade.entryPrice, "$", persian)} • " +
-                            "مبلغ ${QuoteText.priceWithUnit(trade.amountUsd, "$", persian)}",
-                    fontSize = 10.5.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    "نتیجه‌ی فعلی: ${PaperTradeStore.resultText(trade, prices[trade.coinId], persian)}",
-                    fontSize = 11.5.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if ((trade.profitPct(prices[trade.coinId]) ?: 0.0) >= 0.0)
-                        Color(0xFF16A34A) else Color(0xFFDC2626)
-                )
-                val levels = buildString {
-                    trade.takeProfitPrice?.let {
-                        append("حد سود ${QuoteText.priceWithUnit(it, "$", persian)}")
-                    }
-                    trade.stopLossPrice?.let {
-                        if (isNotEmpty()) append(" • ")
-                        append("حد ضرر ${QuoteText.priceWithUnit(it, "$", persian)}")
-                    }
-                }
-                if (levels.isNotBlank()) {
-                    Text(levels, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                OutlinedButton(onClick = { onSell(trade) }, modifier = Modifier.fillMaxWidth()) {
-                    Text("فروش آزمایشی", fontSize = 11.sp)
-                }
-            }
-        }
-        if (closed.isNotEmpty()) {
-            RowDivider()
-            InnerRow {
-                Text(
-                    "معامله‌های بسته‌شده",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                for (trade in closed) {
-                    Text(
-                        "${trade.name}: ${PaperTradeStore.resultText(trade, null, persian)} — " +
-                                (trade.closeReason?.label ?: "بسته شد"),
-                        fontSize = 10.5.sp,
-                        color = if ((trade.profitPct(null) ?: 0.0) >= 0.0) Color(0xFF16A34A)
-                        else Color(0xFFDC2626)
+
+    if (!notice.isNullOrBlank()) InfoCard(notice)
+
+    TradeSummaryCard(summary, PaperTradeStore.totalFees(trades, prices), persian)
+
+    if (open.isNotEmpty()) {
+        SectionHeader("معامله‌های باز")
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            for (trade in open) {
+                key(trade.id) {
+                    WalletTradeCard(
+                        trade = trade,
+                        price = prices[trade.coinId],
+                        persian = persian,
+                        onSell = { onSell(trade) }
                     )
-                }
-                OutlinedButton(onClick = onClearHistory, modifier = Modifier.fillMaxWidth()) {
-                    Text("پاک کردن تاریخچه", fontSize = 11.sp)
                 }
             }
         }
     }
-}
 
-/** مبلغ دلاری با علامت سود/زیان */
-private fun money(value: Double, persian: Boolean): String {
-    val sign = if (value >= 0.0) "+" else "−"
-    val text = Format.price(kotlin.math.abs(value), persian)
-    return "$sign$text دلار"
+    if (closed.isNotEmpty()) {
+        SectionHeader("تاریخچه")
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            for (trade in closed) {
+                key(trade.id) {
+                    WalletTradeCard(
+                        trade = trade,
+                        price = trade.closePrice,
+                        persian = persian
+                    )
+                }
+            }
+        }
+        OutlinedButton(onClick = onClearHistory, modifier = Modifier.fillMaxWidth()) {
+            Text("پاک کردن تاریخچه", fontSize = 11.5.sp)
+        }
+    }
 }
