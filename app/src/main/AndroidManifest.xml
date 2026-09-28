@@ -9,6 +9,8 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- برای نصبِ درون‌برنامه‌ایِ آپدیت (کاربر فایل را دستی دانلود/نصب نکند) -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:name=".App"
@@ -81,6 +83,17 @@
             android:name=".service.LiveUpdateService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- برای دادن فایلِ APK دانلودشده به نصب‌کننده‌ی سیستم به‌صورت content:// امن -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
 
         <!-- بعد از راه‌اندازی مجدد گوشر و همچنین بعد از «آپدیت برنامه»،
              سرویس زنده و ویجت‌ها دوباره وصل می‌شوند (بدون این، بعد از آپدیت

@@ -48,6 +48,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -74,6 +75,7 @@ import com.pulse.market.data.AlertEngine
 import com.pulse.market.data.AlertEvent
 import com.pulse.market.data.AlertHistoryStore
 import com.pulse.market.data.AlertRule
+import com.pulse.market.data.AppInstaller
 import com.pulse.market.data.AppUpdater
 import com.pulse.market.data.ConfigStore
 import com.pulse.market.data.Fetcher
@@ -1065,10 +1067,36 @@ private fun AboutCategory() {
         }.getOrNull()?.takeIf { it.isNotBlank() } ?: "1.2"
     }
 
-    // وضعیت بررسی آپدیت — نسخه‌ی جدید روی همین نصب نصب می‌شود؛ پاک کردن لازم نیست
+    // وضعیت بررسی/دانلود/نصب آپدیت — نسخه‌ی جدید روی همین نصب نصب می‌شود؛ پاک کردن لازم نیست.
+    // حالت‌ها: idle, checking, uptodate, norelease, error, newer,
+    //          downloading, needperm, installing, downloaderror
     val scope = rememberCoroutineScope()
     var updateState by remember { mutableStateOf("idle") }
     var latest by remember { mutableStateOf<AppUpdater.LatestRelease?>(null) }
+    var downloadProgress by remember { mutableStateOf<Float?>(null) }
+    var downloadedFile by remember { mutableStateOf<java.io.File?>(null) }
+
+    // یک دکمه: دانلودِ APK از ریلیز رسمی، سپس بازکردنِ نصب‌کننده‌ی سیستم (با گرفتنِ اجازه‌ی نصب در صورت نیاز).
+    val downloadAndInstall: (String) -> Unit = { url ->
+        scope.launch {
+            updateState = "downloading"
+            downloadProgress = null
+            val file = runCatching {
+                AppInstaller.downloadApk(context, url, latest?.apkSha256) { p -> downloadProgress = p }
+            }.getOrNull()
+            if (file == null) {
+                updateState = "downloaderror"
+            } else {
+                downloadedFile = file
+                if (AppInstaller.canInstall(context)) {
+                    AppInstaller.launchInstaller(context, file)
+                    updateState = "installing"
+                } else {
+                    updateState = "needperm"
+                }
+            }
+        }
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
 
@@ -1115,21 +1143,47 @@ private fun AboutCategory() {
                 title = "نسخه‌ی نصب‌شده: ${Format.toPersianDigits(versionName)}",
                 desc = when (updateState) {
                     "checking" -> "در حال بررسی نسخه‌ی جدید…"
-                    "newer" -> "✨ نسخه‌ی ${latest?.tag ?: ""} هست — روی همین نصب آپدیت می‌شود"
+                    "newer" -> "✨ نسخه‌ی ${latest?.tag ?: ""} آماده است — با یک دکمه دانلود و نصب می‌شود"
+                    "downloading" -> downloadProgress?.let {
+                        "در حال دانلود… ${Format.toPersianDigits("${(it * 100).toInt()}")}٪"
+                    } ?: "در حال دانلود…"
+                    "needperm" -> "برای نصب خودکار، اجازه‌ی «نصب برنامه‌های ناشناس» را روشن کن"
+                    "installing" -> "نصب‌کننده باز شد — ادامه‌ی نصب را تأیید کن"
+                    "downloaderror" -> "دانلود ممکن نشد — اینترنت را چک کن و دوباره بزن"
                     "uptodate" -> "✅ آخرین نسخه را داری"
                     "norelease" -> "هنوز ریلیز رسمی منتشر نشده"
                     "error" -> "ممکن نشد — اینترنت را چک کن و دوباره بزن"
-                    else -> "از اینجا نسخه‌ی جدید را چک و روی همین نصب آپدیت کن؛ پاک کردن لازم نیست"
+                    else -> "از همین‌جا نسخه‌ی جدید را چک، دانلود و نصب کن؛ نیازی به مرورگر یا پاک کردن نیست"
                 }
             ) {
-                if (updateState == "newer" && latest?.apkUrl != null) {
-                    Button(onClick = {
-                        runCatching {
-                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(latest!!.apkUrl)))
+                when (updateState) {
+                    "newer" -> if (latest?.apkUrl != null) {
+                        Button(onClick = { downloadAndInstall(latest!!.apkUrl!!) }) {
+                            Text("⬇ دانلود و نصب", fontSize = 12.sp)
                         }
-                    }) { Text("⬇ دریافت", fontSize = 12.sp) }
-                } else {
-                    OutlinedButton(
+                    }
+                    "downloading" -> {
+                        // پیشرفت پایین‌تر نشان داده می‌شود؛ اینجا دکمه‌ای نیست.
+                    }
+                    "needperm" -> Button(onClick = {
+                        if (AppInstaller.canInstall(context)) {
+                            downloadedFile?.let {
+                                AppInstaller.launchInstaller(context, it)
+                                updateState = "installing"
+                            }
+                        } else {
+                            AppInstaller.openInstallPermissionSettings(context)
+                        }
+                    }) { Text("اجازه و نصب", fontSize = 12.sp) }
+                    "installing" -> Button(onClick = {
+                        downloadedFile?.let { AppInstaller.launchInstaller(context, it) }
+                    }) { Text("نصب دوباره", fontSize = 12.sp) }
+                    "downloaderror" -> if (latest?.apkUrl != null) {
+                        Button(onClick = { downloadAndInstall(latest!!.apkUrl!!) }) {
+                            Text("تلاش دوباره", fontSize = 12.sp)
+                        }
+                    }
+                    else -> OutlinedButton(
                         enabled = updateState != "checking",
                         onClick = {
                             scope.launch {
@@ -1150,7 +1204,28 @@ private fun AboutCategory() {
                     ) { Text("بررسی", fontSize = 12.sp) }
                 }
             }
-            if (updateState == "newer" && latest != null) {
+            if (updateState == "downloading") {
+                RowDivider()
+                InnerRow {
+                    val p = downloadProgress
+                    if (p == null) {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    } else {
+                        LinearProgressIndicator(
+                            progress = { p },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    Text(
+                        "پس از دانلود، نصب‌کننده‌ی اندروید خودش باز می‌شود.",
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            if (latest != null &&
+                updateState in listOf("newer", "downloading", "needperm", "installing", "downloaderror")
+            ) {
                 RowDivider()
                 InnerRow {
                     Text(
@@ -1167,8 +1242,8 @@ private fun AboutCategory() {
                             maxLines = 6
                         )
                     }
-                    // اثر انگشت فایل نصبی — برای اینکه کاربر بتواند بعد از دانلود
-                    // مطمئن شود همان فایلِ ریلیز رسمی را گرفته (متن قابل انتخاب/کپی است)
+                    // اثر انگشت فایل نصبی — پس از دانلود خودکار تطبیق داده می‌شود؛ اینجا هم
+                    // نشان داده می‌شود تا کاربر در صورت تمایل خودش تطبیق دهد (قابل انتخاب/کپی).
                     latest!!.apkSha256?.let { sha ->
                         SelectionContainer {
                             Text(
@@ -1179,8 +1254,8 @@ private fun AboutCategory() {
                         }
                     }
                     Text(
-                        "فایل از صفحه‌ی رسمی ریلیزهای همین مخزن دانلود می‌شود و اندروید هم " +
-                                "امضای نسخه‌ی نصب‌شده را بررسی می‌کند.",
+                        "فایل از ریلیز رسمیِ همین مخزن دانلود و اثر انگشتش خودکار بررسی می‌شود؛ " +
+                                "سپس نصب‌کننده‌ی اندروید باز می‌شود و امضای نسخه را تطبیق می‌دهد (پاک کردن لازم نیست).",
                         fontSize = 10.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

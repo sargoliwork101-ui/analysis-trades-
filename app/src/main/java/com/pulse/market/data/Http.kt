@@ -51,6 +51,9 @@ object Http {
     /** سقف پیش‌فرض صفحه‌ی HTML — صفحات سنگین اسکرپ هم جا شوند */
     const val MAX_HTML_BYTES = 8L * 1024 * 1024
 
+    /** سقف حجم فایل نصبی (APK) هنگام آپدیت درون‌برنامه‌ای — دست‌ودل‌باز برای رشد آینده. */
+    const val MAX_APK_BYTES = 80L * 1024 * 1024
+
     /**
      * سقف کش دیسکِ HTTP (۵ مگابایت). کش فقط پاسخ‌های GET ای را نگه می‌دارد که خودِ سرور
      * با هدرهای `Cache-Control`/`ETag` قابل‌کش اعلام کرده است؛ پس داده‌ی قیمتِ زنده که
@@ -101,21 +104,29 @@ object Http {
         request: Request,
         maxBytes: Long = MAX_JSON_BYTES,
         callTimeoutSeconds: Int? = null
-    ): String {
+    ): String = resolveFinal(request, callTimeoutSeconds).use { readCapped(it, maxBytes) }
+
+    /**
+     * درخواست را (با دنبال‌کردن امنِ redirect) تا پاسخِ نهاییِ غیرِ redirect پیش می‌برد و
+     * آن را باز برمی‌گرداند؛ **مسئولیت بستنِ پاسخ با فراخواننده است** (`.use { … }`).
+     */
+    private fun resolveFinal(request: Request, callTimeoutSeconds: Int? = null): Response {
         rejectSensitiveCleartext(request)
         var current = request
         repeat(MAX_REDIRECTS + 1) { redirectCount ->
             val call = client.newCall(current)
             callTimeoutSeconds?.let {
-                // سقف ۳۰۰ ثانیه: مدل‌های thinking با جست‌وجوی وب واقعاً کند هستند.
+                // سقف ۳۰۰ ثانیه: هم مدل‌های thinking کندند، هم دانلود APK روی موبایل.
                 call.timeout().timeout(it.coerceIn(3, 300).toLong(), TimeUnit.SECONDS)
             }
-            call.execute().use { response ->
-                if (!response.isRedirect) return readCapped(response, maxBytes)
+            val response = call.execute()
+            if (!response.isRedirect) return response
+            // پاسخِ redirect فقط برای هدر Location لازم است؛ بدنه‌اش بسته می‌شود.
+            response.use { r ->
                 if (redirectCount >= MAX_REDIRECTS) error("تعداد تغییر مسیر پاسخ بیش از حد مجاز است")
                 // POST هوش مصنوعی یا هر بدنه‌ی حساس نباید خودکار به مقصد دیگری فرستاده شود.
                 if (current.body != null) error("تغییر مسیر برای درخواست دارای بدنه مجاز نیست")
-                val location = response.header("Location")
+                val location = r.header("Location")
                     ?: error("پاسخ تغییر مسیر، مقصد معتبر ندارد")
                 val next = current.url.resolve(location)
                     ?: error("مقصد تغییر مسیر نامعتبر است")
@@ -135,6 +146,51 @@ object Http {
             }
         }
         error("تغییر مسیر پاسخ کامل نشد")
+    }
+
+    /**
+     * دانلودِ فایلِ دودویی (مثل APK آپدیت) روی [dest] با سقف حجم و گزارشِ پیشرفت.
+     * فقط https مجاز است. [onProgress] بایت‌های دریافتی و حجم کل (اگر سرور بدهد) را می‌دهد.
+     */
+    suspend fun download(
+        url: String,
+        dest: File,
+        maxBytes: Long = MAX_APK_BYTES,
+        onProgress: ((downloaded: Long, total: Long?) -> Unit)? = null
+    ) = withContext(Dispatchers.IO) {
+        if (!url.startsWith("https://", ignoreCase = true)) {
+            error("دانلود فقط از https مجاز است")
+        }
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", UA_DESKTOP)
+            .header("Accept", "application/octet-stream, */*")
+            .build()
+        resolveFinal(request, callTimeoutSeconds = 300).use { resp ->
+            if (!resp.isSuccessful) throw HttpException(resp.code, "HTTP ${resp.code}")
+            val body = resp.body ?: error("پاسخ خالی بود")
+            val total = body.contentLength().takeIf { it > 0 }
+            if (total != null && total > maxBytes) error("حجم فایل بیش از حد مجاز است")
+            dest.parentFile?.mkdirs()
+            var written = 0L
+            body.byteStream().use { input ->
+                dest.outputStream().use { output ->
+                    val buf = ByteArray(64 * 1024)
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        written += n
+                        if (written > maxBytes) {
+                            runCatching { dest.delete() }
+                            error("حجم فایل بیش از حد مجاز است")
+                        }
+                        output.write(buf, 0, n)
+                        onProgress?.invoke(written, total)
+                    }
+                    output.flush()
+                }
+            }
+        }
     }
 
     /**
