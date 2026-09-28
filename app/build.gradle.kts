@@ -18,8 +18,8 @@ android {
         // UI برنامه فارسی است و انگلیسی فقط fallback کتابخانه‌هاست؛ localeهای بلااستفاده
         // AndroidX نباید در APK release نگه داشته شوند.
         resourceConfigurations += listOf("fa", "en")
-        versionCode = 57
-        versionName = "1.56"
+        versionCode = 58
+        versionName = "1.57"
     }
 
     /**
