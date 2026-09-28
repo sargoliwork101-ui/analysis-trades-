@@ -1,9 +1,12 @@
 package com.pulse.market.ui
 
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
@@ -50,11 +53,21 @@ private val pulseTypography: Typography = Typography().let { t ->
     )
 }
 
+/** گوشه‌های نرم‌تر و امروزی‌تر برای کل کارت‌ها، دکمه‌ها، چیپ‌ها و دیالوگ‌ها */
+private val pulseShapes = Shapes(
+    extraSmall = RoundedCornerShape(8.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(18.dp),
+    large = RoundedCornerShape(24.dp),
+    extraLarge = RoundedCornerShape(30.dp)
+)
+
 @Composable
 fun PulseTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = PulseColors,
         typography = pulseTypography,
+        shapes = pulseShapes,
         content = content
     )
 }

@@ -17,12 +17,15 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountBalanceWallet
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.TrendingUp
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.foundation.BorderStroke
@@ -35,16 +38,22 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.TabRowDefaults
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -110,6 +119,7 @@ fun PumpsCategory(
     var trades by remember { mutableStateOf<List<PaperTradeStore.Trade>>(emptyList()) }
     var tradeNotice by remember { mutableStateOf<String?>(null) }
     var nobitex by remember { mutableStateOf<Map<String, NobitexMarkets.Result>>(emptyMap()) }
+    var pumpTab by rememberSaveable { mutableStateOf(0) }
 
     LaunchedEffect(Unit) {
         val loaded = withContext(Dispatchers.IO) { PumpAiConfigStore.load(context) }
@@ -228,390 +238,449 @@ fun PumpsCategory(
             "کوین‌هایی که تند رشد کرده‌اند — اول بفهم پامپ چیست، بعد نگاه کن"
         )
 
-        // آموزش در آیکون راهنما جمع شده تا صفحه روی گوشی‌های کوچک شلوغ نشود.
-        OutlinedButton(
-            onClick = { showHelp = !showHelp },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Icon(Icons.Default.HelpOutline, contentDescription = null, modifier = Modifier.size(19.dp))
-            Spacer(Modifier.width(7.dp))
-            Text(if (showHelp) "بستن راهنمای پامپ" else "راهنمای پامپ و معنی پیام‌ها")
-        }
-        if (showHelp) PumpHelpCard()
-
-        // ── تنظیمات اسکن ──
-        SectionHeader("اسکن زنده", "داده‌ی لحظه‌ای CoinGecko — کوین‌های برتر بازار")
-        RowsCard {
-            SwitchRow(
-                "نمایش این بخش در منو",
-                "اگر نمی‌خواهی، از منوی تنظیمات مخفی می‌شود (اطلاعاتش می‌ماند)",
-                cfg.showPumps
-            ) { onChange(cfg.copy(showPumps = it)) }
-
-            RowDivider()
-
-            InnerRow {
-                Text("دامنه‌ی اسکن", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface)
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    for (n in PumpScanner.UNIVERSE_CHOICES) {
-                        FilterChip(
-                            selected = cfg.pumpUniverse == n,
-                            onClick = { onChange(cfg.copy(pumpUniverse = n)) },
-                            label = { Text("${Format.toPersianDigits("$n")} کوین برتر") }
-                        )
-                    }
-                }
-                Hint("بیشتر پامپ‌ها بین کوین‌های کوچک‌تر (رتبه‌ی ۱۰۰ به بالا) رخ می‌دهد؛ دامنه‌ی بزرگ‌تر = دیدِ بازتر.")
-            }
-
-            RowDivider()
-
-            InnerRow {
-                Text("آستانه‌ی رشد ۲۴ ساعته", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface)
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    for (t in listOf(3.0, 5.0, 8.0, 15.0, 25.0)) {
-                        FilterChip(
-                            selected = cfg.pumpMinChange == t,
-                            onClick = { onChange(cfg.copy(pumpMinChange = t)) },
-                            label = { Text("${Format.toPersianDigits("${t.toInt()}")}٪ و بیشتر") }
-                        )
-                    }
-                }
-            }
-
-            RowDivider()
-
-            SwitchRow(
-                "آلارم پامپ",
-                if (cfg.pumpAlertEnabled)
-                    "فعال است؛ اسکن دوره‌ای همراه با پیشنهاد احتیاطی و دلیل"
-                else "در صورت عبور از آستانه اعلان بده (سیگنال خرید نیست)",
-                cfg.pumpAlertEnabled
-            ) { onAlertToggle(it) }
-
-            if (cfg.pumpAlertEnabled) {
-                InnerRow {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Default.NotificationsActive,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(Modifier.width(7.dp))
-                        Text(
-                            "فاصله‌ی اعلان‌ها",
-                            fontSize = 13.5.sp,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        for (minutes in listOf(30, 60, 180, 360)) {
-                            val label = if (minutes < 60) "$minutes دقیقه" else "${minutes / 60} ساعت"
-                            FilterChip(
-                                selected = cfg.pumpAlertCooldownMin == minutes,
-                                onClick = { onChange(cfg.copy(pumpAlertCooldownMin = minutes)) },
-                                label = { Text(Format.toPersianDigits(label)) }
-                            )
-                        }
-                    }
-                    Hint("برای جلوگیری از اسپم، هر نتیجه‌ی اسکن فقط یک‌بار بررسی می‌شود و در این فاصله اعلان دیگری نمی‌آید.")
-                }
-            }
-
-            RowDivider()
-
-            SettingRow(
-                title = "آخرین اسکن",
-                desc = when {
-                    busy -> "در حال خواندن از CoinGecko…"
-                    scan == null -> "هنوز اسکنی انجام نشده"
-                    else -> "ساعت ${Format.time(scan!!.at)} • ${Format.toPersianDigits("${scan!!.coins.size}")} کوین بررسی شد"
-                }
-            ) {
-                OutlinedButton(onClick = { runScan(true) }, enabled = !busy) {
-                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("اسکن تازه", fontSize = 12.sp)
-                }
-            }
-        }
-
-        if (note.isNotEmpty()) InfoCard(note)
-
-        // ── ۳) نظر دوم هوش مصنوعی ──
-        SectionHeader(
-            "نظر دوم هوش مصنوعی",
-            "اختیاری و مستقل از مدل — API سازگار، نام مدل و کلید را خودت تعیین می‌کنی"
+        // ── نوار تب‌ها: صفحه‌ی شلوغِ پامپ به چند تبِ مرتب تقسیم شده تا روی
+        //    گوشی‌های کوچک هم خلوت و امروزی بماند. حالت هر تب حفظ می‌شود. ──
+        val pumpTabs = listOf(
+            "پامپ‌ها" to Icons.Default.TrendingUp,
+            "اسکن" to Icons.Default.Tune,
+            "هوش‌مصنوعی" to Icons.Default.AutoAwesome,
+            "کیف" to Icons.Default.AccountBalanceWallet
         )
-        RowsCard {
-            SwitchRow(
-                "بررسی با AI",
-                if (aiConfig.enabled)
-                    "برای هر کوین با دکمه اجرا می‌شود و پیشنهاد پایه را تغییر نمی‌دهد"
-                else "خاموش؛ هیچ داده‌ای برای سرویس هوش مصنوعی فرستاده نمی‌شود",
-                aiConfig.enabled
-            ) { saveAiConfig(aiConfig.copy(enabled = it)) }
-
-            if (aiConfig.enabled) {
-                RowDivider()
-                InnerRow {
-                    Text(
-                        "تنظیمات پیش‌فرض سرویس",
-                        fontSize = 12.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        for (preset in PumpAiConfig.PRESETS) {
-                            FilterChip(
-                                selected = aiConfig.matches(preset),
-                                onClick = {
-                                    saveAiConfig(
-                                        aiConfig.copy(
-                                            endpoint = preset.endpoint,
-                                            model = preset.model,
-                                            providerSearch = preset.providerSearch
-                                        )
-                                    )
-                                },
-                                label = { Text(preset.title, fontSize = 11.5.sp) }
-                            )
-                        }
-                    }
-                    val activePreset = PumpAiConfig.PRESETS.firstOrNull { aiConfig.matches(it) }
-                    Hint(
-                        activePreset?.hint
-                            ?: "با انتخاب هر سرویس، آدرس API و نام مدل خودکار پر می‌شود؛ فقط کلید خودت را وارد کن. " +
-                            "می‌توانی مقادیر را دستی هم تغییر بدهی."
-                    )
-                    OutlinedTextField(
-                        value = aiConfig.endpoint,
-                        onValueChange = { saveAiConfig(aiConfig.copy(endpoint = it.take(500))) },
-                        label = { Text("آدرس API سازگار") },
-                        placeholder = { Text("https://example.com/v1") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    OutlinedTextField(
-                        value = aiConfig.model,
-                        onValueChange = { saveAiConfig(aiConfig.copy(model = it.take(150))) },
-                        label = { Text("نام مدل") },
-                        placeholder = { Text("نام مدل سرویس") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    OutlinedTextField(
-                        value = aiConfig.apiKey,
-                        onValueChange = { saveAiConfig(aiConfig.copy(apiKey = it.take(1_000))) },
-                        label = { Text("API Key (اگر سرویس لازم دارد)") },
-                        visualTransformation = PasswordVisualTransformation(),
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    if (aiConfig.insecureKeyTransport) {
-                        Hint("⚠️ برای امنیت، API Key روی HTTP ارسال نمی‌شود؛ آدرس HTTPS بگذار یا کلید را خالی کن.")
-                    } else if (aiConfig.endpoint.startsWith("http://", ignoreCase = true)) {
-                        Hint("⚠️ پاسخ HTTP رمزنگاری نشده و قابل دست‌کاری است؛ در صورت امکان HTTPS استفاده کن.")
-                    }
-                    if (aiConfig.endpoint.isNotBlank() && !aiConfig.endpointValid) {
-                        Hint("آدرس باید HTTP(S) معتبر، بدون نام کاربری، query یا fragment باشد.")
-                    }
-                    if (aiConfig.model.isBlank()) {
-                        Hint("نام مدل خالی است؛ یکی از سرویس‌های بالا را بزن یا نام مدل را دستی بنویس.")
-                    }
-                    if (aiStorageError) {
-                        Hint("⚠️ Android Keystore کلید را ذخیره نکرد؛ برای امنیت، کلید روی دیسک نوشته نشد.")
-                    }
-                    Hint(
-                        "کلید با Android Keystore رمزگذاری می‌شود و وارد بکاپ دستی نمی‌شود. " +
-                                "با زدن دکمه، نام کوین و داده‌های قیمت/حجم/ریسک برای همین API فرستاده می‌شود. " +
-                                "برای خبر، جست‌وجوی وب خود سرویس درخواست می‌شود؛ این قابلیت باید توسط مدل/API پشتیبانی شود."
-                    )
-                }
-                RowDivider()
-                InnerRow {
-                    OutlinedButton(
-                        onClick = {
-                            val config = aiConfig
-                            aiTestBusy = true
-                            aiTestResult = null
-                            scope.launch {
-                                try {
-                                    aiTestResult = PumpAiReviewer.testConnection(config)
-                                } finally {
-                                    aiTestBusy = false
-                                }
-                            }
-                        },
-                        enabled = !aiTestBusy,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Default.NetworkCheck, contentDescription = null, modifier = Modifier.size(17.dp))
-                        Spacer(Modifier.width(6.dp))
+        TabRow(
+            selectedTabIndex = pumpTab,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(18.dp)),
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+            contentColor = MaterialTheme.colorScheme.primary,
+            indicator = { positions ->
+                TabRowDefaults.SecondaryIndicator(
+                    modifier = Modifier.tabIndicatorOffset(positions[pumpTab]),
+                    height = 3.dp,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            },
+            divider = {}
+        ) {
+            pumpTabs.forEachIndexed { index, (label, icon) ->
+                val active = pumpTab == index
+                Tab(
+                    selected = active,
+                    onClick = { pumpTab = index },
+                    selectedContentColor = MaterialTheme.colorScheme.primary,
+                    unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    text = {
                         Text(
-                            if (aiTestBusy) "در حال تست اتصال…" else "تست اتصال به سرویس AI",
-                            fontSize = 11.5.sp
+                            label,
+                            fontSize = 10.5.sp,
+                            maxLines = 1,
+                            fontWeight = if (active) FontWeight.Bold else FontWeight.Normal
                         )
+                    },
+                    icon = {
+                        Icon(icon, contentDescription = null, modifier = Modifier.size(19.dp))
                     }
-                    aiTestResult?.let { result ->
-                        Text(
-                            result.message,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (result.ok) Color(0xFF16A34A) else MaterialTheme.colorScheme.error
-                        )
-                    }
-                    Hint(
-                        "تست، یک پیام خیلی کوتاه برای سرویس می‌فرستد (بدون داده‌ی کوین) و نتیجه‌ی دقیق " +
-                                "آدرس، مدل و کلید را می‌گوید."
-                    )
-                }
-                RowDivider()
-                SwitchRow(
-                    "درخواست جست‌وجوی وب از سرویس",
-                    if (aiConfig.providerSearch)
-                        "برای OpenAI و OpenRouter افزونه‌ی جست‌وجو فعال می‌شود؛ سرویس‌های دیگر فقط بر اساس قابلیت خود مدل جست‌وجو می‌کنند."
-                    else "خاموش؛ مدل فقط با داده‌های همین صفحه نظر می‌دهد و خبر تازه جست‌وجو نمی‌کند.",
-                    aiConfig.providerSearch
-                ) { saveAiConfig(aiConfig.copy(providerSearch = it)) }
+                )
             }
         }
 
-        if (aiConfig.enabled) {
-            InfoCard(
-                "هوش مصنوعی فقط نظر دوم است و ممکن است اشتباه کند. لینک خبرها را پیش از تصمیم باز کن؛ " +
-                        "نبود خبر معتبر یا اختلاف نظر، دلیل خرید نیست."
-            )
-        }
-
-        // ── ۴) نتیجه ──
-        val summary = when {
-            scan == null -> "برای دیدن نتیجه، «اسکن تازه» را بزن."
-            shown.isEmpty() -> "الان در ${Format.toPersianDigits("${scan!!.universe}")} کوین برتر، هیچ کوینی " +
-                    "بیشتر از ${Format.toPersianDigits("${cfg.pumpMinChange.toInt()}")}٪ رشد ۲۴ ساعته ندارد — " +
-                    "یعنی بازار فعلاً پامپ‌دار نیست (خودش یک خبر خوب است)."
-
-            else -> "${Format.toPersianDigits("${shown.size}")} کوین از " +
-                    "${Format.toPersianDigits("${scan!!.coins.size}")} کوین بررسی‌شده، بالای " +
-                    "${Format.toPersianDigits("${cfg.pumpMinChange.toInt()}")}٪ رشد ۲۴ ساعته‌اند."
-        }
-        SectionHeader("نتیجه", summary)
-
-        if (shown.isNotEmpty()) {
-            RowsCard {
-                InnerRow {
-                    Text(
-                        "مرتب‌سازی بر اساس بیشترین رشد",
-                        fontSize = 13.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        for ((period, label) in listOf(
-                            PumpSortPeriod.ONE_HOUR to "۱ ساعت",
-                            PumpSortPeriod.ONE_DAY to "۱ روز",
-                            PumpSortPeriod.ONE_MONTH to "۱ ماه"
-                        )) {
-                            FilterChip(
-                                selected = cfg.pumpSortPeriod == period,
-                                onClick = { onChange(cfg.copy(pumpSortPeriod = period)) },
-                                label = { Text(label) }
-                            )
-                        }
-                    }
-                    Hint("ابتدا ۵ کوین اول دیده می‌شود؛ «نمایش بیشتر» بقیه را باز می‌کند.")
-                }
-            }
-
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                for (coin in visibleCoins) {
-                    PumpRow(
-                        coin = coin,
-                        persian = cfg.persianDigits,
-                        alreadyAdded = cfg.symbols.any {
-                            it.code == coin.id && it.sourceId == PumpScanner.CRYPTO_SOURCE_ID
-                        },
-                        aiReviewed = aiReviews[coin.id] != null,
-                        onClick = { selectedCoinId = coin.id }
-                    )
-                }
-            }
-            if (shown.size > 5) {
+        when (pumpTab) {
+            // ───────── تب ۱) پامپ‌ها: نتیجه‌ی اسکن + راهنما ─────────
+            0 -> {
+                // آموزش در آیکون راهنما جمع شده تا صفحه روی گوشی‌های کوچک شلوغ نشود.
                 OutlinedButton(
-                    onClick = { showAllResults = !showAllResults },
+                    onClick = { showHelp = !showHelp },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(
-                        if (showAllResults) "نمایش فقط ۵ کوین اول"
-                        else "نمایش ${Format.toPersianDigits((shown.size - 5).toString())} کوین دیگر"
+                    Icon(Icons.Default.HelpOutline, contentDescription = null, modifier = Modifier.size(19.dp))
+                    Spacer(Modifier.width(7.dp))
+                    Text(if (showHelp) "بستن راهنمای پامپ" else "راهنمای پامپ و معنی پیام‌ها")
+                }
+                if (showHelp) PumpHelpCard()
+
+                if (note.isNotEmpty()) InfoCard(note)
+
+                val summary = when {
+                    scan == null -> "برای دیدن نتیجه، «اسکن تازه» را بزن."
+                    shown.isEmpty() -> "الان در ${Format.toPersianDigits("${scan!!.universe}")} کوین برتر، هیچ کوینی " +
+                            "بیشتر از ${Format.toPersianDigits("${cfg.pumpMinChange.toInt()}")}٪ رشد ۲۴ ساعته ندارد — " +
+                            "یعنی بازار فعلاً پامپ‌دار نیست (خودش یک خبر خوب است)."
+
+                    else -> "${Format.toPersianDigits("${shown.size}")} کوین از " +
+                            "${Format.toPersianDigits("${scan!!.coins.size}")} کوین بررسی‌شده، بالای " +
+                            "${Format.toPersianDigits("${cfg.pumpMinChange.toInt()}")}٪ رشد ۲۴ ساعته‌اند."
+                }
+                SectionHeader("نتیجه", summary)
+
+                if (shown.isNotEmpty()) {
+                    RowsCard {
+                        InnerRow {
+                            Text(
+                                "مرتب‌سازی بر اساس بیشترین رشد",
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                for ((period, label) in listOf(
+                                    PumpSortPeriod.ONE_HOUR to "۱ ساعت",
+                                    PumpSortPeriod.ONE_DAY to "۱ روز",
+                                    PumpSortPeriod.ONE_MONTH to "۱ ماه"
+                                )) {
+                                    FilterChip(
+                                        selected = cfg.pumpSortPeriod == period,
+                                        onClick = { onChange(cfg.copy(pumpSortPeriod = period)) },
+                                        label = { Text(label) }
+                                    )
+                                }
+                            }
+                            Hint("ابتدا ۵ کوین اول دیده می‌شود؛ «نمایش بیشتر» بقیه را باز می‌کند.")
+                        }
+                    }
+
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        for (coin in visibleCoins) {
+                            PumpRow(
+                                coin = coin,
+                                persian = cfg.persianDigits,
+                                alreadyAdded = cfg.symbols.any {
+                                    it.code == coin.id && it.sourceId == PumpScanner.CRYPTO_SOURCE_ID
+                                },
+                                aiReviewed = aiReviews[coin.id] != null,
+                                onClick = { selectedCoinId = coin.id }
+                            )
+                        }
+                    }
+                    if (shown.size > 5) {
+                        OutlinedButton(
+                            onClick = { showAllResults = !showAllResults },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                if (showAllResults) "نمایش فقط ۵ کوین اول"
+                                else "نمایش ${Format.toPersianDigits((shown.size - 5).toString())} کوین دیگر"
+                            )
+                        }
+                    }
+                    if (room <= 0) {
+                        Hint("ویجت پر است (سقف ${Format.toPersianDigits("$MAX_SYMBOLS")} نماد) — برای افزودن کوین تازه، یکی از نمادها را حذف کن.")
+                    }
+                }
+
+                Hint(
+                    "منبع داده: CoinGecko (کوین‌های برتر بر اساس ارزش بازار). برای اینکه کوین تازه‌ای را " +
+                            "به ویجت اضافه کنی، لازم است منبع «کریپتو — CoinGecko» روشن باشد."
+                )
+
+                Button(
+                    onClick = { runScan(true) },
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Refresh, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (busy) "در حال اسکن…" else "اسکن تازه‌ی پامپ‌ها", fontSize = 12.5.sp)
+                }
+            }
+
+            // ───────── تب ۲) اسکن: تنظیمات اسکن زنده ─────────
+            1 -> {
+                SectionHeader("اسکن زنده", "داده‌ی لحظه‌ای CoinGecko — کوین‌های برتر بازار")
+                RowsCard {
+                    SwitchRow(
+                        "نمایش این بخش در منو",
+                        "اگر نمی‌خواهی، از منوی تنظیمات مخفی می‌شود (اطلاعاتش می‌ماند)",
+                        cfg.showPumps
+                    ) { onChange(cfg.copy(showPumps = it)) }
+
+                    RowDivider()
+
+                    InnerRow {
+                        Text("دامنه‌ی اسکن", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface)
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            for (n in PumpScanner.UNIVERSE_CHOICES) {
+                                FilterChip(
+                                    selected = cfg.pumpUniverse == n,
+                                    onClick = { onChange(cfg.copy(pumpUniverse = n)) },
+                                    label = { Text("${Format.toPersianDigits("$n")} کوین برتر") }
+                                )
+                            }
+                        }
+                        Hint("بیشتر پامپ‌ها بین کوین‌های کوچک‌تر (رتبه‌ی ۱۰۰ به بالا) رخ می‌دهد؛ دامنه‌ی بزرگ‌تر = دیدِ بازتر.")
+                    }
+
+                    RowDivider()
+
+                    InnerRow {
+                        Text("آستانه‌ی رشد ۲۴ ساعته", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface)
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            for (t in listOf(3.0, 5.0, 8.0, 15.0, 25.0)) {
+                                FilterChip(
+                                    selected = cfg.pumpMinChange == t,
+                                    onClick = { onChange(cfg.copy(pumpMinChange = t)) },
+                                    label = { Text("${Format.toPersianDigits("${t.toInt()}")}٪ و بیشتر") }
+                                )
+                            }
+                        }
+                    }
+
+                    RowDivider()
+
+                    SwitchRow(
+                        "آلارم پامپ",
+                        if (cfg.pumpAlertEnabled)
+                            "فعال است؛ اسکن دوره‌ای همراه با پیشنهاد احتیاطی و دلیل"
+                        else "در صورت عبور از آستانه اعلان بده (سیگنال خرید نیست)",
+                        cfg.pumpAlertEnabled
+                    ) { onAlertToggle(it) }
+
+                    if (cfg.pumpAlertEnabled) {
+                        InnerRow {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    Icons.Default.NotificationsActive,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(Modifier.width(7.dp))
+                                Text(
+                                    "فاصله‌ی اعلان‌ها",
+                                    fontSize = 13.5.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                for (minutes in listOf(30, 60, 180, 360)) {
+                                    val label = if (minutes < 60) "$minutes دقیقه" else "${minutes / 60} ساعت"
+                                    FilterChip(
+                                        selected = cfg.pumpAlertCooldownMin == minutes,
+                                        onClick = { onChange(cfg.copy(pumpAlertCooldownMin = minutes)) },
+                                        label = { Text(Format.toPersianDigits(label)) }
+                                    )
+                                }
+                            }
+                            Hint("برای جلوگیری از اسپم، هر نتیجه‌ی اسکن فقط یک‌بار بررسی می‌شود و در این فاصله اعلان دیگری نمی‌آید.")
+                        }
+                    }
+
+                    RowDivider()
+
+                    SettingRow(
+                        title = "آخرین اسکن",
+                        desc = when {
+                            busy -> "در حال خواندن از CoinGecko…"
+                            scan == null -> "هنوز اسکنی انجام نشده"
+                            else -> "ساعت ${Format.time(scan!!.at)} • ${Format.toPersianDigits("${scan!!.coins.size}")} کوین بررسی شد"
+                        }
+                    ) {
+                        OutlinedButton(onClick = { runScan(true) }, enabled = !busy) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("اسکن تازه", fontSize = 12.sp)
+                        }
+                    }
+                }
+
+                if (note.isNotEmpty()) InfoCard(note)
+            }
+
+            // ───────── تب ۳) هوش مصنوعی: نظر دوم اختیاری ─────────
+            2 -> {
+                SectionHeader(
+                    "نظر دوم هوش مصنوعی",
+                    "اختیاری و مستقل از مدل — API سازگار، نام مدل و کلید را خودت تعیین می‌کنی"
+                )
+                RowsCard {
+                    SwitchRow(
+                        "بررسی با AI",
+                        if (aiConfig.enabled)
+                            "برای هر کوین با دکمه اجرا می‌شود و پیشنهاد پایه را تغییر نمی‌دهد"
+                        else "خاموش؛ هیچ داده‌ای برای سرویس هوش مصنوعی فرستاده نمی‌شود",
+                        aiConfig.enabled
+                    ) { saveAiConfig(aiConfig.copy(enabled = it)) }
+
+                    if (aiConfig.enabled) {
+                        RowDivider()
+                        InnerRow {
+                            Text(
+                                "تنظیمات پیش‌فرض سرویس",
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                for (preset in PumpAiConfig.PRESETS) {
+                                    FilterChip(
+                                        selected = aiConfig.matches(preset),
+                                        onClick = {
+                                            saveAiConfig(
+                                                aiConfig.copy(
+                                                    endpoint = preset.endpoint,
+                                                    model = preset.model,
+                                                    providerSearch = preset.providerSearch
+                                                )
+                                            )
+                                        },
+                                        label = { Text(preset.title, fontSize = 11.5.sp) }
+                                    )
+                                }
+                            }
+                            val activePreset = PumpAiConfig.PRESETS.firstOrNull { aiConfig.matches(it) }
+                            Hint(
+                                activePreset?.hint
+                                    ?: "با انتخاب هر سرویس، آدرس API و نام مدل خودکار پر می‌شود؛ فقط کلید خودت را وارد کن. " +
+                                    "می‌توانی مقادیر را دستی هم تغییر بدهی."
+                            )
+                            OutlinedTextField(
+                                value = aiConfig.endpoint,
+                                onValueChange = { saveAiConfig(aiConfig.copy(endpoint = it.take(500))) },
+                                label = { Text("آدرس API سازگار") },
+                                placeholder = { Text("https://example.com/v1") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            OutlinedTextField(
+                                value = aiConfig.model,
+                                onValueChange = { saveAiConfig(aiConfig.copy(model = it.take(150))) },
+                                label = { Text("نام مدل") },
+                                placeholder = { Text("نام مدل سرویس") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            OutlinedTextField(
+                                value = aiConfig.apiKey,
+                                onValueChange = { saveAiConfig(aiConfig.copy(apiKey = it.take(1_000))) },
+                                label = { Text("API Key (اگر سرویس لازم دارد)") },
+                                visualTransformation = PasswordVisualTransformation(),
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            if (aiConfig.insecureKeyTransport) {
+                                Hint("⚠️ برای امنیت، API Key روی HTTP ارسال نمی‌شود؛ آدرس HTTPS بگذار یا کلید را خالی کن.")
+                            } else if (aiConfig.endpoint.startsWith("http://", ignoreCase = true)) {
+                                Hint("⚠️ پاسخ HTTP رمزنگاری نشده و قابل دست‌کاری است؛ در صورت امکان HTTPS استفاده کن.")
+                            }
+                            if (aiConfig.endpoint.isNotBlank() && !aiConfig.endpointValid) {
+                                Hint("آدرس باید HTTP(S) معتبر، بدون نام کاربری، query یا fragment باشد.")
+                            }
+                            if (aiConfig.model.isBlank()) {
+                                Hint("نام مدل خالی است؛ یکی از سرویس‌های بالا را بزن یا نام مدل را دستی بنویس.")
+                            }
+                            if (aiStorageError) {
+                                Hint("⚠️ Android Keystore کلید را ذخیره نکرد؛ برای امنیت، کلید روی دیسک نوشته نشد.")
+                            }
+                            Hint(
+                                "کلید با Android Keystore رمزگذاری می‌شود و وارد بکاپ دستی نمی‌شود. " +
+                                        "با زدن دکمه، نام کوین و داده‌های قیمت/حجم/ریسک برای همین API فرستاده می‌شود. " +
+                                        "برای خبر، جست‌وجوی وب خود سرویس درخواست می‌شود؛ این قابلیت باید توسط مدل/API پشتیبانی شود."
+                            )
+                        }
+                        RowDivider()
+                        InnerRow {
+                            OutlinedButton(
+                                onClick = {
+                                    val config = aiConfig
+                                    aiTestBusy = true
+                                    aiTestResult = null
+                                    scope.launch {
+                                        try {
+                                            aiTestResult = PumpAiReviewer.testConnection(config)
+                                        } finally {
+                                            aiTestBusy = false
+                                        }
+                                    }
+                                },
+                                enabled = !aiTestBusy,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.NetworkCheck, contentDescription = null, modifier = Modifier.size(17.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    if (aiTestBusy) "در حال تست اتصال…" else "تست اتصال به سرویس AI",
+                                    fontSize = 11.5.sp
+                                )
+                            }
+                            aiTestResult?.let { result ->
+                                Text(
+                                    result.message,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (result.ok) Color(0xFF16A34A) else MaterialTheme.colorScheme.error
+                                )
+                            }
+                            Hint(
+                                "تست، یک پیام خیلی کوتاه برای سرویس می‌فرستد (بدون داده‌ی کوین) و نتیجه‌ی دقیق " +
+                                        "آدرس، مدل و کلید را می‌گوید."
+                            )
+                        }
+                        RowDivider()
+                        SwitchRow(
+                            "درخواست جست‌وجوی وب از سرویس",
+                            if (aiConfig.providerSearch)
+                                "برای OpenAI و OpenRouter افزونه‌ی جست‌وجو فعال می‌شود؛ سرویس‌های دیگر فقط بر اساس قابلیت خود مدل جست‌وجو می‌کنند."
+                            else "خاموش؛ مدل فقط با داده‌های همین صفحه نظر می‌دهد و خبر تازه جست‌وجو نمی‌کند.",
+                            aiConfig.providerSearch
+                        ) { saveAiConfig(aiConfig.copy(providerSearch = it)) }
+                    }
+                }
+
+                if (aiConfig.enabled) {
+                    InfoCard(
+                        "هوش مصنوعی فقط نظر دوم است و ممکن است اشتباه کند. لینک خبرها را پیش از تصمیم باز کن؛ " +
+                                "نبود خبر معتبر یا اختلاف نظر، دلیل خرید نیست."
                     )
                 }
             }
-            if (room <= 0) {
-                Hint("ویجت پر است (سقف ${Format.toPersianDigits("$MAX_SYMBOLS")} نماد) — برای افزودن کوین تازه، یکی از نمادها را حذف کن.")
-            }
-        }
 
-        Hint(
-            "منبع داده: CoinGecko (کوین‌های برتر بر اساس ارزش بازار). برای اینکه کوین تازه‌ای را " +
-                    "به ویجت اضافه کنی، لازم است منبع «کریپتو — CoinGecko» روشن باشد."
-        )
-
-        PaperWalletCard(
-            trades = trades,
-            prices = (scan?.coins ?: emptyList()).mapNotNull { coin ->
-                coin.price?.let { coin.id to it }
-            }.toMap(),
-            persian = cfg.persianDigits,
-            notice = tradeNotice,
-            onSell = { trade ->
-                scope.launch {
-                    val price = scan?.coins?.firstOrNull { it.id == trade.coinId }?.price
-                    val closed = withContext(Dispatchers.IO) {
-                        PaperTradeStore.sell(context, trade.id, price)
+            // ───────── تب ۴) کیف: معامله‌های آزمایشی ─────────
+            else -> {
+                PaperWalletCard(
+                    trades = trades,
+                    prices = (scan?.coins ?: emptyList()).mapNotNull { coin ->
+                        coin.price?.let { coin.id to it }
+                    }.toMap(),
+                    persian = cfg.persianDigits,
+                    notice = tradeNotice,
+                    onSell = { trade ->
+                        scope.launch {
+                            val price = scan?.coins?.firstOrNull { it.id == trade.coinId }?.price
+                            val closed = withContext(Dispatchers.IO) {
+                                PaperTradeStore.sell(context, trade.id, price)
+                            }
+                            trades = withContext(Dispatchers.IO) { PaperTradeStore.all(context) }
+                            tradeNotice = if (closed == null) "برای فروش، اول یک اسکن تازه بزن تا قیمت به‌روز شود"
+                            else "فروش آزمایشی ${closed.name}: " +
+                                    PaperTradeStore.resultText(closed, closed.closePrice, cfg.persianDigits)
+                        }
+                    },
+                    onClearHistory = {
+                        scope.launch {
+                            withContext(Dispatchers.IO) { PaperTradeStore.clearClosed(context) }
+                            trades = withContext(Dispatchers.IO) { PaperTradeStore.all(context) }
+                            tradeNotice = null
+                        }
                     }
-                    trades = withContext(Dispatchers.IO) { PaperTradeStore.all(context) }
-                    tradeNotice = if (closed == null) "برای فروش، اول یک اسکن تازه بزن تا قیمت به‌روز شود"
-                    else "فروش آزمایشی ${closed.name}: " +
-                            PaperTradeStore.resultText(closed, closed.closePrice, cfg.persianDigits)
-                }
-            },
-            onClearHistory = {
-                scope.launch {
-                    withContext(Dispatchers.IO) { PaperTradeStore.clearClosed(context) }
-                    trades = withContext(Dispatchers.IO) { PaperTradeStore.all(context) }
-                    tradeNotice = null
-                }
+                )
             }
-        )
-
-        Button(
-            onClick = { runScan(true) },
-            enabled = !busy,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Icon(Icons.Default.Refresh, contentDescription = null)
-            Spacer(Modifier.width(6.dp))
-            Text(if (busy) "در حال اسکن…" else "اسکن تازه‌ی پامپ‌ها", fontSize = 12.5.sp)
         }
     }
 
