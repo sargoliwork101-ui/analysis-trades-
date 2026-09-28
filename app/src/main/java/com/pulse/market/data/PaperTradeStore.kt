@@ -80,22 +80,21 @@ object PaperTradeStore {
          * پله‌های خرید پله‌ای. خالی = خرید ساده‌ی تک‌مرحله‌ای (مثل نسخه‌های قبل).
          * قیمت/مبلغِ بالای این کلاس همیشه «مؤثر» (پله‌های پرشده) را نشان می‌دهند.
          */
-        val steps: List<LadderStep> = emptyList(),
-        /** سقف محدوده‌ی ورود = قیمت پله‌ی اول (فقط برای نمایش) */
-        val entryHigh: Double? = null,
-        /** کف محدوده‌ی ورود = قیمت آخرین پله (فقط برای نمایش) */
-        val entryLow: Double? = null
+        val steps: List<LadderStep> = emptyList()
     ) {
         val isOpen: Boolean get() = closedAt == null || closePrice == null
 
         /** آیا این معامله خرید پله‌ای است؟ */
         val isLadder: Boolean get() = steps.isNotEmpty()
 
+        /** سقف محدوده‌ی ورود = قیمت پله‌ی اول، کف = قیمت آخرین پله (برای نمایش) */
+        val entryHigh: Double? get() = steps.firstOrNull()?.price
+        val entryLow: Double? get() = steps.lastOrNull()?.price
+
         /** کل سرمایه‌ی برنامه‌ریزی‌شده روی همه‌ی پله‌ها (پر و پرنشده) */
         val plannedAmountUsd: Double get() = if (isLadder) steps.sumOf { it.amountUsd } else amountUsd
 
         val filledStepCount: Int get() = steps.count { it.filled }
-        val pendingStepCount: Int get() = steps.count { !it.filled }
 
         val closeReason: CloseReason?
             get() = closeReasonName?.let { name ->
@@ -240,9 +239,7 @@ object PaperTradeStore {
             takeProfitPct = takeProfitPct?.takeIf { it.isFinite() && it > 0.0 }?.coerceIn(0.1, 1000.0),
             stopLossPct = stopLossPct?.takeIf { it.isFinite() && it > 0.0 }?.coerceIn(0.1, 99.0),
             feePct = feePct.takeIf { it.isFinite() && it >= 0.0 }?.coerceAtMost(5.0) ?: DEFAULT_FEE_PCT,
-            steps = steps,
-            entryHigh = steps.firstOrNull()?.price,
-            entryLow = steps.lastOrNull()?.price
+            steps = steps
         )
         // در خرید پله‌ای، قیمت/مبلغِ مؤثر از پله‌های پرشده بازمحاسبه می‌شود
         // (پله‌ی اول همان لحظه پر می‌شود، بقیه با افت قیمت).
@@ -269,17 +266,11 @@ object PaperTradeStore {
         if (n < 2 || floor == null || price <= 0.0 || amountUsd <= 0.0) return emptyList()
         val per = amountUsd / n
         val floorFrac = floor / 100.0
-        val threshold = price * (1.0 - LEVEL_TOLERANCE)
         return List(n) { i ->
-            val frac = floorFrac * i / (n - 1)          // i=0 → ۰ ، i=n-1 → floorFrac
-            val stepPrice = price * (1.0 - frac)
-            val fillNow = stepPrice >= threshold        // فقط پله‌ی اول همین حالا پر می‌شود
-            LadderStep(
-                price = stepPrice,
-                amountUsd = per,
-                filled = fillNow,
-                filledAt = if (fillNow) now else null
-            )
+            // پله‌ی اول با قیمت فعلی همین حالا پر می‌شود؛ پله‌های پایین‌تر بعداً با افت قیمت.
+            val stepPrice = price * (1.0 - floorFrac * i / (n - 1))   // i=0 → قیمت فعلی، i=n-1 → کف محدوده
+            val first = i == 0
+            LadderStep(price = stepPrice, amountUsd = per, filled = first, filledAt = if (first) now else null)
         }
     }
 

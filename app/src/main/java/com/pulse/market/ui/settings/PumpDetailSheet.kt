@@ -682,14 +682,13 @@ fun PumpDetailSheet(
 
                 Button(
                     onClick = {
-                        val useLadder = ladder
                         onBuy(
                             amount.replace(',', '.').toDoubleOrNull() ?: 0.0,
                             takeProfit.replace(',', '.').toDoubleOrNull(),
                             stopLoss.replace(',', '.').toDoubleOrNull(),
                             fee.replace(',', '.').toDoubleOrNull() ?: PaperTradeStore.DEFAULT_FEE_PCT,
-                            if (useLadder) (stepCount.toIntOrNull() ?: 1) else 1,
-                            if (useLadder) rangeFloor.replace(',', '.').toDoubleOrNull() else null
+                            if (ladder) (stepCount.toIntOrNull() ?: 1) else 1,
+                            if (ladder) rangeFloor.replace(',', '.').toDoubleOrNull() else null
                         )
                     },
                     enabled = (coin.price ?: 0.0) > 0.0 &&
