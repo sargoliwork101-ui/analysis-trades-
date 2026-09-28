@@ -509,3 +509,17 @@ CI نسخه‌ی ۱٫۲۸ همه‌ی build/test/lintها را گذراند، ا
 ۳) نوار وضعیت را سیستم مدیریت می‌کند (MainActivity رنگ اجباری نمی‌گذارد)، پس نیازی به تغییر نبود. رنگ‌های نشانه‌ای دست‌نخورده ماندند تا معنی سود/زیان/هشدار در هر دو حالت یکسان بماند.
 
 نسخه به `1.57` و `versionCode=58` افزایش یافت. گیت‌های CI بدون تغییر معتبرند.
+
+## ۳۰) مهاجرت state و منطق صفحه‌ی پامپ به ViewModel — نسخه‌ی ۱٫۵۸
+
+بازآراییِ پرریسکی که در نسخه‌های قبل عمداً به تعویق افتاده بود. هدف: جدا کردن منطق شبکه/دیسک از UI و حفظ نتیجه‌ی اسکن هنگام ترک/بازگشت یا چرخش صفحه.
+
+۱) **مشکل قبلی**: در `PumpsCategory.kt` همه‌ی وضعیت (نتیجه‌ی اسکن، مشغولیت، پیام، پیکربندی و نتایج/خطاهای هوش مصنوعی، معامله‌های آزمایشی، پیام معامله، کشِ نوبیتکس) با `var … by remember` داخل خودِ composable بود. با رفتن به بخش دیگر و بازگشت — یا تغییر پیکربندی (چرخش) — این حافظه پاک می‌شد و یک اسکن شبکه‌ای تازه به‌اجبار اجرا می‌شد؛ ترافیک و تأخیر بی‌مورد.
+
+۲) **`PumpsViewModel`** (`AndroidViewModel`) ساخته شد: همه‌ی propertyها با `mutableStateOf` و `private set` پشتیبانی می‌شوند تا خواندنشان در composition recomposition بسازد ولی نوشتن فقط از داخل کلاس مجاز باشد. متدها: `start(universe,minChange)` (یک‌بار؛ بارگذاری پیکربندی هوش مصنوعی، تطابق‌های قبلی، کش، تسویه‌ی معامله‌ها و در نبودِ کش اسکن اول)، `saveAiConfig`، `testAiConnection`، `runAiReview`، `runScan(cfg,alertOwnerKey,force)`، `buy(...)`، `sellTrade(...)`، `sellOpenForCoin(...)`، `clearHistory`، `checkNobitex`. کارِ شبکه/دیسک داخل `viewModelScope.launch` + `withContext(Dispatchers.IO)` انجام می‌شود؛ `CancellationException` دوباره پرتاب می‌شود.
+
+۳) **کم‌کردن ریسک بازآرایی**: در composable برای هر state یک `val` آینه‌ای از `vm.…` خوانده شد، پس حدود ۳۰ محلِ خواندنِ UI بدون تغییر ماند و فقط اعلان‌های state، دو `LaunchedEffect(Unit)`، سه تابع محلی و حدود ۹ محل تغییر (onClick/onSell/onBuy/…) به فراخوانی `vm.…` تبدیل شدند. `rememberCoroutineScope` و ایمپورت‌های بلااستفاده (`Dispatchers`, `withContext`, `launch`, `CancellationException`, `NobitexMarkets`, `PumpAiReviewer`, `PumpAiConfigStore`) حذف شدند. مقادیر فقط-نمایشی (`showHelp`, `showAllResults`, `selectedCoinId`, `pumpTab`) عمداً در خودِ composable ماندند چون به منطق دامنه ربطی ندارند.
+
+۴) دو وابستگی افزوده شد: `androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.6` و `lifecycle-viewmodel-compose:2.8.6` (برای `viewModel()`).
+
+نسخه به `1.58` و `versionCode=59` افزایش یافت. بقیه‌ی گیت‌های CI (کامپایل، تست واحد، `lintRelease`، امضای ثابت، سقف حجم ۵ MiB) بدون تغییر معتبرند.

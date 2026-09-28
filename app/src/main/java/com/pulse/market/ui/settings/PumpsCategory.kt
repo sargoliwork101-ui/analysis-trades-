@@ -51,8 +51,8 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -64,10 +64,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pulse.market.data.MAX_SYMBOLS
 import com.pulse.market.data.PumpAiConfig
-import com.pulse.market.data.PumpAiConfigStore
-import com.pulse.market.data.NobitexMarkets
 import com.pulse.market.data.PaperTradeStore
-import com.pulse.market.data.PumpAiReviewer
 import com.pulse.market.data.PumpAlertEngine
 import com.pulse.market.data.PumpScanner
 import com.pulse.market.data.PumpSortPeriod
@@ -75,10 +72,6 @@ import com.pulse.market.data.SymbolDef
 import com.pulse.market.data.WidgetConfig
 import com.pulse.market.ui.Format
 import com.pulse.market.ui.QuoteText
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 /**
  * بخش «پامپ‌های کریپتو» — دو کار را با هم می‌کند:
@@ -100,126 +93,34 @@ fun PumpsCategory(
     onAddSymbol: (SymbolDef) -> Unit
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
+    val vm: PumpsViewModel = viewModel()
 
-    var scan by remember { mutableStateOf<PumpScanner.PumpScan?>(null) }
-    var busy by remember { mutableStateOf(false) }
-    var note by remember { mutableStateOf("") }
-    var aiConfig by remember { mutableStateOf(PumpAiConfig()) }
-    var aiBusyIds by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var aiReviews by remember { mutableStateOf<Map<String, PumpAiReviewer.Review>>(emptyMap()) }
-    var aiErrors by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
-    var aiStorageError by remember { mutableStateOf(false) }
-    var aiTestBusy by remember { mutableStateOf(false) }
-    var aiTestResult by remember { mutableStateOf<PumpAiReviewer.TestResult?>(null) }
-    var aiEdited by remember { mutableStateOf(false) }
+    // بارگذاری اولیه یک‌بار انجام می‌شود؛ چون state در ViewModel است، با ترک و
+    // بازگشت به این بخش (یا چرخش صفحه) نتیجه‌ی اسکن و معامله‌ها حفظ می‌شود.
+    LaunchedEffect(Unit) { vm.start(cfg.pumpUniverse, cfg.pumpMinChange) }
+
+    // آینه‌ی خواندنیِ state از ViewModel — خواندن این‌ها در composition، recomposition
+    // درست هنگام تغییر می‌سازد و بدنه‌ی UI پایین بدون تغییر می‌ماند.
+    val scan = vm.scan
+    val busy = vm.busy
+    val note = vm.note
+    val aiConfig = vm.aiConfig
+    val aiBusyIds = vm.aiBusyIds
+    val aiReviews = vm.aiReviews
+    val aiErrors = vm.aiErrors
+    val aiReviewAt = vm.aiReviewAt
+    val aiStorageError = vm.aiStorageError
+    val aiTestBusy = vm.aiTestBusy
+    val aiTestResult = vm.aiTestResult
+    val previousMatches = vm.previousMatches
+    val trades = vm.trades
+    val tradeNotice = vm.tradeNotice
+    val nobitex = vm.nobitex
+
     var showHelp by remember { mutableStateOf(false) }
     var showAllResults by remember { mutableStateOf(false) }
     var selectedCoinId by remember { mutableStateOf<String?>(null) }
-    var aiReviewAt by remember { mutableStateOf<Map<String, Long>>(emptyMap()) }
-    var previousMatches by remember { mutableStateOf<Pair<Long, Set<String>>?>(null) }
-    var trades by remember { mutableStateOf<List<PaperTradeStore.Trade>>(emptyList()) }
-    var tradeNotice by remember { mutableStateOf<String?>(null) }
-    var nobitex by remember { mutableStateOf<Map<String, NobitexMarkets.Result>>(emptyMap()) }
     var pumpTab by rememberSaveable { mutableStateOf(0) }
-
-    LaunchedEffect(Unit) {
-        val loaded = withContext(Dispatchers.IO) { PumpAiConfigStore.load(context) }
-        if (!aiEdited) aiConfig = loaded
-    }
-
-    fun saveAiConfig(new: PumpAiConfig) {
-        if (new != aiConfig) {
-            aiReviews = emptyMap()
-            aiErrors = emptyMap()
-            aiTestResult = null
-        }
-        aiEdited = true
-        aiConfig = new
-        PumpAiConfigStore.saveDebounced(context, new) { saved ->
-            aiStorageError = !saved
-        }
-    }
-
-    fun runAiReview(coin: PumpScanner.PumpCoin) {
-        val config = aiConfig
-        if (!config.isReady || coin.id in aiBusyIds) return
-        aiBusyIds = aiBusyIds + coin.id
-        aiErrors = aiErrors - coin.id
-        scope.launch {
-            try {
-                val outcome = PumpAiReviewer.review(config, coin)
-                outcome.review?.let {
-                    aiReviews = aiReviews + (coin.id to it)
-                    aiReviewAt = aiReviewAt + (coin.id to System.currentTimeMillis())
-                }
-                outcome.error?.let { aiErrors = aiErrors + (coin.id to it) }
-            } finally {
-                aiBusyIds = aiBusyIds - coin.id
-            }
-        }
-    }
-
-    // فهرست قبلی (ذخیره‌شده روی گوشی) فوراً نشان داده می‌شود؛ اگر نبود یک بار اسکن می‌کنیم
-    LaunchedEffect(Unit) {
-        previousMatches = withContext(Dispatchers.IO) { PumpScanner.previousMatches(context) }
-        val cached = PumpScanner.cached(context)
-        // با باز شدن صفحه هم حد سود/ضرر با آخرین قیمت کش‌شده بررسی می‌شود.
-        trades = withContext(Dispatchers.IO) {
-            cached?.coins?.mapNotNull { coin -> coin.price?.let { coin.id to it } }?.toMap()
-                ?.let { PaperTradeStore.settle(context, it) }
-            PaperTradeStore.all(context)
-        }
-        scan = cached
-        if (cached == null) {
-            busy = true
-            try {
-                scan = PumpScanner.scan(context, cfg.pumpUniverse, cfg.pumpMinChange)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                note = "⚠️ اسکن پامپ کامل نشد؛ اتصال را بررسی کن"
-            } finally {
-                busy = false
-            }
-        }
-    }
-
-    fun runScan(force: Boolean) {
-        busy = true
-        note = ""
-        scope.launch {
-            try {
-                val res = PumpScanner.scan(context, cfg.pumpUniverse, cfg.pumpMinChange, force = force)
-                scan = res
-                previousMatches = withContext(Dispatchers.IO) { PumpScanner.previousMatches(context) }
-                // حد سود/حد ضرر معامله‌های آزمایشی با قیمت‌های تازه بررسی می‌شود.
-                val closed = withContext(Dispatchers.IO) {
-                    val prices = res.coins.mapNotNull { coin ->
-                        coin.price?.let { coin.id to it }
-                    }.toMap()
-                    PaperTradeStore.settle(context, prices)
-                }
-                trades = withContext(Dispatchers.IO) { PaperTradeStore.all(context) }
-                if (closed.isNotEmpty()) {
-                    tradeNotice = closed.joinToString(" • ") { trade ->
-                        "${trade.name}: ${trade.closeReason?.label ?: "بسته شد"} — " +
-                                PaperTradeStore.resultText(trade, trade.closePrice, cfg.persianDigits)
-                    }
-                }
-                if (res.error == null) PumpAlertEngine.evaluateScan(context, alertOwnerKey, cfg, res)
-                note = res.error?.let {
-                    "⚠️ اسکن تازه نگرفت — $it (فهرست قبلی نمایش داده می‌شود)"
-                } ?: ""
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                note = "⚠️ اسکن پامپ کامل نشد؛ اتصال را بررسی کن"
-            } finally {
-                busy = false
-            }
-        }
-    }
 
     val room = (MAX_SYMBOLS - cfg.symbols.size).coerceAtLeast(0)
     // تغییر آستانه یک فیلتر محلی است و نباید تا اسکن شبکه‌ی بعدی بی‌اثر بماند.
@@ -400,7 +301,7 @@ fun PumpsCategory(
                 )
 
                 Button(
-                    onClick = { runScan(true) },
+                    onClick = { vm.runScan(cfg, alertOwnerKey, true) },
                     enabled = !busy,
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -510,7 +411,7 @@ fun PumpsCategory(
                             else -> "ساعت ${Format.time(scan!!.at)} • ${Format.toPersianDigits("${scan!!.coins.size}")} کوین بررسی شد"
                         }
                     ) {
-                        OutlinedButton(onClick = { runScan(true) }, enabled = !busy) {
+                        OutlinedButton(onClick = { vm.runScan(cfg, alertOwnerKey, true) }, enabled = !busy) {
                             Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
                             Text("اسکن تازه", fontSize = 12.sp)
@@ -534,7 +435,7 @@ fun PumpsCategory(
                             "برای هر کوین با دکمه اجرا می‌شود و پیشنهاد پایه را تغییر نمی‌دهد"
                         else "خاموش؛ هیچ داده‌ای برای سرویس هوش مصنوعی فرستاده نمی‌شود",
                         aiConfig.enabled
-                    ) { saveAiConfig(aiConfig.copy(enabled = it)) }
+                    ) { vm.saveAiConfig(aiConfig.copy(enabled = it)) }
 
                     if (aiConfig.enabled) {
                         RowDivider()
@@ -553,7 +454,7 @@ fun PumpsCategory(
                                     FilterChip(
                                         selected = aiConfig.matches(preset),
                                         onClick = {
-                                            saveAiConfig(
+                                            vm.saveAiConfig(
                                                 aiConfig.copy(
                                                     endpoint = preset.endpoint,
                                                     model = preset.model,
@@ -573,7 +474,7 @@ fun PumpsCategory(
                             )
                             OutlinedTextField(
                                 value = aiConfig.endpoint,
-                                onValueChange = { saveAiConfig(aiConfig.copy(endpoint = it.take(500))) },
+                                onValueChange = { vm.saveAiConfig(aiConfig.copy(endpoint = it.take(500))) },
                                 label = { Text("آدرس API سازگار") },
                                 placeholder = { Text("https://example.com/v1") },
                                 singleLine = true,
@@ -581,7 +482,7 @@ fun PumpsCategory(
                             )
                             OutlinedTextField(
                                 value = aiConfig.model,
-                                onValueChange = { saveAiConfig(aiConfig.copy(model = it.take(150))) },
+                                onValueChange = { vm.saveAiConfig(aiConfig.copy(model = it.take(150))) },
                                 label = { Text("نام مدل") },
                                 placeholder = { Text("نام مدل سرویس") },
                                 singleLine = true,
@@ -589,7 +490,7 @@ fun PumpsCategory(
                             )
                             OutlinedTextField(
                                 value = aiConfig.apiKey,
-                                onValueChange = { saveAiConfig(aiConfig.copy(apiKey = it.take(1_000))) },
+                                onValueChange = { vm.saveAiConfig(aiConfig.copy(apiKey = it.take(1_000))) },
                                 label = { Text("API Key (اگر سرویس لازم دارد)") },
                                 visualTransformation = PasswordVisualTransformation(),
                                 singleLine = true,
@@ -618,18 +519,7 @@ fun PumpsCategory(
                         RowDivider()
                         InnerRow {
                             OutlinedButton(
-                                onClick = {
-                                    val config = aiConfig
-                                    aiTestBusy = true
-                                    aiTestResult = null
-                                    scope.launch {
-                                        try {
-                                            aiTestResult = PumpAiReviewer.testConnection(config)
-                                        } finally {
-                                            aiTestBusy = false
-                                        }
-                                    }
-                                },
+                                onClick = { vm.testAiConnection() },
                                 enabled = !aiTestBusy,
                                 modifier = Modifier.fillMaxWidth()
                             ) {
@@ -660,7 +550,7 @@ fun PumpsCategory(
                                 "برای OpenAI و OpenRouter افزونه‌ی جست‌وجو فعال می‌شود؛ سرویس‌های دیگر فقط بر اساس قابلیت خود مدل جست‌وجو می‌کنند."
                             else "خاموش؛ مدل فقط با داده‌های همین صفحه نظر می‌دهد و خبر تازه جست‌وجو نمی‌کند.",
                             aiConfig.providerSearch
-                        ) { saveAiConfig(aiConfig.copy(providerSearch = it)) }
+                        ) { vm.saveAiConfig(aiConfig.copy(providerSearch = it)) }
                     }
                 }
 
@@ -680,24 +570,9 @@ fun PumpsCategory(
                     persian = cfg.persianDigits,
                     notice = tradeNotice,
                     onSell = { trade ->
-                        scope.launch {
-                            val price = livePrices[trade.coinId]
-                            val closed = withContext(Dispatchers.IO) {
-                                PaperTradeStore.sell(context, trade.id, price)
-                            }
-                            trades = withContext(Dispatchers.IO) { PaperTradeStore.all(context) }
-                            tradeNotice = if (closed == null) "برای فروش، اول یک اسکن تازه بزن تا قیمت به‌روز شود"
-                            else "فروش آزمایشی ${closed.name}: " +
-                                    PaperTradeStore.resultText(closed, closed.closePrice, cfg.persianDigits)
-                        }
+                        vm.sellTrade(trade, livePrices[trade.coinId], cfg.persianDigits)
                     },
-                    onClearHistory = {
-                        scope.launch {
-                            withContext(Dispatchers.IO) { PaperTradeStore.clearClosed(context) }
-                            trades = withContext(Dispatchers.IO) { PaperTradeStore.all(context) }
-                            tradeNotice = null
-                        }
-                    }
+                    onClearHistory = { vm.clearHistory() }
                 )
             }
         }
@@ -705,9 +580,7 @@ fun PumpsCategory(
 
     LaunchedEffect(selectedCoinId) {
         val coin = selectedCoinId?.let { id -> shown.firstOrNull { it.id == id } } ?: return@LaunchedEffect
-        if (nobitex.containsKey(coin.id)) return@LaunchedEffect
-        val result = NobitexMarkets.check(context, coin.symbol)
-        nobitex = nobitex + (coin.id to result)
+        vm.checkNobitex(coin)
     }
 
     val selected = selectedCoinId?.let { id -> shown.firstOrNull { it.id == id } }
@@ -732,35 +605,10 @@ fun PumpsCategory(
             nobitex = nobitex[selected.id],
             openTrade = trades.firstOrNull { it.coinId == selected.id && it.isOpen },
             onBuy = { amount, takeProfit, stopLoss, fee, stepCount, rangeFloorPct ->
-                scope.launch {
-                    val opened = withContext(Dispatchers.IO) {
-                        PaperTradeStore.buy(
-                            context, selected, amount, takeProfit, stopLoss, fee,
-                            stepCount = stepCount, rangeFloorPct = rangeFloorPct
-                        )
-                    }
-                    trades = withContext(Dispatchers.IO) { PaperTradeStore.all(context) }
-                    tradeNotice = when {
-                        opened == null -> "ثبت خرید آزمایشی ممکن نشد (قیمت یا مبلغ نامعتبر)"
-                        opened.isLadder -> "خرید پله‌ای آزمایشی ${opened.name} ثبت شد " +
-                                "(${Format.toPersianDigits("${opened.steps.size}")} پله)."
-                        else -> "خرید آزمایشی ${opened.name} ثبت شد."
-                    }
-                }
+                vm.buy(selected, amount, takeProfit, stopLoss, fee, stepCount, rangeFloorPct, cfg.persianDigits)
             },
-            onSell = {
-                scope.launch {
-                    val open = trades.firstOrNull { it.coinId == selected.id && it.isOpen }
-                    val closed = if (open == null) null else withContext(Dispatchers.IO) {
-                        PaperTradeStore.sell(context, open.id, selected.price)
-                    }
-                    trades = withContext(Dispatchers.IO) { PaperTradeStore.all(context) }
-                    tradeNotice = if (closed == null) "فروش آزمایشی ممکن نشد"
-                    else "فروش آزمایشی ${closed.name}: " +
-                            PaperTradeStore.resultText(closed, closed.closePrice, cfg.persianDigits)
-                }
-            },
-            onAiReview = { runAiReview(selected) },
+            onSell = { vm.sellOpenForCoin(selected.id, selected.price, cfg.persianDigits) },
+            onAiReview = { vm.runAiReview(selected) },
             onOpenLink = { url ->
                 runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
             },
