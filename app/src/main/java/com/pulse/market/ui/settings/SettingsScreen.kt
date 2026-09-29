@@ -30,7 +30,6 @@ import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
-import androidx.compose.material.icons.filled.HealthAndSafety
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.NotificationsActive
@@ -107,7 +106,6 @@ import java.util.Locale
 /** بخش‌های تنظیمات — هر کدام صفحه‌ی خودش را دارد */
 enum class SettingsSection(val title: String) {
     SOURCES("منابع داده"),
-    HEALTH("سلامت منابع"),
     SYMBOLS("نمادها"),
     VALUES("مقادیر نمایشی"),
     LOOK("ظاهر و فونت"),
@@ -203,7 +201,7 @@ fun SettingsScreen(
 
     LaunchedEffect(section) {
         if (section == SettingsSection.ALERTS) alertHistory = AlertHistoryStore.load(context)
-        if (section == SettingsSection.HEALTH || section == null) {
+        if (section == SettingsSection.SOURCES || section == null) {
             sourceHealth = SourceHealthStore.load(context)
         }
     }
@@ -377,6 +375,9 @@ fun SettingsScreen(
                     SettingsSection.SOURCES -> SourcesCategory(
                         allSources = allSources,
                         selectedIds = selectedIds,
+                        selectedSources = selectedSources,
+                        health = sourceHealth,
+                        busy = busy,
                         onToggle = { src ->
                             val ids = selectedIds.toMutableList()
                             if (src.id in ids) {
@@ -424,13 +425,7 @@ fun SettingsScreen(
                                 }
                             }
                         },
-                        onAddClick = { showAddDialog = true }
-                    )
-
-                    SettingsSection.HEALTH -> SourceHealthCategory(
-                        sources = selectedSources,
-                        health = sourceHealth,
-                        busy = busy,
+                        onAddClick = { showAddDialog = true },
                         onTestAll = {
                             scope.launch {
                                 busy = true
@@ -906,16 +901,9 @@ private fun LandingMenu(
                 icon = Icons.Default.CloudQueue,
                 tint = Color(0xFF38BDF8),
                 title = SettingsSection.SOURCES.title,
-                summary = sourcesSummary
+                summary = if (selectedSources.isEmpty()) sourcesSummary else
+                    "$sourcesSummary • ${Format.toPersianDigits(healthySourceCount.toString())} منبع سالم از ${Format.toPersianDigits(selectedSources.size.toString())}"
             ) { onOpen(SettingsSection.SOURCES) }
-            RowDivider()
-            NavMenuRow(
-                icon = Icons.Default.HealthAndSafety,
-                tint = Color(0xFF14B8A6),
-                title = SettingsSection.HEALTH.title,
-                summary = if (selectedSources.isEmpty()) "منبع فعالی نیست" else
-                    "${Format.toPersianDigits(healthySourceCount.toString())} منبع سالم از ${Format.toPersianDigits(selectedSources.size.toString())}"
-            ) { onOpen(SettingsSection.HEALTH) }
             RowDivider()
             NavMenuRow(
                 icon = Icons.Default.ShowChart,

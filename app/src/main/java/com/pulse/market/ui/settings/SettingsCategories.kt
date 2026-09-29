@@ -103,12 +103,21 @@ private fun themeLabel(theme: WidgetTheme): String = when (theme) {
 fun SourcesCategory(
     allSources: List<SourceDef>,
     selectedIds: List<String>,
+    selectedSources: List<SourceDef>,
+    health: List<SourceHealth>,
+    busy: Boolean,
     onToggle: (SourceDef) -> Unit,
     onDelete: (SourceDef) -> Unit,
-    onAddClick: () -> Unit
+    onAddClick: () -> Unit,
+    onTestAll: () -> Unit,
+    onClear: () -> Unit
 ) {
+    val byId = health.associateBy { it.sourceId }
     Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
-        SectionHeader("منابع داده", "چند منبع را می‌توانی هم‌زمان روشن کنی — نمادهای همه در یک ویجت")
+        SectionHeader(
+            "منابع داده",
+            "چند منبع را می‌توانی هم‌زمان روشن کنی — وضعیت اتصالِ هر منبع همین‌جا کنارش دیده می‌شود"
+        )
         // منبعِ انتخاب‌شده‌ی قدیمی که دیگر وجود ندارد (مثل منابع حذف‌شده‌ی نسخه‌های
         // قبل) — بدون این کاربر نمی‌فهمید چرا ویجتش خالی است
         val missingIds = selectedIds.filter { id -> allSources.none { it.id == id } }
@@ -124,6 +133,7 @@ fun SourcesCategory(
                 SourceRow(
                     src = src,
                     selected = src.id in selectedIds,
+                    health = byId[src.id],
                     onClick = { onToggle(src) },
                     onDelete = if (!src.builtIn) ({ onDelete(src) }) else null
                 )
@@ -134,6 +144,34 @@ fun SourcesCategory(
             Spacer(Modifier.width(6.dp))
             Text("افزودن منبع دلخواه (آدرس سایت + مسیر داده)", fontSize = 12.5.sp)
         }
+
+        // ── وضعیت اتصال منابع (آزمایش سلامت، همین‌جا کنار انتخاب) ──
+        SectionHeader(
+            "وضعیت اتصال",
+            "آدرس اصلی و پشتیبان‌ها آزمایش می‌شوند؛ endpoint خراب ۵ دقیقه به انتهای صف می‌رود"
+        )
+        if (selectedSources.any { it.marketKind == MarketKind.TSE }) {
+            InfoCard(
+                "اگر بورس تهران داده نمی‌دهد: VPN یا Private DNS خارجی را موقتاً خاموش کن و «آزمایش اتصال» را بزن. " +
+                        "TSETMC بعضی IPهای خارج ایران و بعضی اپراتورها را قطع می‌کند. برنامه ابتدا HTTPS، سپس مسیر عمومی HTTP رسمی را آزمایش می‌کند و آخرین قیمت سالم را پاک نمی‌کند."
+            )
+        }
+        if (selectedSources.isEmpty()) {
+            InfoCard("منبع فعالی برای آزمایش وجود ندارد.")
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Button(
+                onClick = onTestAll,
+                enabled = !busy && selectedSources.isNotEmpty(),
+                modifier = Modifier.weight(1f)
+            ) { Text(if (busy) "در حال آزمایش…" else "آزمایش اتصال همه", fontSize = 12.5.sp) }
+            OutlinedButton(
+                onClick = onClear,
+                enabled = health.isNotEmpty(),
+                modifier = Modifier.weight(1f)
+            ) { Text("پاک‌کردن وضعیت", fontSize = 12.5.sp) }
+        }
+        Hint("برای امنیت، فقط نام میزبان ذخیره می‌شود؛ URL کامل، query، توکن و هدرها در گزارش سلامت نمی‌آیند.")
     }
 }
 
@@ -141,6 +179,7 @@ fun SourcesCategory(
 private fun SourceRow(
     src: SourceDef,
     selected: Boolean,
+    health: SourceHealth?,
     onClick: () -> Unit,
     onDelete: (() -> Unit)?
 ) {
@@ -179,6 +218,43 @@ private fun SourceRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 2.dp)
                 )
+            }
+            // وضعیت اتصال فقط برای منابعِ روشن نشان داده می‌شود (فقط همان‌ها آزمایش می‌شوند).
+            if (selected) {
+                val statusColor = when {
+                    health?.isHealthy == true -> Color(0xFF16A34A)
+                    health == null || health.lastCheckedAt <= 0L -> MaterialTheme.colorScheme.onSurfaceVariant
+                    else -> MaterialTheme.colorScheme.error
+                }
+                Text(
+                    when {
+                        health == null || health.lastCheckedAt <= 0L -> "وضعیت اتصال: هنوز آزمایش نشده"
+                        health.isHealthy && health.usingFallback -> "● سالم — در حال استفاده از آدرس پشتیبان"
+                        health.isHealthy -> "● سالم — آدرس اصلی پاسخ می‌دهد"
+                        else -> "● اختلال — ${health.consecutiveFailures} شکست پیاپی"
+                    }.let(Format::toPersianDigits),
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = statusColor,
+                    modifier = Modifier.padding(top = 3.dp)
+                )
+                if (health != null && health.lastCheckedAt > 0L) {
+                    val details = buildList {
+                        add("آخرین بررسی ${Format.dateTime(health.lastCheckedAt)}")
+                        if (health.endpointHost.isNotBlank()) add("میزبان ${health.endpointHost}")
+                        if (health.responseMs > 0L) add("${Format.toPersianDigits(health.responseMs.toString())} میلی‌ثانیه")
+                        if (health.totalCount > 0) add("${Format.toPersianDigits(health.successCount.toString())} از ${Format.toPersianDigits(health.totalCount.toString())} نماد")
+                        if (health.anomalyCount > 0) add("${Format.toPersianDigits(health.anomalyCount.toString())} قیمت غیرعادی")
+                    }.joinToString(" • ")
+                    Text(details, fontSize = 9.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (health.lastError.isNotBlank()) {
+                        Text(
+                            "آخرین خطا: ${health.lastError}",
+                            fontSize = 9.5.sp,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
             }
         }
         if (onDelete != null) {
@@ -840,91 +916,6 @@ fun UpdateCategory(
                 }
             }
         }
-    }
-}
-
-// ═══════════════════ سلامت منابع و fallback ═══════════════════
-
-@Composable
-fun SourceHealthCategory(
-    sources: List<SourceDef>,
-    health: List<SourceHealth>,
-    busy: Boolean,
-    onTestAll: () -> Unit,
-    onClear: () -> Unit
-) {
-    val byId = health.associateBy { it.sourceId }
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        SectionHeader(
-            "سلامت منابع",
-            "آدرس اصلی و پشتیبان‌ها خودکار آزمایش می‌شوند؛ endpoint خراب ۵ دقیقه به انتهای صف می‌رود"
-        )
-        if (sources.any { it.marketKind == MarketKind.TSE }) {
-            InfoCard(
-                "اگر بورس تهران داده نمی‌دهد: VPN یا Private DNS خارجی را موقتاً خاموش کن و «آزمایش همه» را بزن. " +
-                        "TSETMC بعضی IPهای خارج ایران و بعضی اپراتورها را قطع می‌کند. برنامه ابتدا HTTPS، سپس مسیر عمومی HTTP رسمی را آزمایش می‌کند و آخرین قیمت سالم را پاک نمی‌کند."
-            )
-        }
-        if (sources.isEmpty()) {
-            InfoCard("منبع فعالی برای آزمایش وجود ندارد.")
-        } else {
-            RowsCard {
-                for ((index, source) in sources.withIndex()) {
-                    if (index > 0) RowDivider()
-                    val item = byId[source.id]
-                    InnerRow {
-                        Text(
-                            source.title.substringBefore(" —"),
-                            fontSize = 13.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            when {
-                                item == null || item.lastCheckedAt <= 0L -> "هنوز آزمایش نشده"
-                                item.isHealthy && item.usingFallback -> "سالم — در حال استفاده از آدرس پشتیبان"
-                                item.isHealthy -> "سالم — آدرس اصلی پاسخ می‌دهد"
-                                else -> "اختلال — ${item.consecutiveFailures} شکست پیاپی"
-                            }.let(Format::toPersianDigits),
-                            fontSize = 11.5.sp,
-                            color = when {
-                                item?.isHealthy == true -> Color(0xFF16A34A)
-                                item == null -> MaterialTheme.colorScheme.onSurfaceVariant
-                                else -> MaterialTheme.colorScheme.error
-                            }
-                        )
-                        if (item != null && item.lastCheckedAt > 0L) {
-                            val details = buildList {
-                                add("آخرین بررسی ${Format.dateTime(item.lastCheckedAt)}")
-                                if (item.endpointHost.isNotBlank()) add("میزبان ${item.endpointHost}")
-                                if (item.responseMs > 0L) add("${Format.toPersianDigits(item.responseMs.toString())} میلی‌ثانیه")
-                                if (item.totalCount > 0) add("${Format.toPersianDigits(item.successCount.toString())} از ${Format.toPersianDigits(item.totalCount.toString())} نماد")
-                                if (item.anomalyCount > 0) add("${Format.toPersianDigits(item.anomalyCount.toString())} قیمت غیرعادی")
-                            }.joinToString(" • ")
-                            Text(details, fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            if (item.lastError.isNotBlank()) {
-                                Text(
-                                    "آخرین خطا: ${item.lastError}",
-                                    fontSize = 10.5.sp,
-                                    color = MaterialTheme.colorScheme.error
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Button(
-                onClick = onTestAll,
-                enabled = !busy && sources.isNotEmpty(),
-                modifier = Modifier.weight(1f)
-            ) { Text(if (busy) "در حال آزمایش…" else "آزمایش همه", fontSize = 12.5.sp) }
-            OutlinedButton(onClick = onClear, enabled = health.isNotEmpty(), modifier = Modifier.weight(1f)) {
-                Text("پاک‌کردن وضعیت", fontSize = 12.5.sp)
-            }
-        }
-        Hint("برای امنیت، فقط نام میزبان ذخیره می‌شود؛ URL کامل، query، توکن و هدرها در گزارش سلامت نمی‌آیند.")
     }
 }
 

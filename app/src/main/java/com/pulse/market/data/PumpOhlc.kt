@@ -60,11 +60,11 @@ object PumpOhlc {
         cache[key(coinId, range)] = Entry(System.currentTimeMillis(), candles)
     }
 
-    /** گرفتن کندل‌ها؛ خطای شبکه = فهرست خالی (UI به نمودار خطی ساده برمی‌گردد). */
-    suspend fun load(coinId: String, range: Range): List<Candle> = withContext(Dispatchers.IO) {
+    /** گرفتن کندل‌ها؛ خطای شبکه = فهرست خالی. [force] کش را دور می‌زند (به‌روزرسانی دستی). */
+    suspend fun load(coinId: String, range: Range, force: Boolean = false): List<Candle> = withContext(Dispatchers.IO) {
         val id = coinId.trim().lowercase()
         if (id.isEmpty()) return@withContext emptyList()
-        cached(id, range)?.let { return@withContext it }
+        if (!force) cached(id, range)?.let { return@withContext it }
         val url = "https://api.coingecko.com/api/v3/coins/$id/ohlc?vs_currency=usd&days=${range.days}"
         val candles = try {
             parse(Http.getText(url))
@@ -129,11 +129,11 @@ object PumpOhlc {
         synthCache[key(coinId, range)] = Entry(System.currentTimeMillis(), candles)
     }
 
-    /** کندلِ ساختگیِ یک بازه از market_chart؛ خطای شبکه = فهرست خالی. */
-    suspend fun loadSynthetic(coinId: String, range: Range): List<Candle> = withContext(Dispatchers.IO) {
+    /** کندلِ ساختگیِ یک بازه از market_chart؛ خطای شبکه = فهرست خالی. [force] کش را دور می‌زند. */
+    suspend fun loadSynthetic(coinId: String, range: Range, force: Boolean = false): List<Candle> = withContext(Dispatchers.IO) {
         val id = coinId.trim().lowercase()
         if (id.isEmpty()) return@withContext emptyList()
-        cachedSynth(id, range)?.let { return@withContext it }
+        if (!force) cachedSynth(id, range)?.let { return@withContext it }
         val url = "https://api.coingecko.com/api/v3/coins/$id/market_chart?vs_currency=usd&days=${range.days}"
         val candles = try {
             synthesizeCandles(parsePricePoints(Http.getText(url)), SYNTH_CANDLES)

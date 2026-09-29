@@ -9,11 +9,18 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -22,6 +29,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -56,17 +64,24 @@ fun CoinChartCard(
     var range by remember(coinId) { mutableStateOf(PumpOhlc.Range.WEEK) }
     var candles by remember(coinId) { mutableStateOf<List<PumpOhlc.Candle>>(emptyList()) }
     var chartBusy by remember(coinId) { mutableStateOf(false) }
-    LaunchedEffect(coinId, range) {
+    // با هر بار زدن دکمه‌ی «به‌روزرسانی» این کلید بالا می‌رود و افکت دوباره اجرا می‌شود؛
+    // فقط بارِ دستی کش را دور می‌زند (force) تا داده‌ی تازه از شبکه گرفته شود؛ عوض‌کردن بازه
+    // همچنان از کش استفاده می‌کند (سهمیه‌ی رایگان محدود است).
+    var reloadKey by remember(coinId) { mutableStateOf(0) }
+    var forceReload by remember(coinId) { mutableStateOf(false) }
+    LaunchedEffect(coinId, range, reloadKey) {
         chartBusy = true
-        val loaded = PumpOhlc.load(coinId, range)
+        val force = forceReload
+        val loaded = PumpOhlc.load(coinId, range, force = force)
         // همه‌ی نمودارها شمعی‌اند: اگر endpointِ ohlc داده نداد، کندلِ *همان بازه* از
         // market_chart ساخته می‌شود؛ و اگر شبکه نبود، از سریِ کش‌شدهٔ اسپارک کندل می‌سازیم.
         candles = when {
             loaded.size >= 3 -> loaded
-            else -> PumpOhlc.loadSynthetic(coinId, range).ifEmpty {
+            else -> PumpOhlc.loadSynthetic(coinId, range, force = force).ifEmpty {
                 PumpOhlc.candlesFromValues(sparkFallback)
             }
         }
+        forceReload = false
         chartBusy = false
     }
     Card(
@@ -77,15 +92,31 @@ fun CoinChartCard(
         modifier = modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                for (option in PumpOhlc.Range.entries) {
-                    FilterChip(
-                        selected = range == option,
-                        onClick = { range = option },
-                        label = { Text(option.label, fontSize = 11.sp) }
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    for (option in PumpOhlc.Range.entries) {
+                        FilterChip(
+                            selected = range == option,
+                            onClick = { range = option },
+                            label = { Text(option.label, fontSize = 11.sp) }
+                        )
+                    }
+                }
+                IconButton(
+                    onClick = { if (!chartBusy) { forceReload = true; reloadKey++ } },
+                    enabled = !chartBusy
+                ) {
+                    Icon(
+                        Icons.Default.Refresh,
+                        contentDescription = "به‌روزرسانی نمودار",
+                        tint = MaterialTheme.colorScheme.primary
                     )
                 }
             }
@@ -105,7 +136,18 @@ fun CoinChartCard(
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                else -> Hint("داده‌ی نمودار برای این کوین در دسترس نبود (اینترنت را بررسی کن).")
+                else -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Hint("داده‌ی نمودار برای این کوین در دسترس نبود (اینترنت را بررسی کن).")
+                    OutlinedButton(
+                        onClick = { if (!chartBusy) { forceReload = true; reloadKey++ } },
+                        enabled = !chartBusy,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("تلاش دوباره برای گرفتن نمودار", fontSize = 12.sp)
+                    }
+                }
             }
             Spacer(Modifier.height(6.dp))
             Text(
