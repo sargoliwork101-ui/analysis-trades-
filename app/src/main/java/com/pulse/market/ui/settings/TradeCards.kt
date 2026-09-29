@@ -251,6 +251,21 @@ fun WalletTradeCard(
                     }
                 }
 
+                if (trade.isSellLadder) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        FactCell(
+                            "پله‌های فروش",
+                            "${Format.toPersianDigits("${trade.filledSellStepCount}")}/${Format.toPersianDigits("${trade.sellSteps.size}")}"
+                        )
+                        FactCell(
+                            "فروخته‌شده",
+                            Format.toPersianDigits(
+                                String.format(java.util.Locale.US, "%.0f", trade.soldFraction * 100.0)
+                            ) + "٪"
+                        )
+                    }
+                }
+
                 HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
 
                 // زمان‌ها — چیزی که کاربر می‌خواست: کِی خریدی، کِی فروختی

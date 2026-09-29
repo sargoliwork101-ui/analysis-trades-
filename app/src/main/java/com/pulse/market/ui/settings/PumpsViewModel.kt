@@ -200,23 +200,30 @@ class PumpsViewModel(app: Application) : AndroidViewModel(app) {
         takeProfitPct: Double?,
         stopLossPct: Double?,
         feePct: Double,
-        stepCount: Int,
-        rangeFloorPct: Double?,
+        buyStepPrices: List<Double>?,
+        sellStepPrices: List<Double>?,
         persian: Boolean
     ) {
         viewModelScope.launch {
             val opened = withContext(Dispatchers.IO) {
                 PaperTradeStore.buy(
                     ctx, coin, amountUsd, takeProfitPct, stopLossPct, feePct,
-                    stepCount = stepCount, rangeFloorPct = rangeFloorPct
+                    buyStepPrices = buyStepPrices, sellStepPrices = sellStepPrices
                 )
             }
             reloadTrades()
+            val ladderNote = when {
+                opened == null -> ""
+                opened.isLadder && opened.isSellLadder ->
+                    " (${Format.toPersianDigits("${opened.steps.size}")} پله خرید، " +
+                            "${Format.toPersianDigits("${opened.sellSteps.size}")} پله فروش)"
+                opened.isLadder -> " (${Format.toPersianDigits("${opened.steps.size}")} پله خرید)"
+                opened.isSellLadder -> " (${Format.toPersianDigits("${opened.sellSteps.size}")} پله فروش)"
+                else -> ""
+            }
             tradeNotice = when {
                 opened == null -> "ثبت خرید آزمایشی ممکن نشد (قیمت یا مبلغ نامعتبر)"
-                opened.isLadder -> "خرید پله‌ای آزمایشی ${opened.name} ثبت شد " +
-                        "(${Format.toPersianDigits("${opened.steps.size}")} پله)."
-                else -> "خرید آزمایشی ${opened.name} ثبت شد."
+                else -> "خرید آزمایشی ${opened.name} ثبت شد$ladderNote."
             }
         }
     }

@@ -606,8 +606,8 @@ fun PumpsCategory(
             aiError = aiErrors[selected.id],
             nobitex = nobitex[selected.id],
             openTrade = trades.firstOrNull { it.coinId == selected.id && it.isOpen },
-            onBuy = { amount, takeProfit, stopLoss, fee, stepCount, rangeFloorPct ->
-                vm.buy(selected, amount, takeProfit, stopLoss, fee, stepCount, rangeFloorPct, cfg.persianDigits)
+            onBuy = { amount, takeProfit, stopLoss, fee, buyPrices, sellPrices ->
+                vm.buy(selected, amount, takeProfit, stopLoss, fee, buyPrices, sellPrices, cfg.persianDigits)
             },
             onSell = { vm.sellOpenForCoin(selected.id, selected.price, cfg.persianDigits) },
             onAiReview = { vm.runAiReview(selected) },

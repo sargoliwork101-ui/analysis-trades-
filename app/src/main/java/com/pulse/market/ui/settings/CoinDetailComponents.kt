@@ -55,15 +55,18 @@ fun CoinChartCard(
 ) {
     var range by remember(coinId) { mutableStateOf(PumpOhlc.Range.WEEK) }
     var candles by remember(coinId) { mutableStateOf<List<PumpOhlc.Candle>>(emptyList()) }
-    // خطِ هم‌بازه از market_chart؛ پشتیبانِ کندل تا هر بازه داده‌ی *خودش* را نشان دهد.
-    var line by remember(coinId) { mutableStateOf<List<Double>>(emptyList()) }
     var chartBusy by remember(coinId) { mutableStateOf(false) }
     LaunchedEffect(coinId, range) {
         chartBusy = true
         val loaded = PumpOhlc.load(coinId, range)
-        candles = loaded
-        // فقط وقتی کندل کم آمد، خطِ همان بازه گرفته می‌شود (یک درخواستِ اضافه‌ی کم‌هزینه).
-        line = if (loaded.size >= 3) emptyList() else PumpOhlc.loadLine(coinId, range)
+        // همه‌ی نمودارها شمعی‌اند: اگر endpointِ ohlc داده نداد، کندلِ *همان بازه* از
+        // market_chart ساخته می‌شود؛ و اگر شبکه نبود، از سریِ کش‌شدهٔ اسپارک کندل می‌سازیم.
+        candles = when {
+            loaded.size >= 3 -> loaded
+            else -> PumpOhlc.loadSynthetic(coinId, range).ifEmpty {
+                PumpOhlc.candlesFromValues(sparkFallback)
+            }
+        }
         chartBusy = false
     }
     Card(
@@ -87,14 +90,7 @@ fun CoinChartCard(
                 }
             }
             Spacer(Modifier.height(8.dp))
-            // خطِ پشتیبان به ترتیب: خطِ هم‌بازه (market_chart) وگرنه اسپارک‌لاینِ ۷روزه.
-            val lineValues = when {
-                line.size >= 3 -> line
-                else -> sparkFallback
-            }
-            val closes = remember(candles, lineValues) {
-                PumpOhlc.closes(candles).ifEmpty { lineValues }
-            }
+            val closes = remember(candles) { PumpOhlc.closes(candles) }
             val ichimoku = remember(closes) { Ichimoku.of(closes) }
             when {
                 candles.size >= 3 -> CandleChart(
@@ -108,14 +104,6 @@ fun CoinChartCard(
                     "در حال گرفتن نمودار…",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                lineValues.size >= 3 -> PriceSparkline(
-                    values = lineValues,
-                    rising = rising,
-                    ichimoku = ichimoku,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(190.dp)
                 )
                 else -> Hint("داده‌ی نمودار برای این کوین در دسترس نبود (اینترنت را بررسی کن).")
             }

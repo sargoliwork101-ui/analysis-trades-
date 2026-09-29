@@ -42,6 +42,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -92,7 +93,7 @@ fun PumpDetailSheet(
     aiError: String?,
     nobitex: NobitexMarkets.Result?,
     openTrade: PaperTradeStore.Trade?,
-    onBuy: (Double, Double?, Double?, Double, Int, Double?) -> Unit,
+    onBuy: (Double, Double?, Double?, Double, List<Double>?, List<Double>?) -> Unit,
     onSell: () -> Unit,
     onAiReview: () -> Unit,
     onOpenLink: (String) -> Unit,
@@ -514,6 +515,23 @@ fun PumpDetailSheet(
                         openTrade.stopLossPrice?.let {
                             StatRow("فروش خودکار در ضرر", QuoteText.priceWithUnit(it, "$", persian))
                         }
+                        if (openTrade.isSellLadder) {
+                            StatRow(
+                                "فروش پله‌ای",
+                                "${Format.toPersianDigits("${openTrade.filledSellStepCount}")} از " +
+                                        "${Format.toPersianDigits("${openTrade.sellSteps.size}")} پله فروخته شده"
+                            )
+                            for ((i, step) in openTrade.sellSteps.withIndex()) {
+                                val pct = Format.toPersianDigits(
+                                    String.format(java.util.Locale.US, "%.0f", step.fraction * 100.0)
+                                )
+                                StatRow(
+                                    "هدف فروش ${Format.toPersianDigits("${i + 1}")} ($pct٪) " +
+                                            (if (step.filled) "✓ فروخته شد" else "⏳ در انتظار"),
+                                    QuoteText.priceWithUnit(step.price, "$", persian)
+                                )
+                            }
+                        }
                         Text(
                             "زمان خرید: ${Format.dateTime(openTrade.openedAt, persian)}",
                             fontSize = 10.5.sp,
@@ -526,15 +544,39 @@ fun PumpDetailSheet(
                     }
                 }
             } else {
+                val curPrice = coin.price ?: 0.0
                 var amount by remember(coin.id) { mutableStateOf("100") }
                 var takeProfit by remember(coin.id) { mutableStateOf("10") }
                 var stopLoss by remember(coin.id) { mutableStateOf("5") }
                 var fee by remember(coin.id) {
                     mutableStateOf(PaperTradeStore.DEFAULT_FEE_PCT.toString())
                 }
+                // خرید پله‌ای: کاربر قیمتِ دقیقِ هر پله را وارد می‌کند.
                 var ladder by remember(coin.id) { mutableStateOf(false) }
                 var stepCount by remember(coin.id) { mutableStateOf("3") }
-                var rangeFloor by remember(coin.id) { mutableStateOf("8") }
+                val buyPrices = remember(coin.id) { mutableStateListOf<String>() }
+                // فروش پله‌ای: دو قیمت (پایین و بالا) + تعداد پله؛ سهمِ برابر، پخشِ یکنواخت رو به بالا.
+                var sellLadder by remember(coin.id) { mutableStateOf(false) }
+                var sellCount by remember(coin.id) { mutableStateOf("3") }
+                var sellLow by remember(coin.id) {
+                    mutableStateOf(if (curPrice > 0.0) editablePrice(curPrice * 1.05) else "")
+                }
+                var sellHigh by remember(coin.id) {
+                    mutableStateOf(if (curPrice > 0.0) editablePrice(curPrice * 1.25) else "")
+                }
+
+                LaunchedEffect(coin.id, ladder, stepCount) {
+                    val n = stepCount.toIntOrNull()?.coerceIn(2, PaperTradeStore.MAX_STEPS) ?: 3
+                    while (buyPrices.size < n) {
+                        val i = buyPrices.size
+                        val default = if (curPrice > 0.0)
+                            editablePrice(curPrice * (1.0 - 0.08 * i / (n - 1).coerceAtLeast(1)))
+                        else ""
+                        buyPrices.add(default)
+                    }
+                    while (buyPrices.size > n) buyPrices.removeAt(buyPrices.lastIndex)
+                }
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -552,6 +594,7 @@ fun PumpDetailSheet(
                         onValueChange = { takeProfit = it.take(6) },
                         label = { Text("حد سود ٪", fontSize = 10.sp) },
                         singleLine = true,
+                        enabled = !sellLadder,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.weight(1f)
                     )
@@ -564,6 +607,9 @@ fun PumpDetailSheet(
                         modifier = Modifier.weight(1f)
                     )
                 }
+                if (sellLadder) {
+                    Hint("چون فروش پله‌ای روشن است، «حد سود ٪» نادیده گرفته می‌شود؛ هدف‌های فروشِ پایین تعیین می‌کنند.")
+                }
                 OutlinedTextField(
                     value = fee,
                     onValueChange = { fee = it.take(5) },
@@ -573,7 +619,7 @@ fun PumpDetailSheet(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                // ── خرید پله‌ای با محدوده‌ی ورود (مثل نوبیتکس) ──
+                // ── خرید پله‌ای: قیمتِ دقیقِ هر پله را خودت وارد کن ──
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
@@ -581,7 +627,7 @@ fun PumpDetailSheet(
                     Column(modifier = Modifier.weight(1f)) {
                         Text("خرید پله‌ای", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         Text(
-                            "مبلغ در چند پله از قیمت فعلی تا کف محدوده پخش می‌شود",
+                            "قیمتِ دقیقِ هر پله را خودت می‌نویسی؛ مبلغ به‌طور مساوی بین پله‌ها پخش می‌شود",
                             fontSize = 9.5.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -589,62 +635,137 @@ fun PumpDetailSheet(
                     Switch(checked = ladder, onCheckedChange = { ladder = it })
                 }
                 if (ladder) {
+                    OutlinedTextField(
+                        value = stepCount,
+                        onValueChange = { stepCount = it.filter { c -> c.isDigit() }.take(2) },
+                        label = { Text("تعداد پله (۲ تا ۱۰)", fontSize = 10.sp) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    val nBuy = buyPrices.size
+                    val perAmount = (amount.replace(',', '.').toDoubleOrNull() ?: 0.0) /
+                            nBuy.coerceAtLeast(1)
+                    for (i in buyPrices.indices) {
+                        OutlinedTextField(
+                            value = buyPrices[i],
+                            onValueChange = { buyPrices[i] = it.take(16) },
+                            label = {
+                                Text(
+                                    "قیمت خرید پله ${Format.toPersianDigits("${i + 1}")} (دلار)",
+                                    fontSize = 10.sp
+                                )
+                            },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    if (perAmount > 0.0) {
+                        Hint(
+                            "هر پله حدود " + QuoteText.priceWithUnit(perAmount, "$", persian) +
+                                    " خرید می‌کند. پله‌ای که قیمتِ بازار همین حالا به آن رسیده بی‌درنگ پر می‌شود؛ " +
+                                    "بقیه با رسیدن قیمت. حد ضرر روی «میانگین ورود» حساب می‌شود."
+                        )
+                    }
+                }
+
+                // ── فروش پله‌ای: دو قیمت (پایین و بالا) + تعداد پله ──
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("فروش پله‌ای", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            "دارایی در چند قیمتِ هدف، پله‌پله فروخته می‌شود (حد سود چندمرحله‌ای)",
+                            fontSize = 9.5.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(checked = sellLadder, onCheckedChange = { sellLadder = it })
+                }
+                if (sellLadder) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         OutlinedTextField(
-                            value = stepCount,
-                            onValueChange = { stepCount = it.take(2) },
-                            label = { Text("تعداد پله (۲ تا ۱۰)", fontSize = 10.sp) },
+                            value = sellLow,
+                            onValueChange = { sellLow = it.take(16) },
+                            label = { Text("پایین‌ترین قیمت فروش", fontSize = 10.sp) },
                             singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             modifier = Modifier.weight(1f)
                         )
                         OutlinedTextField(
-                            value = rangeFloor,
-                            onValueChange = { rangeFloor = it.take(5) },
-                            label = { Text("کف محدوده (٪ پایین‌تر)", fontSize = 10.sp) },
+                            value = sellHigh,
+                            onValueChange = { sellHigh = it.take(16) },
+                            label = { Text("بالاترین قیمت فروش", fontSize = 10.sp) },
                             singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             modifier = Modifier.weight(1f)
                         )
                     }
-                    val price = coin.price ?: 0.0
-                    val floorFrac = (rangeFloor.replace(',', '.').toDoubleOrNull() ?: 0.0) / 100.0
-                    if (price > 0.0 && floorFrac > 0.0) {
-                        Hint(
-                            "پله‌ی اول همین حالا با قیمت فعلی پر می‌شود؛ پله‌های بعدی تا " +
-                                    QuoteText.priceWithUnit(price * (1.0 - floorFrac), "$", persian) +
-                                    " با افت قیمت پر می‌شوند. حد سود/ضرر روی «میانگین ورود» حساب می‌شود."
+                    OutlinedTextField(
+                        value = sellCount,
+                        onValueChange = { sellCount = it.filter { c -> c.isDigit() }.take(2) },
+                        label = { Text("تعداد پله فروش (۲ تا ۱۰)", fontSize = 10.sp) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    val sellPreview = sellLadderPrices(
+                        sellLow.replace(',', '.').toDoubleOrNull() ?: 0.0,
+                        sellHigh.replace(',', '.').toDoubleOrNull() ?: 0.0,
+                        sellCount.toIntOrNull() ?: 0
+                    )
+                    if (sellPreview.size >= 2) {
+                        val share = Format.toPersianDigits(
+                            String.format(java.util.Locale.US, "%.0f", 100.0 / sellPreview.size)
                         )
+                        val list = sellPreview.joinToString("، ") {
+                            QuoteText.priceWithUnit(it, "$", persian)
+                        }
+                        Hint("هر پله $share٪ از دارایی را می‌فروشد در قیمت‌های: $list")
                     }
                 }
 
                 Button(
                     onClick = {
+                        val buyList = if (ladder)
+                            buyPrices.mapNotNull { it.replace(',', '.').toDoubleOrNull() }
+                        else null
+                        val sellList = if (sellLadder) sellLadderPrices(
+                            sellLow.replace(',', '.').toDoubleOrNull() ?: 0.0,
+                            sellHigh.replace(',', '.').toDoubleOrNull() ?: 0.0,
+                            sellCount.toIntOrNull() ?: 0
+                        ) else null
                         onBuy(
                             amount.replace(',', '.').toDoubleOrNull() ?: 0.0,
-                            takeProfit.replace(',', '.').toDoubleOrNull(),
+                            if (sellLadder) null else takeProfit.replace(',', '.').toDoubleOrNull(),
                             stopLoss.replace(',', '.').toDoubleOrNull(),
                             fee.replace(',', '.').toDoubleOrNull() ?: PaperTradeStore.DEFAULT_FEE_PCT,
-                            if (ladder) (stepCount.toIntOrNull() ?: 1) else 1,
-                            if (ladder) rangeFloor.replace(',', '.').toDoubleOrNull() else null
+                            buyList,
+                            sellList
                         )
                     },
-                    enabled = (coin.price ?: 0.0) > 0.0 &&
+                    enabled = curPrice > 0.0 &&
                             (amount.replace(',', '.').toDoubleOrNull() ?: 0.0) > 0.0,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        if (ladder) "ثبت خرید پله‌ای آزمایشی" else "ثبت خرید آزمایشی با قیمت فعلی",
+                        when {
+                            ladder -> "ثبت خرید پله‌ای آزمایشی"
+                            else -> "ثبت خرید آزمایشی با قیمت فعلی"
+                        },
                         fontSize = 11.5.sp
                     )
                 }
                 Hint(
                     "هیچ سفارشی به هیچ صرافی نمی‌رود؛ فقط روی همین گوشی ثبت می‌شود. با هر اسکن تازه، " +
-                            "پله‌های رسیده پر و در صورت رسیدن قیمت به حد سود یا حد ضرر، معامله خودکار بسته " +
-                            "و نتیجه ثبت می‌شود. کارمزد در هر دو سمت خرید و فروش از سود کم می‌شود (پیش‌فرض ۰٫۲٪ مثل نوبیتکس)."
+                            "پله‌های خریدِ رسیده پر، پله‌های فروشِ رسیده فروخته و در صورت رسیدن قیمت به حد ضرر، " +
+                            "معامله خودکار بسته و نتیجه ثبت می‌شود. کارمزد در هر دو سمت خرید و فروش از سود کم می‌شود (پیش‌فرض ۰٫۲٪ مثل نوبیتکس)."
                 )
             }
 
@@ -782,114 +903,31 @@ private fun ScoreBar(label: String, value: Double, total: Double, persian: Boole
 }
 
 /**
- * نمودار خطیِ قیمت + ابر ایچیموکو، با زوم و جابه‌جایی (مثل نمودار شمعی).
- * زوم با دو انگشت تعداد نقطه‌های دیده‌شده را کم/زیاد می‌کند و کشیدن افقی، پنجره‌ی دید را
- * روی تاریخ جابه‌جا می‌کند. مقیاس عمودی روی همان پنجره حساب می‌شود تا هیچ خطی بیرون نیفتد.
+ * قیمت را برای نمایش در فیلدِ قابل‌ویرایش (با رقم‌های لاتین و اعشارِ کافی) قالب‌بندی می‌کند.
+ * دقتِ اعشار با بزرگیِ عدد تطبیق می‌یابد تا کوین‌های ارزان هم عددِ معنادار بگیرند.
  */
-@Composable
-internal fun PriceSparkline(
-    values: List<Double>,
-    rising: Boolean,
-    ichimoku: Ichimoku.Series?,
-    modifier: Modifier
-) {
-    val priceColor = if (rising) Color(0xFF16A34A) else Color(0xFFDC2626)
-    val tenkanColor = Color(0xFF3B82F6)
-    val kijunColor = Color(0xFFF59E0B)
-    val bullCloud = Color(0xFF22C55E)
-    val bearCloud = Color(0xFFF43F5E)
-
-    val spanA = ichimoku?.spanA.orEmpty()
-    val spanB = ichimoku?.spanB.orEmpty()
-    val tenkan = ichimoku?.tenkan.orEmpty()
-    val kijun = ichimoku?.kijun.orEmpty()
-    // ابرِ ایچیموکو جلوتر از آخرین قیمت هم پیش‌بینی می‌شود، پس بازه‌ی کل شامل آن هم هست.
-    val total = maxOf(values.size, spanA.size, spanB.size)
-
-    var zoom by remember(values) { mutableStateOf(1f) }
-    var offset by remember(values) { mutableStateOf(0f) }
-    val visibleCount = (total / zoom).toInt().coerceIn(6, total.coerceAtLeast(6))
-    val maxStart = (total - visibleCount).coerceAtLeast(0)
-    val start = offset.toInt().coerceIn(0, maxStart)
-    val end = (start + visibleCount).coerceAtMost(total)
-
-    Canvas(
-        modifier = modifier.pointerInput(values) {
-            detectTransformGestures { _, pan, gestureZoom, _ ->
-                zoom = (zoom * gestureZoom).coerceIn(1f, 8f)
-                val step = (size.width.toFloat() / visibleCount.coerceAtLeast(1)).coerceAtLeast(1f)
-                offset = (offset - pan.x / step).coerceIn(0f, maxStart.toFloat())
-            }
-        }
-    ) {
-        if (total < 2 || end - start < 2) return@Canvas
-
-        fun window(series: List<Double?>): List<Double?> = (start until end).map { series.getOrNull(it) }
-
-        val wValues = window(values.map { it as Double? })
-        val wSpanA = window(spanA)
-        val wSpanB = window(spanB)
-        val wTenkan = window(tenkan)
-        val wKijun = window(kijun)
-
-        val all = buildList {
-            addAll(wValues.filterNotNull())
-            addAll(wSpanA.filterNotNull())
-            addAll(wSpanB.filterNotNull())
-            addAll(wTenkan.filterNotNull())
-            addAll(wKijun.filterNotNull())
-        }
-        val min = all.minOrNull() ?: return@Canvas
-        val max = all.maxOrNull() ?: return@Canvas
-        val range = (max - min).takeIf { it > 0.0 } ?: 1.0
-        val pad = size.height * 0.08f
-        val usable = size.height - pad * 2f
-        val count = end - start
-        val dx = size.width / (count - 1).coerceAtLeast(1).toFloat()
-
-        fun yOf(value: Double): Float = pad + (usable - (((value - min) / range).toFloat() * usable))
-        fun xOf(index: Int): Float = index * dx
-
-        // ابر: بین اسپن A و B پر می‌شود؛ رنگ سبز یعنی A بالای B (ابر صعودی).
-        var i = 0
-        while (i < count - 1) {
-            val a1 = wSpanA.getOrNull(i)
-            val b1 = wSpanB.getOrNull(i)
-            val a2 = wSpanA.getOrNull(i + 1)
-            val b2 = wSpanB.getOrNull(i + 1)
-            if (a1 != null && b1 != null && a2 != null && b2 != null) {
-                val path = Path().apply {
-                    moveTo(xOf(i), yOf(a1))
-                    lineTo(xOf(i + 1), yOf(a2))
-                    lineTo(xOf(i + 1), yOf(b2))
-                    lineTo(xOf(i), yOf(b1))
-                    close()
-                }
-                val bullish = (a1 + a2) >= (b1 + b2)
-                drawPath(path, color = (if (bullish) bullCloud else bearCloud).copy(alpha = 0.22f))
-            }
-            i++
-        }
-
-        fun drawSeries(series: List<Double?>, color: Color, width: Float) {
-            var previous: Offset? = null
-            for ((index, value) in series.withIndex()) {
-                if (value == null) {
-                    previous = null
-                    continue
-                }
-                val point = Offset(xOf(index), yOf(value))
-                previous?.let { p ->
-                    drawLine(color, p, point, strokeWidth = width, cap = StrokeCap.Round)
-                }
-                previous = point
-            }
-        }
-
-        drawSeries(wTenkan, tenkanColor, 2.5f)
-        drawSeries(wKijun, kijunColor, 2.5f)
-        drawSeries(wValues, priceColor, 3.5f)
+internal fun editablePrice(price: Double): String {
+    if (!price.isFinite() || price <= 0.0) return ""
+    val text = when {
+        price >= 1000.0 -> String.format(java.util.Locale.US, "%.2f", price)
+        price >= 1.0 -> String.format(java.util.Locale.US, "%.4f", price)
+        price >= 0.01 -> String.format(java.util.Locale.US, "%.6f", price)
+        else -> String.format(java.util.Locale.US, "%.10f", price)
     }
+    return if (text.contains('.')) text.trimEnd('0').trimEnd('.') else text
+}
+
+/**
+ * قیمت‌های هدفِ فروش پله‌ای: [count] پله‌ی هم‌فاصله از [low] تا [high] (صعودی).
+ * خروجی خالی اگر ورودی نامعتبر باشد.
+ */
+internal fun sellLadderPrices(low: Double, high: Double, count: Int): List<Double> {
+    val n = count.coerceIn(2, PaperTradeStore.MAX_STEPS)
+    if (!low.isFinite() || !high.isFinite() || low <= 0.0 || high <= 0.0) return emptyList()
+    val lo = minOf(low, high)
+    val hi = maxOf(low, high)
+    if (hi <= lo) return emptyList()
+    return List(n) { i -> lo + (hi - lo) * i / (n - 1) }
 }
 
 /** آدرس نمودار همین نماد در TradingView (جفت USDT رایج‌ترین بازار است). */

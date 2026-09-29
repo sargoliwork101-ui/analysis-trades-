@@ -106,64 +106,98 @@ object PumpOhlc {
     /** قیمت‌های پایانی — ورودی ایچیموکو */
     fun closes(candles: List<Candle>): List<Double> = candles.map { it.close }
 
-    // ───────────── نمودار خطیِ هم‌بازه (پشتیبان کندل) ─────────────
-    // اگر endpointِ کندل برای بازه‌ای داده ندهد (سهمیه/خطای شبکه)، به‌جای نمایشِ
-    // اسپارک‌لاینِ همیشه‌۷روزه (که باعث می‌شد نمودار ۳۰ روزه و ۷ روزه یکی به‌نظر برسند)،
-    // خطِ قیمتِ *همان بازه* از market_chart گرفته می‌شود تا همه‌ی بازه‌ها هم‌خوان باشند.
+    // ───────────── کندلِ ساختگی از market_chart (پشتیبان endpointِ ohlc) ─────────────
+    // چون همه‌ی نمودارها باید شمعی باشند، اگر endpointِ ohlc برای بازه‌ای داده ندهد
+    // (سهمیه‌ی رایگان/خطای شبکه)، سریِ قیمتِ *همان بازه* از market_chart گرفته و به کندل
+    // تبدیل می‌شود (هر سطل: open=اولین، high=بیشینه، low=کمینه، close=آخرین). این‌طوری هیچ
+    // نمودار خطی‌ای نمی‌ماند و همه‌ی بازه‌ها داده‌ی خودشان را شمعی نشان می‌دهند.
 
-    private const val LINE_MAX_POINTS = 180
+    /** تعداد کندلِ هدف هنگام ساختن کندل از سریِ قیمت */
+    private const val SYNTH_CANDLES = 90
 
-    private data class LineEntry(val at: Long, val values: List<Double>)
-
-    private val lineCache = HashMap<String, LineEntry>()
+    private val synthCache = HashMap<String, Entry>()
 
     @Synchronized
-    private fun cachedLine(coinId: String, range: Range, now: Long = System.currentTimeMillis()): List<Double>? {
-        val entry = lineCache[key(coinId, range)] ?: return null
-        return if (TimePolicy.isFresh(now, entry.at, TTL_MS)) entry.values else null
+    private fun cachedSynth(coinId: String, range: Range, now: Long = System.currentTimeMillis()): List<Candle>? {
+        val entry = synthCache[key(coinId, range)] ?: return null
+        return if (TimePolicy.isFresh(now, entry.at, TTL_MS)) entry.candles else null
     }
 
     @Synchronized
-    private fun putLine(coinId: String, range: Range, values: List<Double>) {
-        if (lineCache.size > 40) lineCache.clear()
-        lineCache[key(coinId, range)] = LineEntry(System.currentTimeMillis(), values)
+    private fun putSynth(coinId: String, range: Range, candles: List<Candle>) {
+        if (synthCache.size > 40) synthCache.clear()
+        synthCache[key(coinId, range)] = Entry(System.currentTimeMillis(), candles)
     }
 
-    /** خطِ قیمتِ یک بازه از market_chart؛ خطای شبکه = فهرست خالی. */
-    suspend fun loadLine(coinId: String, range: Range): List<Double> = withContext(Dispatchers.IO) {
+    /** کندلِ ساختگیِ یک بازه از market_chart؛ خطای شبکه = فهرست خالی. */
+    suspend fun loadSynthetic(coinId: String, range: Range): List<Candle> = withContext(Dispatchers.IO) {
         val id = coinId.trim().lowercase()
         if (id.isEmpty()) return@withContext emptyList()
-        cachedLine(id, range)?.let { return@withContext it }
+        cachedSynth(id, range)?.let { return@withContext it }
         val url = "https://api.coingecko.com/api/v3/coins/$id/market_chart?vs_currency=usd&days=${range.days}"
-        val values = try {
-            parseLine(Http.getText(url))
+        val candles = try {
+            synthesizeCandles(parsePricePoints(Http.getText(url)), SYNTH_CANDLES)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
             emptyList()
         }
-        if (values.isNotEmpty()) putLine(id, range, values)
-        values
+        if (candles.isNotEmpty()) putSynth(id, range, candles)
+        candles
     }
 
-    /** پاسخ market_chart: {"prices":[[ts, price], ...]} */
-    internal fun parseLine(body: String): List<Double> {
+    /** پاسخ market_chart: {"prices":[[ts, price], ...]} → فهرست (زمان، قیمت). */
+    internal fun parsePricePoints(body: String): List<Pair<Long, Double>> {
         val root = runCatching { JSONObject(body) }.getOrNull() ?: return emptyList()
         val arr = root.optJSONArray("prices") ?: return emptyList()
-        val out = ArrayList<Double>(arr.length())
+        val out = ArrayList<Pair<Long, Double>>(arr.length())
         for (i in 0 until arr.length()) {
             val row = arr.optJSONArray(i) ?: continue
             if (row.length() < 2) continue
+            val ts = row.optLong(0, 0L)
             val price = row.optDouble(1)
-            if (price.isFinite() && price > 0.0) out += price
+            if (price.isFinite() && price > 0.0) out += ts to price
         }
-        return downsample(out, LINE_MAX_POINTS)
+        return out
     }
 
-    /** کاهش تعداد نقطه‌ها به سقفِ معلوم، با فاصله‌ی یکنواخت (حفظِ نقطه‌ی آخر). */
-    internal fun downsample(values: List<Double>, maxPoints: Int): List<Double> {
-        if (maxPoints < 2 || values.size <= maxPoints) return values
-        val step = (values.size - 1).toDouble() / (maxPoints - 1)
-        return (0 until maxPoints).map { values[(it * step).toInt().coerceIn(0, values.size - 1)] }
+    /**
+     * تبدیل سریِ (زمان، قیمت) به کندل با سطل‌بندیِ یکنواخت:
+     * open=اولین قیمتِ سطل، close=آخرین، high=بیشینه، low=کمینه.
+     */
+    internal fun synthesizeCandles(points: List<Pair<Long, Double>>, targetCount: Int): List<Candle> {
+        if (points.size < 2) return emptyList()
+        val target = targetCount.coerceIn(2, MAX_CANDLES)
+        val bucketSize = kotlin.math.ceil(points.size.toDouble() / target).toInt().coerceAtLeast(1)
+        val out = ArrayList<Candle>(target + 1)
+        var i = 0
+        while (i < points.size) {
+            val end = minOf(i + bucketSize, points.size)
+            val slice = points.subList(i, end)
+            val open = slice.first().second
+            val close = slice.last().second
+            val high = slice.maxOf { it.second }
+            val low = slice.minOf { it.second }
+            out += Candle(
+                time = slice.first().first,
+                open = open,
+                high = maxOf(high, open, close),
+                low = minOf(low, open, close),
+                close = close
+            )
+            i = end
+        }
+        return out
+    }
+
+    /**
+     * تبدیل یک سریِ سادهٔ قیمت (بدون زمان — مثل اسپارک‌لاینِ کش‌شده) به کندل، برای وقتی که
+     * شبکه در دسترس نیست و فقط همین سری موجود است. زمان = اندیسِ سطل.
+     */
+    fun candlesFromValues(values: List<Double>): List<Candle> {
+        val clean = values.filter { it.isFinite() && it > 0.0 }
+        if (clean.size < 2) return emptyList()
+        val points = clean.mapIndexed { i, v -> i.toLong() to v }
+        return synthesizeCandles(points, SYNTH_CANDLES)
     }
 }

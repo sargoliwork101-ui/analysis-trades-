@@ -194,6 +194,23 @@ fun WalletDetailSheet(
                                     "${Format.toPersianDigits("${trade.steps.size}")} پله پر شده"
                         )
                     }
+                    if (trade.isSellLadder) {
+                        StatRow(
+                            "فروش پله‌ای",
+                            "${Format.toPersianDigits("${trade.filledSellStepCount}")} از " +
+                                    "${Format.toPersianDigits("${trade.sellSteps.size}")} پله فروخته شده"
+                        )
+                        for ((i, step) in trade.sellSteps.withIndex()) {
+                            val pct = Format.toPersianDigits(
+                                String.format(java.util.Locale.US, "%.0f", step.fraction * 100.0)
+                            )
+                            StatRow(
+                                "هدف فروش ${Format.toPersianDigits("${i + 1}")} ($pct٪) " +
+                                        (if (step.filled) "✓ فروخته شد" else "⏳ در انتظار"),
+                                QuoteText.priceWithUnit(step.price, "$", persian)
+                            )
+                        }
+                    }
                     StatRow("زمان خرید", Format.dateTime(trade.openedAt, persian))
                     if (!trade.isOpen) {
                         trade.closedAt?.let { StatRow("زمان فروش", Format.dateTime(it, persian)) }
