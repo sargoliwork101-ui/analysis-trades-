@@ -253,6 +253,27 @@ object PumpScanner {
     }
 
     /**
+     * گرفتن داده‌ی کاملِ بازارِ یک کوینِ مشخص (رتبه، تغییرها، حجم، ATH، اسپارک‌لاین…).
+     *
+     * برای صفحه‌ی جزئیاتِ «کیف پول» لازم است: کوین‌های کیف ممکن است در فهرست پامپ نباشند،
+     * پس داده‌شان مستقیم با شناسه گرفته می‌شود. خطای شبکه = null (صفحه با داده‌ی کش‌شده کار می‌کند).
+     */
+    suspend fun fetchCoin(coinId: String): PumpCoin? = withContext(Dispatchers.IO) {
+        val id = coinId.trim().lowercase()
+        if (id.isEmpty()) return@withContext null
+        val url = "https://api.coingecko.com/api/v3/coins/markets" +
+                "?vs_currency=usd&ids=$id&sparkline=true&price_change_percentage=1h,24h,7d,30d"
+        try {
+            val coins = parse(Http.getText(url), 1, 0.0).coins
+            coins.firstOrNull { it.id == id } ?: coins.firstOrNull()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
      * اسکن تازه‌ی بازار.
      *
      * @param universe چند کوین برتر بازار خوانده شود (۵۰/۱۰۰/۲۵۰)

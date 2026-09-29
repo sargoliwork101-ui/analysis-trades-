@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.compose.runtime.Immutable
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import kotlin.math.abs
 
@@ -21,7 +23,10 @@ object PaperTradeStore {
 
     private const val PREF = "pulse_paper_trades"
     private const val KEY_TRADES = "trades"
+    private const val KEY_PRICES = "cached_prices"
+    private const val KEY_PRICES_AT = "cached_prices_at"
     private const val MAX_TRADES = 200
+    private val priceMapSerializer = MapSerializer(String.serializer(), Double.serializer())
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
@@ -200,6 +205,38 @@ object PaperTradeStore {
     }
 
     fun open(context: Context, trades: List<Trade>): List<Trade> = trades.filter { it.isOpen }
+
+    // ───────────── کش قیمت‌ها (نمایش آفلاین) ─────────────
+    // آخرین قیمت‌های گرفته‌شده روی همین گوشی می‌مانند تا اگر اینترنت نبود، کیف پول با
+    // «آخرین مقدار موجود» نمایش داده شود و فقط برچسب «آپدیت نشده» بخورد.
+
+    /** آخرین قیمت‌های کش‌شده (شناسه‌ی کوین → دلار)؛ خالی اگر چیزی ذخیره نشده. */
+    @Synchronized
+    fun cachedPrices(context: Context): Map<String, Double> {
+        val raw = prefs(context).getString(KEY_PRICES, null) ?: return emptyMap()
+        return runCatching { json.decodeFromString(priceMapSerializer, raw) }
+            .getOrDefault(emptyMap())
+            .filterValues { it.isFinite() && it > 0.0 }
+    }
+
+    /** زمان آخرین به‌روزرسانی موفق قیمت‌ها (میلی‌ثانیه)؛ ۰ یعنی هرگز. */
+    fun pricesUpdatedAt(context: Context): Long = prefs(context).getLong(KEY_PRICES_AT, 0L)
+
+    /** ادغام و ذخیره‌ی قیمت‌های تازه روی کش قبلی. نقشه‌ی خالی نادیده گرفته می‌شود. */
+    @Synchronized
+    fun savePrices(
+        context: Context,
+        prices: Map<String, Double>,
+        at: Long = System.currentTimeMillis()
+    ) {
+        val fresh = prices.filterValues { it.isFinite() && it > 0.0 }
+        if (fresh.isEmpty()) return
+        val merged = cachedPrices(context) + fresh
+        prefs(context).edit()
+            .putString(KEY_PRICES, json.encodeToString(priceMapSerializer, merged))
+            .putLong(KEY_PRICES_AT, at)
+            .apply()
+    }
 
     @Synchronized
     private fun write(context: Context, trades: List<Trade>) {

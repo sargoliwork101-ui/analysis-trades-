@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.pulse.market.data.AiReviewStore
 import com.pulse.market.data.NobitexMarkets
 import com.pulse.market.data.PaperTradeStore
 import com.pulse.market.data.PumpAiConfig
@@ -42,6 +43,7 @@ class PumpsViewModel(app: Application) : AndroidViewModel(app) {
     var aiReviews by mutableStateOf<Map<String, PumpAiReviewer.Review>>(emptyMap()); private set
     var aiErrors by mutableStateOf<Map<String, String>>(emptyMap()); private set
     var aiReviewAt by mutableStateOf<Map<String, Long>>(emptyMap()); private set
+    var aiHistory by mutableStateOf<Map<String, List<AiReviewStore.Entry>>>(emptyMap()); private set
     var aiStorageError by mutableStateOf(false); private set
     var aiTestBusy by mutableStateOf(false); private set
     var aiTestResult by mutableStateOf<PumpAiReviewer.TestResult?>(null); private set
@@ -63,6 +65,14 @@ class PumpsViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val loaded = withContext(Dispatchers.IO) { PumpAiConfigStore.load(ctx) }
             if (!aiEdited) aiConfig = loaded
+        }
+        // آخرین تحلیل‌های ذخیره‌شده‌ی هر کوین بازیابی می‌شوند تا بعد از بستن برنامه هم بمانند.
+        viewModelScope.launch {
+            val latest = withContext(Dispatchers.IO) { AiReviewStore.latestByCoin(ctx) }
+            if (latest.isNotEmpty()) {
+                aiReviews = aiReviews + latest.mapValues { it.value.review }
+                aiReviewAt = aiReviewAt + latest.mapValues { it.value.at }
+            }
         }
         viewModelScope.launch {
             previousMatches = withContext(Dispatchers.IO) { PumpScanner.previousMatches(ctx) }
@@ -122,13 +132,27 @@ class PumpsViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val outcome = PumpAiReviewer.review(config, coin)
                 outcome.review?.let {
+                    val at = System.currentTimeMillis()
                     aiReviews = aiReviews + (coin.id to it)
-                    aiReviewAt = aiReviewAt + (coin.id to System.currentTimeMillis())
+                    aiReviewAt = aiReviewAt + (coin.id to at)
+                    withContext(Dispatchers.IO) {
+                        AiReviewStore.add(ctx, coin.id, coin.symbol, coin.name, it, at)
+                    }
+                    aiHistory = aiHistory +
+                            (coin.id to withContext(Dispatchers.IO) { AiReviewStore.history(ctx, coin.id) })
                 }
                 outcome.error?.let { aiErrors = aiErrors + (coin.id to it) }
             } finally {
                 aiBusyIds = aiBusyIds - coin.id
             }
+        }
+    }
+
+    /** تاریخچه‌ی تحلیل‌های یک کوین را برای صفحه‌ی جزئیات بارگذاری می‌کند. */
+    fun loadAiHistory(coinId: String) {
+        viewModelScope.launch {
+            val history = withContext(Dispatchers.IO) { AiReviewStore.history(ctx, coinId) }
+            aiHistory = aiHistory + (coinId to history)
         }
     }
 

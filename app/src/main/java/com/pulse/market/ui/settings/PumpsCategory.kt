@@ -581,6 +581,7 @@ fun PumpsCategory(
     LaunchedEffect(selectedCoinId) {
         val coin = selectedCoinId?.let { id -> shown.firstOrNull { it.id == id } } ?: return@LaunchedEffect
         vm.checkNobitex(coin)
+        vm.loadAiHistory(coin.id)
     }
 
     val selected = selectedCoinId?.let { id -> shown.firstOrNull { it.id == id } }
@@ -601,6 +602,7 @@ fun PumpsCategory(
             aiBusy = selected.id in aiBusyIds,
             aiReview = aiReviews[selected.id],
             aiReviewAt = aiReviewAt[selected.id],
+            aiHistory = vm.aiHistory[selected.id].orEmpty(),
             aiError = aiErrors[selected.id],
             nobitex = nobitex[selected.id],
             openTrade = trades.firstOrNull { it.coinId == selected.id && it.isOpen },

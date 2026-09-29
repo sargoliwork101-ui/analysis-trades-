@@ -89,6 +89,7 @@ fun PumpDetailSheet(
     aiBusy: Boolean,
     aiReview: PumpAiReviewer.Review?,
     aiReviewAt: Long?,
+    aiHistory: List<com.pulse.market.data.AiReviewStore.Entry> = emptyList(),
     aiError: String?,
     nobitex: NobitexMarkets.Result?,
     openTrade: PaperTradeStore.Trade?,
@@ -498,6 +499,11 @@ fun PumpDetailSheet(
                         }
                     }
                 }
+                AiReviewHistorySection(
+                    older = aiHistory.drop(1),
+                    persian = persian,
+                    onOpenLink = onOpenLink
+                )
             }
 
             // ── معامله‌ی آزمایشی ──
@@ -846,7 +852,7 @@ private fun ScoreBar(label: String, value: Double, total: Double, persian: Boole
  * بیرون کادر نیفتد؛ بخش جلوتر از آخرین قیمت، پیش‌بینیِ ابر است.
  */
 @Composable
-private fun PriceSparkline(
+internal fun PriceSparkline(
     values: List<Double>,
     rising: Boolean,
     ichimoku: Ichimoku.Series?,
@@ -936,7 +942,7 @@ internal fun tradingViewUrl(symbol: String): String {
  * پنجره‌ی دید را روی تاریخ جابه‌جا می‌کند. خطوط ایچیموکو هم روی همان پنجره رسم می‌شوند.
  */
 @Composable
-private fun CandleChart(
+internal fun CandleChart(
     candles: List<PumpOhlc.Candle>,
     ichimoku: Ichimoku.Series?,
     modifier: Modifier

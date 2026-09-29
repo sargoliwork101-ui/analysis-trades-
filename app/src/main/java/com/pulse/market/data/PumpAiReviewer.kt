@@ -28,6 +28,7 @@ object PumpAiReviewer {
     /** مسیرهایی مثل /v1، /v1beta یا /v2alpha که فقط «chat/completions» کم دارند. */
     private val VERSIONED_PATH = Regex("(?i)/v\\d+(?:beta|alpha)?\\d*$")
 
+    @kotlinx.serialization.Serializable
     data class NewsItem(
         val title: String,
         val url: String,
@@ -38,6 +39,7 @@ object PumpAiReviewer {
         val host: String = ""
     )
 
+    @kotlinx.serialization.Serializable
     data class Review(
         val verdict: String,
         val recommendation: String,

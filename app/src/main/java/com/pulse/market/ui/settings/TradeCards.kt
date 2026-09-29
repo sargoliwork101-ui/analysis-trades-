@@ -1,6 +1,7 @@
 package com.pulse.market.ui.settings
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -144,7 +145,8 @@ fun WalletTradeCard(
     price: Double?,
     persian: Boolean,
     onSell: (() -> Unit)? = null,
-    onDelete: (() -> Unit)? = null
+    onDelete: (() -> Unit)? = null,
+    onClick: (() -> Unit)? = null
 ) {
     val pct = trade.profitPct(price)
     val usd = trade.profitUsd(price)
@@ -158,7 +160,9 @@ fun WalletTradeCard(
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         border = BorderStroke(1.dp, accent.copy(alpha = 0.35f)),
         shape = RoundedCornerShape(18.dp),
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
     ) {
         Row(modifier = Modifier.height(IntrinsicSize.Min)) {
             // نوار رنگی کناری = وضعیت سود/زیان در یک نگاه
