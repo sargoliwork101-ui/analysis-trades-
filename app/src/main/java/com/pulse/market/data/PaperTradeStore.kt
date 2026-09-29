@@ -336,6 +336,7 @@ object PaperTradeStore {
      * @param sellStepPrices قیمتِ هدفِ هر پله‌ی فروش پله‌ای (حد سود چندمرحله‌ای)؛ سهم برابر
      *                       بین پله‌ها. null یا کمتر از دو قیمت = بدون فروش پله‌ای.
      */
+    @Synchronized
     fun buy(
         context: Context,
         coin: PumpScanner.PumpCoin,
@@ -456,6 +457,7 @@ object PaperTradeStore {
     }
 
     /** فروش دستی */
+    @Synchronized
     fun sell(
         context: Context,
         tradeId: String,
@@ -471,10 +473,12 @@ object PaperTradeStore {
         return closed
     }
 
+    @Synchronized
     fun remove(context: Context, tradeId: String) {
         write(context, all(context).filterNot { it.id == tradeId })
     }
 
+    @Synchronized
     fun clearClosed(context: Context) {
         write(context, all(context).filter { it.isOpen })
     }
@@ -483,6 +487,7 @@ object PaperTradeStore {
      * بررسی حد سود/حد ضرر با قیمت‌های تازه و بستن خودکار معامله‌های رسیده.
      * خروجی: معامله‌هایی که همین حالا بسته شدند (برای نمایش پیام به کاربر).
      */
+    @Synchronized
     fun settle(
         context: Context,
         pricesByCoinId: Map<String, Double>,

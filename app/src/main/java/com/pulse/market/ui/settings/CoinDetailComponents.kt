@@ -1,6 +1,7 @@
 package com.pulse.market.ui.settings
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -42,6 +43,7 @@ import com.pulse.market.data.AiReviewStore
 import com.pulse.market.data.Ichimoku
 import com.pulse.market.data.PumpAiReviewer
 import com.pulse.market.data.PumpOhlc
+import com.pulse.market.data.TradingViewSymbols
 import com.pulse.market.ui.Format
 
 /**
@@ -71,6 +73,22 @@ fun CoinChartCard(
     val hasSymbol = symbol.isNotBlank()
     var advanced by remember(coinId) { mutableStateOf(hasSymbol) }
     val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+
+    // نمادِ تریدینگ‌ویو پیش از نمایش با سرویسِ جست‌وجوی خودِ تریدینگ‌ویو تأیید می‌شود:
+    //  • null       → هنوز در حال تشخیص (نمای «در حال آماده‌سازی»).
+    //  • غیرِ null   → نمادِ آماده برای ویجت (EXCHANGE:SYMBOL یا SYMBOLUSDT).
+    // اگر جفتِ USDT وجود نداشته باشد، خودکار به «نمودار داخلی» برمی‌گردیم و پیام می‌دهیم.
+    var tvSymbol by remember(coinId) { mutableStateOf<String?>(null) }
+    var tvUnavailable by remember(coinId) { mutableStateOf(false) }
+    LaunchedEffect(coinId, symbol, advanced) {
+        if (!advanced || !hasSymbol || tvSymbol != null) return@LaunchedEffect
+        when (val r = TradingViewSymbols.resolve(symbol)) {
+            is TradingViewSymbols.Outcome.Found -> tvSymbol = r.tvSymbol
+            TradingViewSymbols.Outcome.NotFound -> { tvUnavailable = true; advanced = false }
+            // خطای شبکه/تجزیه: خوش‌بینانه با حدسِ رایج ادامه می‌دهیم (مثل رفتار قبلی).
+            TradingViewSymbols.Outcome.Unknown -> tvSymbol = tradingViewSymbol(symbol)
+        }
+    }
 
     var range by remember(coinId) { mutableStateOf(PumpOhlc.Range.WEEK) }
     var candles by remember(coinId) { mutableStateOf<List<PumpOhlc.Candle>>(emptyList()) }
@@ -109,7 +127,8 @@ fun CoinChartCard(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
                         selected = advanced,
-                        onClick = { advanced = true },
+                        // کلیکِ دوباره روی «پیشرفته» بعد از بازگشتِ خودکار، دوباره تلاش می‌کند.
+                        onClick = { tvUnavailable = false; advanced = true },
                         label = { Text("نمودار پیشرفته", fontSize = 11.sp) }
                     )
                     FilterChip(
@@ -122,22 +141,42 @@ fun CoinChartCard(
             }
 
             if (advanced && hasSymbol) {
-                TradingViewChart(
-                    symbol = symbol,
-                    dark = dark,
-                    persian = persian,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(480.dp)
-                )
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    "نمودار حرفه‌ای تریدینگ‌ویو داخل برنامه: با دو انگشت زوم کن، با کشیدن جابه‌جا کن، از نوار بالا " +
-                            "تایم‌فریم و اندیکاتور را عوض کن و از ذره‌بین، نماد را تغییر بده. اگر نماد پیدا نشد، به «نمودار داخلی» برگرد.",
-                    fontSize = 10.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                val ready = tvSymbol
+                if (ready == null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(480.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "در حال آماده‌سازی نمودار حرفه‌ای…",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    TradingViewChart(
+                        tvSymbol = ready,
+                        dark = dark,
+                        persian = persian,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(480.dp)
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "نمودار حرفه‌ای تریدینگ‌ویو داخل برنامه: با دو انگشت زوم کن، با کشیدن جابه‌جا کن، از نوار بالا " +
+                                "تایم‌فریم و اندیکاتور را عوض کن و از ذره‌بین، نماد را تغییر بده.",
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             } else {
+                if (tvUnavailable) {
+                    Hint("این کوین جفتِ USDT در تریدینگ‌ویو نداشت؛ «نمودار داخلی» نمایش داده می‌شود.")
+                    Spacer(Modifier.height(8.dp))
+                }
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
@@ -220,12 +259,12 @@ fun CoinChartCard(
  */
 @Composable
 fun TradingViewChart(
-    symbol: String,
+    tvSymbol: String,
     dark: Boolean,
     persian: Boolean,
     modifier: Modifier = Modifier
 ) {
-    val html = remember(symbol, dark, persian) { tradingViewHtml(tradingViewSymbol(symbol), dark, persian) }
+    val html = remember(tvSymbol, dark, persian) { tradingViewHtml(tvSymbol, dark, persian) }
     // با تغییر نماد/تم، WebView از نو ساخته و بارگذاری می‌شود.
     key(html) {
         AndroidView(
@@ -241,12 +280,26 @@ fun TradingViewChart(
                     settings.loadWithOverviewMode = true
                     settings.useWideViewPort = true
                     settings.mediaPlaybackRequiresUserGesture = false
+                    // صفحه‌ی ویجت روی HTTPS است؛ اجازه‌ی افتِ منابع به HTTP ساده داده نمی‌شود
+                    // (هرچند برنامه برای منابع داده‌ی ایرانی cleartext را کلی مجاز می‌کند).
+                    settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
                     setBackgroundColor(android.graphics.Color.TRANSPARENT)
                     webViewClient = android.webkit.WebViewClient()
                     webChromeClient = android.webkit.WebChromeClient()
-                    // تا وقتی کاربر روی نمودار می‌کشد، صفحه‌ی بالادستی اسکرول را نگیرد.
-                    setOnTouchListener { v, _ ->
-                        v.parent?.requestDisallowInterceptTouchEvent(true)
+                    // تا وقتی کاربر روی نمودار می‌کشد، صفحه‌ی بالادستی (شیتِ اسکرول‌شونده)
+                    // اسکرول را نگیرد؛ در پایانِ لمس، کنترل را پس می‌دهیم و performClick را
+                    // صدا می‌زنیم تا دسترس‌پذیری/کلیک هم درست کار کند.
+                    setOnTouchListener { v, event ->
+                        when (event.actionMasked) {
+                            android.view.MotionEvent.ACTION_DOWN,
+                            android.view.MotionEvent.ACTION_MOVE ->
+                                v.parent?.requestDisallowInterceptTouchEvent(true)
+                            android.view.MotionEvent.ACTION_UP,
+                            android.view.MotionEvent.ACTION_CANCEL -> {
+                                v.parent?.requestDisallowInterceptTouchEvent(false)
+                                if (event.actionMasked == android.view.MotionEvent.ACTION_UP) v.performClick()
+                            }
+                        }
                         false
                     }
                     loadDataWithBaseURL(
@@ -257,6 +310,15 @@ fun TradingViewChart(
                         null
                     )
                 }
+            },
+            // بدون این، WebView هنگام خروج از composition (بستن شیت یا تعویض تم/نماد که
+            // WebView را از نو می‌سازد) آزاد نمی‌شد و به Context اکتیویتی نشت می‌کرد.
+            onRelease = { webView ->
+                webView.stopLoading()
+                webView.loadUrl("about:blank")
+                webView.setOnTouchListener(null)
+                (webView.parent as? android.view.ViewGroup)?.removeView(webView)
+                webView.destroy()
             }
         )
     }
