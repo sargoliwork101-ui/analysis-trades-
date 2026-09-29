@@ -17,6 +17,7 @@ import org.jsoup.select.Selector
 import java.net.URI
 import java.net.URLEncoder
 import java.util.ArrayDeque
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -74,14 +75,62 @@ object Fetcher {
     suspend fun fetchAll(source: SourceDef, symbols: List<SymbolDef>): List<Quote> {
         if (symbols.isEmpty()) return emptyList()
         return withContext(Dispatchers.IO) {
-            when {
+            val base = when {
                 source.kind == FetchKind.TSE_TSETMC -> fetchTseBatch(source, symbols)
 
                 source.batchTemplate != null -> fetchBatch(source, symbols)
 
                 else -> parallel(symbols) { s -> fetchOne(source, s) }
             }
+            applyCryptoFallback(source, symbols, base)
         }
+    }
+
+    /**
+     * منبعِ اصلیِ کریپتو (CoinGecko) در بعضی شبکه‌ها/مناطق بلاک یا ریت‌لیمیت (۴۲۹) می‌شود —
+     * حتی با VPN. برای همین اگر بعد از تلاشِ عادی هنوز نمادی قیمت نگرفته باشد، از منبعِ
+     * پشتیبانِ رایگانِ بی‌کلید (Coinpaprika) پر می‌شود تا ویجت/فهرستِ کریپتو خالی نماند.
+     */
+    private suspend fun applyCryptoFallback(
+        source: SourceDef,
+        symbols: List<SymbolDef>,
+        quotes: List<Quote>
+    ): List<Quote> {
+        if (source.id != PumpScanner.CRYPTO_SOURCE_ID) return quotes
+        val missing = quotes.withIndex().filter { it.value.price == null }
+        if (missing.isEmpty()) return quotes
+        val fb = runCatching {
+            CryptoFallback.quotesFor(missing.map { symbols[it.index].code })
+        }.getOrNull().orEmpty()
+        if (fb.isEmpty()) return quotes
+
+        val now = System.currentTimeMillis()
+        val out = quotes.toMutableList()
+        var used = false
+        for (m in missing) {
+            val sym = symbols[m.index]
+            val px = fb[sym.code.trim().lowercase(Locale.ROOT)] ?: continue
+            val price = px.price ?: continue
+            out[m.index] = Quote(
+                code = sym.code,
+                label = sym.label,
+                price = price,
+                changePct = px.change24h,
+                volume = px.volume,
+                unit = unitOf(source, sym),
+                ts = now,
+                sourceId = source.id
+            )
+            used = true
+        }
+        if (used) {
+            endpointBySource[source.id] = EndpointUse(
+                host = "api.coinpaprika.com",
+                fallback = true,
+                at = now
+            )
+        }
+        return out
     }
 
     /** گرفتن قیمت یک نماد (برای دکمه‌ی «تست داده» و منابع دلخواه) */

@@ -263,7 +263,7 @@ object PumpScanner {
         if (id.isEmpty()) return@withContext null
         val url = "https://api.coingecko.com/api/v3/coins/markets" +
                 "?vs_currency=usd&ids=$id&sparkline=true&price_change_percentage=1h,24h,7d,30d"
-        try {
+        val fromPrimary = try {
             val coins = parse(Http.getText(url), 1, 0.0).coins
             coins.firstOrNull { it.id == id } ?: coins.firstOrNull()
         } catch (cancelled: CancellationException) {
@@ -271,6 +271,30 @@ object PumpScanner {
         } catch (_: Exception) {
             null
         }
+        if (fromPrimary != null) return@withContext fromPrimary
+        // منبعِ اصلی نشد؛ از پشتیبان (Coinpaprika) با تطبیقِ شناسه/نماد بگیر.
+        val t = runCatching { CryptoFallback.find(id) }.getOrNull() ?: return@withContext null
+        sanitizeCoin(
+            PumpCoin(
+                id = t.id,
+                symbol = t.symbol,
+                name = t.name,
+                price = t.price,
+                change1h = t.change1h,
+                change24h = t.change24h,
+                change7d = t.change7d,
+                change30d = t.change30d,
+                volume = t.volume,
+                marketCap = t.marketCap,
+                rank = t.rank,
+                score = 0.0,
+                ath = t.ath,
+                athChangePct = t.athChangePct,
+                circulatingSupply = t.circulating,
+                totalSupply = t.total,
+                spark = emptyList()
+            )
+        )
     }
 
     /**
@@ -325,6 +349,20 @@ object PumpScanner {
                 scan
             },
             onFailure = { t ->
+                // منبعِ اصلی (CoinGecko) شکست خورد؛ اول منبعِ پشتیبان (Coinpaprika) را امتحان کن
+                // تا وقتی CoinGecko در دسترس نیست (ریت‌لیمیت/بلاکِ Cloudflare/فیلترِ منطقه‌ای)
+                // فهرستِ پامپ خالی نماند.
+                val fallback = runCatching { buildFromFallback(size, threshold) }.getOrNull()
+                if (fallback != null && fallback.coins.isNotEmpty()) {
+                    rememberPrevious(context, cached(context))
+                    prefs(context).edit()
+                        .putString(
+                            KEY_LAST,
+                            json.encodeToString(PumpScan.serializer(), trimSparkForCache(fallback))
+                        )
+                        .apply()
+                    return@fold fallback
+                }
                 // خطای شبکه: نتیجه‌ی قبلیِ کش را با پیام خطا برمی‌گردانیم (صفحه خالی نمی‌شود)
                 val old = cached(context)
                 val safeError = SensitiveText.redact(t.message.orEmpty(), 160)
@@ -341,6 +379,59 @@ object PumpScanner {
                     error = safeError
                 )
             }
+        )
+    }
+
+    /**
+     * ساختِ اسکن از منبعِ پشتیبان (Coinpaprika). فیلدهایی که paprika ندارد
+     * (نمودارِ اسپارک، سقف/کفِ ۲۴ ساعت) خالی می‌مانند؛ نمودارِ تریدینگ‌ویو مستقل کار می‌کند.
+     */
+    private suspend fun buildFromFallback(universe: Int, minChange: Double): PumpScan {
+        val tickers = CryptoFallback.tickers()
+        if (tickers.isEmpty()) {
+            return PumpScan(
+                at = System.currentTimeMillis(),
+                universe = universe,
+                minChange = minChange,
+                coins = emptyList(),
+                error = null
+            )
+        }
+        val coins = tickers.asSequence()
+            .sortedBy { if (it.rank > 0) it.rank else Int.MAX_VALUE }
+            .take(universe)
+            .mapNotNull { t ->
+                sanitizeCoin(
+                    PumpCoin(
+                        id = t.id,
+                        symbol = t.symbol,
+                        name = t.name,
+                        price = t.price,
+                        change1h = t.change1h,
+                        change24h = t.change24h,
+                        change7d = t.change7d,
+                        change30d = t.change30d,
+                        volume = t.volume,
+                        marketCap = t.marketCap,
+                        rank = t.rank,
+                        score = 0.0,
+                        ath = t.ath,
+                        athChangePct = t.athChangePct,
+                        circulatingSupply = t.circulating,
+                        totalSupply = t.total,
+                        spark = emptyList()
+                    )
+                )
+            }
+            .sortedByDescending { it.score }
+            .take(MAX_RESULTS)
+            .toList()
+        return PumpScan(
+            at = System.currentTimeMillis(),
+            universe = universe,
+            minChange = minChange,
+            coins = coins,
+            error = null
         )
     }
 

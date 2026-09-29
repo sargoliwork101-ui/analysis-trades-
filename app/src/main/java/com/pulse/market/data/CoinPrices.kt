@@ -30,13 +30,19 @@ object CoinPrices {
         val safe = sanitizeIds(ids)
         if (safe.isEmpty()) return@withContext emptyMap()
         val url = "$ENDPOINT?ids=${safe.joinToString(",")}&vs_currencies=usd"
-        try {
+        val primary = try {
             parse(Http.getText(url))
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
             emptyMap()
         }
+        // اگر CoinGecko همه را داد، تمام. وگرنه شناسه‌های جامانده را از منبعِ پشتیبان
+        // (Coinpaprika) تکمیل کن تا قیمتِ کیف حتی وقتی CoinGecko بلاک است هم بیاید.
+        val missing = safe.filterNot { it in primary }
+        if (missing.isEmpty()) return@withContext primary
+        val fallback = runCatching { CryptoFallback.pricesFor(missing) }.getOrNull().orEmpty()
+        if (fallback.isEmpty()) primary else primary + fallback
     }
 
     /** پاسخ: {"solana":{"usd":150.2}, ...} */
