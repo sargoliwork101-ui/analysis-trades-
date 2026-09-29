@@ -21,7 +21,11 @@ class CryptoFallbackTest {
           {"id":"eth-ethereum","name":"Ethereum","symbol":"ETH","rank":2,
            "quotes":{"USD":{"price":3200.0,"percent_change_24h":-1.2,"volume_24h":9999.0,"market_cap":400000000.0}}},
           {"id":"sol-solana","name":"Solana","symbol":"SOL","rank":5,
-           "quotes":{"USD":{"price":150.0,"percent_change_24h":4.0}}}
+           "quotes":{"USD":{"price":150.0,"percent_change_24h":4.0}}},
+          {"id":"xrp-xrp","name":"XRP","symbol":"XRP","rank":6,
+           "quotes":{"USD":{"price":0.55,"percent_change_24h":1.0}}},
+          {"id":"bnb-binance-coin","name":"BNB","symbol":"BNB","rank":4,
+           "quotes":{"USD":{"price":580.0,"percent_change_24h":0.8}}}
         ]
     """.trimIndent()
 
@@ -55,6 +59,16 @@ class CryptoFallbackTest {
         assertEquals("btc-bitcoin", byId["btc-bitcoin"]?.id)
         val bySymbol = CryptoFallback.resolveFrom(list, listOf("eth"))
         assertEquals("eth-ethereum", bySymbol["eth"]?.id)
+    }
+
+    @Test
+    fun mapsKnownCoinGeckoIdsThatDifferFromPaprika() {
+        val list = CryptoFallback.parse(sample)
+        // شناسه‌ی CoinGecko «ripple»/«binancecoin» با هیچ id/slug/نمادِ paprika مستقیم یکی
+        // نیست؛ نگاشتِ نام باید آن‌ها را به XRP/BNB وصل کند.
+        val resolved = CryptoFallback.resolveFrom(list, listOf("ripple", "binancecoin"))
+        assertEquals("xrp-xrp", resolved["ripple"]?.id)
+        assertEquals("bnb-binance-coin", resolved["binancecoin"]?.id)
     }
 
     @Test

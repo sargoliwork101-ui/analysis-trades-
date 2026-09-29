@@ -27,6 +27,29 @@ object CryptoFallback {
     // پاسخِ paprika چند مگابایت است؛ فقط رده‌های بالای بازار برای اسکن/قیمت لازم‌اند.
     private const val MAX_PARSE = 3000
 
+    /**
+     * نگاشتِ شناسه‌های معروفِ CoinGecko که با شناسه/slug/نمادِ paprika یکی نیستند، به نمادِ
+     * paprika. بدونِ این، fallback برای همین کوین‌های پرکاربرد (که در فهرستِ پیش‌فرضِ ویجت
+     * هم هستند) قیمت پیدا نمی‌کرد. تطبیقِ نهایی با نماد + اولویتِ رتبه انجام می‌شود تا برخوردِ
+     * نماد به کوینِ اشتباه نخورد.
+     */
+    private val GECKO_ID_TO_SYMBOL = mapOf(
+        "ripple" to "xrp",
+        "binancecoin" to "bnb",
+        "toncoin" to "ton",
+        "the-open-network" to "ton",
+        "avalanche-2" to "avax",
+        "matic-network" to "matic",
+        "polygon-ecosystem-token" to "pol",
+        "havven" to "snx",
+        "leo-token" to "leo",
+        "crypto-com-chain" to "cro",
+        "blockstack" to "stx",
+        "elrond-erd-2" to "egld",
+        "bitcoin-cash-sv" to "bsv",
+        "binance-usd" to "busd"
+    )
+
     @Volatile
     private var cache: Pair<Long, List<Ticker>>? = null
 
@@ -97,7 +120,11 @@ object CryptoFallback {
         }
         val out = HashMap<String, Ticker>()
         for (id in wanted) {
-            (byId[id] ?: bySlug[id] ?: bySymbol[id])?.let { out[id] = it }
+            val match = byId[id]
+                ?: bySlug[id]
+                ?: bySymbol[id]
+                ?: GECKO_ID_TO_SYMBOL[id]?.let { bySymbol[it] }
+            if (match != null) out[id] = match
         }
         return out
     }
@@ -121,17 +148,11 @@ object CryptoFallback {
         return out
     }
 
-    /** یافتنِ یک تیکر با شناسه‌ی paprika، slug یا نماد. */
+    /** یافتنِ یک تیکر با شناسه‌ی paprika، slug، نماد یا نگاشتِ نامِ CoinGecko. */
     suspend fun find(idOrSymbol: String): Ticker? {
         val key = idOrSymbol.trim().lowercase(Locale.ROOT)
         if (key.isEmpty()) return null
-        val list = tickers()
-        if (list.isEmpty()) return null
-        return list.firstOrNull { it.id == key }
-            ?: list.firstOrNull { it.slug == key }
-            ?: list.asSequence()
-                .filter { it.symbol.lowercase(Locale.ROOT) == key }
-                .minByOrNull { if (it.rank > 0) it.rank else Int.MAX_VALUE }
+        return resolveFrom(tickers(), listOf(key))[key]
     }
 
     internal fun parse(body: String): List<Ticker> {
