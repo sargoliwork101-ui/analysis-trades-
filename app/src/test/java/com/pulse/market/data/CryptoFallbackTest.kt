@@ -32,7 +32,7 @@ class CryptoFallbackTest {
     @Test
     fun parsesFieldsAndSlug() {
         val list = CryptoFallback.parse(sample)
-        assertEquals(3, list.size)
+        assertEquals(5, list.size)
         val btc = list.first { it.id == "btc-bitcoin" }
         assertEquals("bitcoin", btc.slug)       // بخشِ بعد از خط تیره == شناسه‌ی CoinGecko
         assertEquals("BTC", btc.symbol)
