@@ -17,6 +17,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -162,6 +163,9 @@ fun PortfolioCategory(persian: Boolean) {
     // پنجره‌های ویرایش
     var showCapital by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<PaperTradeStore.Trade?>(null) }
+    // برای کارایی، تاریخچه به‌صورت صفحه‌ای نشان داده می‌شود تا صدها کارت یک‌جا رندر نشوند.
+    var showAllHistory by remember { mutableStateOf(false) }
+    val historyPageSize = 30
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         SectionHeader(
@@ -208,7 +212,7 @@ fun PortfolioCategory(persian: Boolean) {
 
         if (open.isNotEmpty()) {
             SectionHeader("معامله‌های باز", "با رسیدن قیمت به حد سود یا ضرر، خودکار بسته می‌شوند.")
-            for (trade in open) {
+            for (trade in open) key(trade.id) {
                 WalletTradeCard(
                     trade = trade,
                     price = prices[trade.coinId],
@@ -240,7 +244,8 @@ fun PortfolioCategory(persian: Boolean) {
 
         if (closed.isNotEmpty()) {
             SectionHeader("تاریخچه", "نتیجه‌ی نهایی معامله‌های بسته‌شده.")
-            for (trade in closed) {
+            val shownClosed = if (showAllHistory) closed else closed.take(historyPageSize)
+            for (trade in shownClosed) key(trade.id) {
                 WalletTradeCard(
                     trade = trade,
                     price = trade.closePrice,
@@ -255,6 +260,17 @@ fun PortfolioCategory(persian: Boolean) {
                         }
                     }
                 )
+            }
+            if (!showAllHistory && closed.size > historyPageSize) {
+                TextButton(
+                    onClick = { showAllHistory = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        "نمایش همه‌ی ${Format.toPersianDigits("${closed.size}")} مورد",
+                        fontSize = 11.5.sp
+                    )
+                }
             }
             TextButton(
                 onClick = {
