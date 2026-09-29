@@ -28,7 +28,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -148,77 +147,13 @@ fun PumpDetailSheet(
             )
 
             // ── نمودار کندلی با بازه‌ی انتخابی و زوم ──
-            var range by remember(coin.id) { mutableStateOf(PumpOhlc.Range.WEEK) }
-            var candles by remember(coin.id) { mutableStateOf<List<PumpOhlc.Candle>>(emptyList()) }
-            var chartBusy by remember(coin.id) { mutableStateOf(false) }
-            LaunchedEffect(coin.id, range) {
-                chartBusy = true
-                candles = PumpOhlc.load(coin.id, range)
-                chartBusy = false
-            }
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-                ),
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        for (option in PumpOhlc.Range.entries) {
-                            FilterChip(
-                                selected = range == option,
-                                onClick = { range = option },
-                                label = { Text(option.label, fontSize = 11.sp) }
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    val closes = remember(candles) { PumpOhlc.closes(candles) }
-                    val ichimoku = remember(candles, coin.spark) {
-                        Ichimoku.of(closes.ifEmpty { coin.spark })
-                    }
-                    when {
-                        candles.size >= 3 -> CandleChart(
-                            candles = candles,
-                            ichimoku = ichimoku,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(190.dp)
-                        )
-                        chartBusy -> Text(
-                            "در حال گرفتن کندل‌ها…",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        coin.spark.size >= 3 -> PriceSparkline(
-                            values = coin.spark,
-                            rising = (coin.change7d ?: 0.0) >= 0.0,
-                            ichimoku = ichimoku,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(110.dp)
-                        )
-                        else -> Hint("داده‌ی نمودار برای این کوین در دسترس نبود.")
-                    }
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        "ایچیموکو: ${Ichimoku.summary(coin.price, ichimoku)}",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        "${range.candleHint} • با دو انگشت زوم کن و با کشیدن، نمودار را جابه‌جا کن. " +
-                                "خط آبی تنکان، خط نارنجی کیجون و ناحیه‌ی رنگی ابر ایچیموکو است.",
-                        fontSize = 10.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
+            CoinChartCard(
+                coinId = coin.id,
+                price = coin.price,
+                persian = persian,
+                sparkFallback = coin.spark,
+                rising = (coin.change7d ?: 0.0) >= 0.0
+            )
 
             // ── تغییرات ──
             FlowRow(
@@ -847,9 +782,9 @@ private fun ScoreBar(label: String, value: Double, total: Double, persian: Boole
 }
 
 /**
- * نمودار قیمت + ابر ایچیموکو.
- * مقیاس عمودی روی همه‌ی سری‌ها (قیمت، تنکان، کیجون و ابر) حساب می‌شود تا هیچ خطی
- * بیرون کادر نیفتد؛ بخش جلوتر از آخرین قیمت، پیش‌بینیِ ابر است.
+ * نمودار خطیِ قیمت + ابر ایچیموکو، با زوم و جابه‌جایی (مثل نمودار شمعی).
+ * زوم با دو انگشت تعداد نقطه‌های دیده‌شده را کم/زیاد می‌کند و کشیدن افقی، پنجره‌ی دید را
+ * روی تاریخ جابه‌جا می‌کند. مقیاس عمودی روی همان پنجره حساب می‌شود تا هیچ خطی بیرون نیفتد.
  */
 @Composable
 internal fun PriceSparkline(
@@ -863,35 +798,65 @@ internal fun PriceSparkline(
     val kijunColor = Color(0xFFF59E0B)
     val bullCloud = Color(0xFF22C55E)
     val bearCloud = Color(0xFFF43F5E)
-    Canvas(modifier = modifier) {
-        if (values.size < 2) return@Canvas
-        val spanA = ichimoku?.spanA.orEmpty()
-        val spanB = ichimoku?.spanB.orEmpty()
-        val total = maxOf(values.size, spanA.size, spanB.size)
+
+    val spanA = ichimoku?.spanA.orEmpty()
+    val spanB = ichimoku?.spanB.orEmpty()
+    val tenkan = ichimoku?.tenkan.orEmpty()
+    val kijun = ichimoku?.kijun.orEmpty()
+    // ابرِ ایچیموکو جلوتر از آخرین قیمت هم پیش‌بینی می‌شود، پس بازه‌ی کل شامل آن هم هست.
+    val total = maxOf(values.size, spanA.size, spanB.size)
+
+    var zoom by remember(values) { mutableStateOf(1f) }
+    var offset by remember(values) { mutableStateOf(0f) }
+    val visibleCount = (total / zoom).toInt().coerceIn(6, total.coerceAtLeast(6))
+    val maxStart = (total - visibleCount).coerceAtLeast(0)
+    val start = offset.toInt().coerceIn(0, maxStart)
+    val end = (start + visibleCount).coerceAtMost(total)
+
+    Canvas(
+        modifier = modifier.pointerInput(values) {
+            detectTransformGestures { _, pan, gestureZoom, _ ->
+                zoom = (zoom * gestureZoom).coerceIn(1f, 8f)
+                val step = (size.width.toFloat() / visibleCount.coerceAtLeast(1)).coerceAtLeast(1f)
+                offset = (offset - pan.x / step).coerceIn(0f, maxStart.toFloat())
+            }
+        }
+    ) {
+        if (total < 2 || end - start < 2) return@Canvas
+
+        fun window(series: List<Double?>): List<Double?> = (start until end).map { series.getOrNull(it) }
+
+        val wValues = window(values.map { it as Double? })
+        val wSpanA = window(spanA)
+        val wSpanB = window(spanB)
+        val wTenkan = window(tenkan)
+        val wKijun = window(kijun)
+
         val all = buildList {
-            addAll(values)
-            addAll(spanA.filterNotNull())
-            addAll(spanB.filterNotNull())
-            ichimoku?.tenkan?.let { addAll(it.filterNotNull()) }
-            ichimoku?.kijun?.let { addAll(it.filterNotNull()) }
+            addAll(wValues.filterNotNull())
+            addAll(wSpanA.filterNotNull())
+            addAll(wSpanB.filterNotNull())
+            addAll(wTenkan.filterNotNull())
+            addAll(wKijun.filterNotNull())
         }
         val min = all.minOrNull() ?: return@Canvas
         val max = all.maxOrNull() ?: return@Canvas
         val range = (max - min).takeIf { it > 0.0 } ?: 1.0
         val pad = size.height * 0.08f
         val usable = size.height - pad * 2f
-        val dx = size.width / (total - 1).coerceAtLeast(1).toFloat()
+        val count = end - start
+        val dx = size.width / (count - 1).coerceAtLeast(1).toFloat()
 
         fun yOf(value: Double): Float = pad + (usable - (((value - min) / range).toFloat() * usable))
         fun xOf(index: Int): Float = index * dx
 
         // ابر: بین اسپن A و B پر می‌شود؛ رنگ سبز یعنی A بالای B (ابر صعودی).
         var i = 0
-        while (i < total - 1) {
-            val a1 = spanA.getOrNull(i)
-            val b1 = spanB.getOrNull(i)
-            val a2 = spanA.getOrNull(i + 1)
-            val b2 = spanB.getOrNull(i + 1)
+        while (i < count - 1) {
+            val a1 = wSpanA.getOrNull(i)
+            val b1 = wSpanB.getOrNull(i)
+            val a2 = wSpanA.getOrNull(i + 1)
+            val b2 = wSpanB.getOrNull(i + 1)
             if (a1 != null && b1 != null && a2 != null && b2 != null) {
                 val path = Path().apply {
                     moveTo(xOf(i), yOf(a1))
@@ -914,18 +879,16 @@ internal fun PriceSparkline(
                     continue
                 }
                 val point = Offset(xOf(index), yOf(value))
-                previous?.let { start ->
-                    drawLine(color, start, point, strokeWidth = width, cap = StrokeCap.Round)
+                previous?.let { p ->
+                    drawLine(color, p, point, strokeWidth = width, cap = StrokeCap.Round)
                 }
                 previous = point
             }
         }
 
-        ichimoku?.let {
-            drawSeries(it.tenkan, tenkanColor, 2.5f)
-            drawSeries(it.kijun, kijunColor, 2.5f)
-        }
-        drawSeries(values.map { it }, priceColor, 3.5f)
+        drawSeries(wTenkan, tenkanColor, 2.5f)
+        drawSeries(wKijun, kijunColor, 2.5f)
+        drawSeries(wValues, priceColor, 3.5f)
     }
 }
 
