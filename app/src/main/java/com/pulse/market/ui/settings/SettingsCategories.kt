@@ -63,7 +63,6 @@ import com.pulse.market.data.SourceDef
 import com.pulse.market.data.SourceHealth
 import com.pulse.market.data.SymbolDef
 import com.pulse.market.data.SymbolSort
-import com.pulse.market.data.Watchlist
 import com.pulse.market.data.WidgetConfig
 import com.pulse.market.data.WidgetTheme
 import com.pulse.market.data.marketKind
@@ -929,95 +928,6 @@ fun SourceHealthCategory(
     }
 }
 
-// ═══════════════════ واچ‌لیست‌های نام‌دار ═══════════════════
-
-@Composable
-fun WatchlistsCategory(
-    cfg: WidgetConfig,
-    watchlists: List<Watchlist>,
-    onSaveCurrent: (String) -> Unit,
-    onApply: (Watchlist) -> Unit,
-    onDelete: (Watchlist) -> Unit
-) {
-    var name by remember { mutableStateOf("") }
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        SectionHeader(
-            "فهرست‌های آماده (واچ‌لیست)",
-            "ترکیب نمادهای این ویجت را برای استفاده‌ی دوباره ذخیره کن"
-        )
-        InfoCard(
-            "واچ‌لیست خرید، فروش یا هشدار انجام نمی‌دهد؛ فقط یک نسخه از نام منابع و نمادهای فعلی نگه می‌دارد. " +
-                    "مثلاً ترکیب «طلا و دلار» را یک‌بار ذخیره می‌کنی و بعد با یک دکمه روی ویجت دیگری می‌گذاری. " +
-                    "اعمال یک واچ‌لیست، نمادهای فعلی همان ویجت را جایگزین می‌کند. اگر به این میان‌بر نیاز نداری، می‌توانی این بخش را نادیده بگیری."
-        )
-        RowsCard {
-            InnerRow {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it.take(80) },
-                    label = { Text("نام فهرست؛ مثلاً طلا و دلار") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp)
-                )
-                Button(
-                    onClick = {
-                        onSaveCurrent(name.trim())
-                        name = ""
-                    },
-                    enabled = name.isNotBlank() && cfg.symbols.isNotEmpty(),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("ذخیره‌ی ترکیب فعلی", fontSize = 12.5.sp)
-                }
-                if (cfg.symbols.isEmpty()) {
-                    Text(
-                        "برای ساخت واچ‌لیست، اول دست‌کم یک نماد به این ویجت اضافه کن.",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        }
-
-        if (watchlists.isEmpty()) {
-            InfoCard("هنوز ترکیب آماده‌ای ذخیره نشده است. ابتدا نمادهای دلخواه را در بخش «نمادها» انتخاب کن.")
-        } else {
-            RowsCard {
-                for ((index, watchlist) in watchlists.withIndex()) {
-                    if (index > 0) RowDivider()
-                    InnerRow {
-                        Text(
-                            watchlist.name,
-                            fontSize = 13.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            watchlist.symbols.joinToString("، ") { it.label }
-                                .ifBlank { "بدون نماد" },
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Button(
-                                onClick = { onApply(watchlist) },
-                                enabled = watchlist.symbols.isNotEmpty(),
-                                modifier = Modifier.fillMaxWidth()
-                            ) { Text("جایگزینی نمادهای این ویجت", fontSize = 11.5.sp) }
-                            OutlinedButton(
-                                onClick = { onDelete(watchlist) },
-                                modifier = Modifier.fillMaxWidth()
-                            ) { Text("حذف این فهرست آماده", fontSize = 11.5.sp) }
-                        }
-                    }
-                }
-            }
-        }
-        Hint("اگر نام تکراری وارد کنی، همان فهرست با ترکیب فعلی به‌روزرسانی می‌شود.")
-    }
-}
-
 // ═══════════════════ ۶) هشدارها ═══════════════════
 
 @Composable
@@ -1300,7 +1210,7 @@ fun BackupCategory(
         }
 
         Hint(
-            "فایل بکاپ رمزگذاری نشده و تنظیمات، واچ‌لیست‌ها، تاریخچه‌ی هشدار و هدرهای " +
+            "فایل بکاپ رمزگذاری نشده و تنظیمات، تاریخچه‌ی هشدار و هدرهای " +
                     "منابع دلخواه را دارد. اگر توکن یا API Key داری، فایل را فقط در جای امن نگه دار."
         )
     }

@@ -30,7 +30,6 @@ import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
-import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.HealthAndSafety
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Phone
@@ -86,7 +85,6 @@ import com.pulse.market.data.SourceDef
 import com.pulse.market.data.SourceHealth
 import com.pulse.market.data.SourceHealthStore
 import com.pulse.market.data.SymbolDef
-import com.pulse.market.data.Watchlist
 import com.pulse.market.data.WidgetConfig
 import com.pulse.market.data.WidgetTheme
 import com.pulse.market.data.marketKindOf
@@ -111,7 +109,6 @@ enum class SettingsSection(val title: String) {
     SOURCES("منابع داده"),
     HEALTH("سلامت منابع"),
     SYMBOLS("نمادها"),
-    WATCHLISTS("فهرست‌های آماده (واچ‌لیست)"),
     VALUES("مقادیر نمایشی"),
     LOOK("ظاهر و فونت"),
     UPDATE("به‌روزرسانی"),
@@ -143,7 +140,6 @@ fun SettingsScreen(
     var cfgLoaded by remember { mutableStateOf(false) }
     var customSources by remember { mutableStateOf<List<SourceDef>>(emptyList()) }
     var tseCustomSymbols by remember { mutableStateOf<List<SymbolDef>>(emptyList()) }
-    var watchlists by remember { mutableStateOf<List<Watchlist>>(emptyList()) }
     var sourceHealth by remember { mutableStateOf<List<SourceHealth>>(emptyList()) }
     var alertHistory by remember { mutableStateOf<List<AlertEvent>>(emptyList()) }
     var busy by remember { mutableStateOf(false) }
@@ -193,7 +189,6 @@ fun SettingsScreen(
             cfg = ConfigStore.current(context, widgetId)
             customSources = ConfigStore.currentCustomSources(context)
             tseCustomSymbols = ConfigStore.currentTseSymbols(context)
-            watchlists = ConfigStore.currentWatchlists(context)
             sourceHealth = SourceHealthStore.load(context)
             alertHistory = AlertHistoryStore.load(context)
         } catch (cancelled: CancellationException) {
@@ -289,7 +284,6 @@ fun SettingsScreen(
                             cfg = ConfigStore.current(context, widgetId)
                             customSources = ConfigStore.currentCustomSources(context)
                             tseCustomSymbols = ConfigStore.currentTseSymbols(context)
-                            watchlists = ConfigStore.currentWatchlists(context)
                             alertHistory = AlertHistoryStore.load(context)
                             StockWidgetProvider.requestUpdate(context)
                             // سرویس زنده/Worker هم مطابق تنظیمات بازیابی‌شده همگام شود.
@@ -376,7 +370,6 @@ fun SettingsScreen(
                     null -> LandingMenu(
                         cfg = cfg,
                         selectedSources = selectedSources,
-                        watchlistCount = watchlists.size,
                         healthySourceCount = sourceHealth.count { it.sourceId in selectedIds && it.isHealthy },
                         onOpen = { section = it }
                     )
@@ -479,51 +472,6 @@ fun SettingsScreen(
                         onClear = {
                             SourceHealthStore.clear(context)
                             sourceHealth = emptyList()
-                        }
-                    )
-
-                    SettingsSection.WATCHLISTS -> WatchlistsCategory(
-                        cfg = cfg,
-                        watchlists = watchlists,
-                        onSaveCurrent = { name ->
-                            scope.launch {
-                                val existing = watchlists.firstOrNull {
-                                    it.name.equals(name, ignoreCase = true)
-                                }
-                                val item = Watchlist(
-                                    id = existing?.id ?: "watchlist_${System.currentTimeMillis()}",
-                                    name = name,
-                                    sourceIds = cfg.activeSourceIds,
-                                    symbols = cfg.symbols,
-                                    updatedAt = System.currentTimeMillis()
-                                )
-                                val updated = watchlists.filterNot { it.id == item.id } + item
-                                ConfigStore.saveWatchlists(context, updated)
-                                watchlists = ConfigStore.currentWatchlists(context)
-                            }
-                        },
-                        onApply = { watchlist ->
-                            val availableIds = watchlist.sourceIds.filter { id ->
-                                allSources.any { it.id == id }
-                            }
-                            val ids = availableIds.ifEmpty { cfg.activeSourceIds }.take(MAX_SYMBOLS)
-                            val symbols = watchlist.symbols.filter { symbol ->
-                                symbol.sourceId.isBlank() || symbol.sourceId in ids
-                            }.take(MAX_SYMBOLS)
-                            persist(
-                                cfg.copy(
-                                    sourceIds = ids,
-                                    sourceId = ids.first(),
-                                    symbols = symbols
-                                )
-                            )
-                        },
-                        onDelete = { watchlist ->
-                            scope.launch {
-                                val updated = watchlists.filterNot { it.id == watchlist.id }
-                                ConfigStore.saveWatchlists(context, updated)
-                                watchlists = updated
-                            }
                         }
                     )
 
@@ -928,7 +876,6 @@ fun SettingsScreen(
 private fun LandingMenu(
     cfg: WidgetConfig,
     selectedSources: List<SourceDef>,
-    watchlistCount: Int,
     healthySourceCount: Int,
     onOpen: (SettingsSection) -> Unit
 ) {
@@ -976,14 +923,6 @@ private fun LandingMenu(
                 title = SettingsSection.SYMBOLS.title,
                 summary = symbolsSummary
             ) { onOpen(SettingsSection.SYMBOLS) }
-            RowDivider()
-            NavMenuRow(
-                icon = Icons.Default.FavoriteBorder,
-                tint = Color(0xFFEC4899),
-                title = SettingsSection.WATCHLISTS.title,
-                summary = if (watchlistCount == 0) "ذخیره‌ی ترکیب نمادها برای استفاده‌ی دوباره" else
-                    "${Format.toPersianDigits(watchlistCount.toString())} ترکیب آماده‌ی نماد"
-            ) { onOpen(SettingsSection.WATCHLISTS) }
             RowDivider()
             NavMenuRow(
                 icon = Icons.Default.Tune,

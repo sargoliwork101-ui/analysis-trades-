@@ -383,26 +383,9 @@ object ConfigStore {
         .take(500)
         .toList()
 
-    // ───────────── واچ‌لیست‌های نام‌دار (سراسری) ─────────────
-
-    fun watchlistsFlow(context: Context): Flow<List<Watchlist>> =
-        context.dataStore.data.map { prefs ->
-            val decoded = prefs[KEY_WATCHLISTS]?.let { raw ->
-                runCatching {
-                    json.decodeFromString(ListSerializer(Watchlist.serializer()), raw)
-                }.getOrNull()
-            } ?: emptyList()
-            sanitizeWatchlists(decoded)
-        }
-
-    suspend fun currentWatchlists(context: Context): List<Watchlist> = watchlistsFlow(context).first()
-
-    suspend fun saveWatchlists(context: Context, list: List<Watchlist>) {
-        val safe = sanitizeWatchlists(list)
-        context.dataStore.edit {
-            it[KEY_WATCHLISTS] = json.encodeToString(ListSerializer(Watchlist.serializer()), safe)
-        }
-    }
+    // ───────────── واچ‌لیست‌های نام‌دار ─────────────
+    // بخش تنظیماتِ واچ‌لیست از رابط کاربری حذف شده است؛ این توابع فقط برای سازگاری
+    // با فایل‌های بکاپِ قدیمی نگه داشته می‌شوند تا داده‌ی ذخیره‌شده از بین نرود.
 
     private fun sanitizeWatchlists(list: List<Watchlist>): List<Watchlist> =
         list.asSequence()
