@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -55,10 +56,10 @@ private const val USD = "$"
 @Composable
 fun TradeSummaryCard(
     summary: PaperTradeStore.Summary,
-    feesUsd: Double,
-    persian: Boolean
+    persian: Boolean,
+    onEditCapital: (() -> Unit)? = null
 ) {
-    val total = summary.realizedUsd + summary.openUsd
+    val total = summary.totalPnlUsd
     val accent = if (total >= 0.0) ProfitGreen else LossRed
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -70,23 +71,52 @@ fun TradeSummaryCard(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    "نتیجه‌ی کل کیف",
-                    fontSize = 11.5.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    signedUsd(total, persian),
-                    fontSize = 23.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = accent
-                )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Top
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        "ارزش کل کیف",
+                        fontSize = 11.5.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        "${Format.price(summary.equityUsd, persian)} $USD",
+                        fontSize = 23.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        "سرمایه ${Format.price(summary.capitalUsd, persian)} $USD  •  سود/زیان ${signedUsd(total, persian)}",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = accent
+                    )
+                }
+                if (onEditCapital != null) {
+                    OutlinedButton(
+                        onClick = onEditCapital,
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                            horizontal = 10.dp, vertical = 4.dp
+                        )
+                    ) {
+                        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("سرمایه", fontSize = 11.sp)
+                    }
+                }
             }
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                StatChip("سرمایه", "${Format.price(summary.capitalUsd, persian)} $USD",
+                    MaterialTheme.colorScheme.onSurface)
+                StatChip("سود/زیان کل", signedUsd(total, persian), accent)
                 StatChip("محقق‌شده", signedUsd(summary.realizedUsd, persian),
                     if (summary.realizedUsd >= 0.0) ProfitGreen else LossRed)
                 StatChip("سود باز", signedUsd(summary.openUsd, persian),
@@ -108,7 +138,7 @@ fun TradeSummaryCard(
                 )
                 StatChip(
                     "کارمزد کل",
-                    "${Format.price(feesUsd, persian)} $USD",
+                    "${Format.price(summary.feesUsd, persian)} $USD",
                     MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
@@ -137,6 +167,7 @@ private fun StatChip(label: String, value: String, valueColor: Color) {
  * مهم‌تر از همه «کِی خریدی / کِی فروختی». چیدمان دو‌ستونه تا شلوغ نشود.
  *
  * @param onSell اگر null باشد دکمه‌ی فروش نمایش داده نمی‌شود (معامله‌ی بسته).
+ * @param onEdit اگر null باشد دکمه‌ی ویرایش نمایش داده نمی‌شود.
  * @param onDelete اگر null باشد دکمه‌ی حذف نمایش داده نمی‌شود.
  */
 @Composable
@@ -145,6 +176,7 @@ fun WalletTradeCard(
     price: Double?,
     persian: Boolean,
     onSell: (() -> Unit)? = null,
+    onEdit: (() -> Unit)? = null,
     onDelete: (() -> Unit)? = null,
     onClick: (() -> Unit)? = null
 ) {
@@ -296,7 +328,7 @@ fun WalletTradeCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
-                if (onSell != null || onDelete != null) {
+                if (onSell != null || onEdit != null || onDelete != null) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -304,6 +336,13 @@ fun WalletTradeCard(
                         if (onSell != null) {
                             Button(onClick = onSell, modifier = Modifier.weight(1f)) {
                                 Text("فروش با قیمت فعلی", fontSize = 11.sp)
+                            }
+                        }
+                        if (onEdit != null) {
+                            OutlinedButton(onClick = onEdit, modifier = Modifier.weight(1f)) {
+                                Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(15.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("ویرایش", fontSize = 11.sp)
                             }
                         }
                         if (onDelete != null) {

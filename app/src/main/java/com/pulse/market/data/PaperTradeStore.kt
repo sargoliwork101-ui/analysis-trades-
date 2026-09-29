@@ -25,6 +25,7 @@ object PaperTradeStore {
     private const val KEY_TRADES = "trades"
     private const val KEY_PRICES = "cached_prices"
     private const val KEY_PRICES_AT = "cached_prices_at"
+    private const val KEY_ACCOUNT = "account"
     private const val MAX_TRADES = 200
     private val priceMapSerializer = MapSerializer(String.serializer(), Double.serializer())
 
@@ -260,20 +261,110 @@ object PaperTradeStore {
 
     /** خلاصه‌ی عملکرد کیف آزمایشی */
     data class Summary(
+        /** سرمایه‌ی کل کیف که کاربر تعیین/شارژ کرده (دلار) */
+        val capitalUsd: Double,
         val openCount: Int,
         val closedCount: Int,
         val wins: Int,
         val losses: Int,
+        /** سود/زیانِ محقق‌شده: معامله‌های بسته‌ی فعلی + مجموعِ ماندگارِ حمل‌شده از تاریخچه‌ی پاک‌شده */
         val realizedUsd: Double,
         val openUsd: Double,
-        val investedOpenUsd: Double
+        val investedOpenUsd: Double,
+        /** کل کارمزدِ پرداخت‌شده (شاملِ حمل‌شده) */
+        val feesUsd: Double
     ) {
         val winRatePct: Double
             get() = if (closedCount == 0) 0.0 else wins * 100.0 / closedCount
+
+        /** سود/زیانِ کل = محقق‌شده + باز */
+        val totalPnlUsd: Double get() = realizedUsd + openUsd
+
+        /** ارزشِ کلِ کیف = سرمایه + سود/زیانِ محقق‌شده + سود/زیانِ باز */
+        val equityUsd: Double get() = capitalUsd + realizedUsd + openUsd
     }
+
+    /**
+     * حسابِ کیف پول: سرمایه‌ی تعیین‌شده + آمارِ «ماندگار» (سود/زیان و برد/باختِ معامله‌هایی که
+     * از تاریخچه حذف شده‌اند). این‌طور «پاک کردن تاریخچه» موجودی/سود/زیانِ کل را صفر نمی‌کند.
+     */
+    @Serializable
+    data class Account(
+        val capitalUsd: Double = 0.0,
+        val carriedRealizedUsd: Double = 0.0,
+        val carriedFeesUsd: Double = 0.0,
+        val carriedWins: Int = 0,
+        val carriedLosses: Int = 0,
+        val carriedClosed: Int = 0
+    )
 
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+
+    /** حسابِ کیف (سرمایه + آمارِ ماندگار). خالی اگر چیزی ذخیره نشده. */
+    @Synchronized
+    fun account(context: Context): Account {
+        val raw = prefs(context).getString(KEY_ACCOUNT, null) ?: return Account()
+        return runCatching { json.decodeFromString(Account.serializer(), raw) }.getOrDefault(Account())
+    }
+
+    @Synchronized
+    fun saveAccount(context: Context, account: Account) {
+        prefs(context).edit()
+            .putString(KEY_ACCOUNT, json.encodeToString(Account.serializer(), account))
+            .apply()
+    }
+
+    /** تعیینِ سرمایه‌ی کل کیف (دلار). */
+    @Synchronized
+    fun setCapital(context: Context, capitalUsd: Double) {
+        val safe = capitalUsd.takeIf { it.isFinite() && it >= 0.0 }?.coerceAtMost(1_000_000_000.0) ?: return
+        saveAccount(context, account(context).copy(capitalUsd = safe))
+    }
+
+    /** افزودن (یا کسر، با عددِ منفی) پول به سرمایه‌ی کیف. */
+    @Synchronized
+    fun addCapital(context: Context, deltaUsd: Double) {
+        if (!deltaUsd.isFinite()) return
+        val acc = account(context)
+        val next = (acc.capitalUsd + deltaUsd).coerceIn(0.0, 1_000_000_000.0)
+        saveAccount(context, acc.copy(capitalUsd = next))
+    }
+
+    /** صفر کردنِ آمارِ ماندگارِ سود/زیان (سرمایه دست نمی‌خورد). */
+    @Synchronized
+    fun resetCarried(context: Context) {
+        saveAccount(
+            context,
+            account(context).copy(
+                carriedRealizedUsd = 0.0, carriedFeesUsd = 0.0,
+                carriedWins = 0, carriedLosses = 0, carriedClosed = 0
+            )
+        )
+    }
+
+    /** انباشتنِ سود/زیانِ یک معامله‌ی بسته در آمارِ ماندگار (پیش از حذفش از فهرست). */
+    private fun carry(context: Context, closedTrades: List<Trade>) {
+        if (closedTrades.isEmpty()) return
+        var wins = 0; var losses = 0; var realized = 0.0; var fees = 0.0
+        for (t in closedTrades) {
+            val pnl = t.profitUsd(null) ?: 0.0
+            realized += pnl
+            if (pnl > 0.0) wins++ else if (pnl < 0.0) losses++
+            fees += t.totalFeeUsd(null) ?: t.buyFeeUsd
+        }
+        val acc = account(context)
+        saveAccount(
+            context,
+            acc.copy(
+                carriedRealizedUsd = acc.carriedRealizedUsd + realized,
+                carriedFeesUsd = acc.carriedFeesUsd + fees,
+                carriedWins = acc.carriedWins + wins,
+                carriedLosses = acc.carriedLosses + losses,
+                carriedClosed = acc.carriedClosed + closedTrades.size
+            )
+        )
+    }
 
     @Synchronized
     fun all(context: Context): List<Trade> {
@@ -475,12 +566,65 @@ object PaperTradeStore {
 
     @Synchronized
     fun remove(context: Context, tradeId: String) {
-        write(context, all(context).filterNot { it.id == tradeId })
+        val trades = all(context)
+        val target = trades.firstOrNull { it.id == tradeId }
+        // حذفِ یک معامله‌ی بسته، سود/زیانش را از دست نمی‌دهد؛ در آمارِ ماندگار می‌ماند.
+        if (target != null && !target.isOpen) carry(context, listOf(target))
+        write(context, trades.filterNot { it.id == tradeId })
     }
 
     @Synchronized
     fun clearClosed(context: Context) {
-        write(context, all(context).filter { it.isOpen })
+        val trades = all(context)
+        // پیش از پاک‌کردنِ تاریخچه، سود/زیانِ محقق‌شده در آمارِ ماندگار انباشته می‌شود تا
+        // «نتیجه‌ی کل کیف» صفر نشود (کاربر باید بداند در مجموع سود کرده یا ضرر).
+        carry(context, trades.filterNot { it.isOpen })
+        write(context, trades.filter { it.isOpen })
+    }
+
+    /**
+     * ویرایشِ یک معامله. فقط مقادیرِ داده‌شده (غیرِ null) اعمال می‌شوند.
+     * قیمت/دلیلِ بسته‌شدن فقط روی معامله‌ی بسته اثر دارد. برای حذفِ حد سود/ضرر از
+     * [clearTakeProfit]/[clearStopLoss] استفاده کن.
+     */
+    @Synchronized
+    fun edit(
+        context: Context,
+        tradeId: String,
+        amountUsd: Double? = null,
+        entryPrice: Double? = null,
+        takeProfitPct: Double? = null,
+        stopLossPct: Double? = null,
+        feePct: Double? = null,
+        note: String? = null,
+        clearTakeProfit: Boolean = false,
+        clearStopLoss: Boolean = false,
+        closePrice: Double? = null,
+        closeReason: CloseReason? = null
+    ): Trade? {
+        val trades = all(context)
+        val target = trades.firstOrNull { it.id == tradeId } ?: return null
+        var t = target
+        amountUsd?.takeIf { it.isFinite() && it > 0.0 }?.let { t = t.copy(amountUsd = it.coerceIn(1.0, 1_000_000.0)) }
+        entryPrice?.takeIf { it.isFinite() && it > 0.0 }?.let { t = t.copy(entryPrice = it) }
+        feePct?.takeIf { it.isFinite() && it >= 0.0 }?.let { t = t.copy(feePct = it.coerceAtMost(5.0)) }
+        note?.let { t = t.copy(note = it.take(500)) }
+        when {
+            clearTakeProfit -> t = t.copy(takeProfitPct = null)
+            else -> takeProfitPct?.takeIf { it.isFinite() && it > 0.0 }
+                ?.let { t = t.copy(takeProfitPct = it.coerceIn(0.1, 1000.0)) }
+        }
+        when {
+            clearStopLoss -> t = t.copy(stopLossPct = null)
+            else -> stopLossPct?.takeIf { it.isFinite() && it > 0.0 }
+                ?.let { t = t.copy(stopLossPct = it.coerceIn(0.1, 99.0)) }
+        }
+        if (!target.isOpen) {
+            closePrice?.takeIf { it.isFinite() && it > 0.0 }?.let { t = t.copy(closePrice = it) }
+            closeReason?.let { t = t.copy(closeReasonName = it.name) }
+        }
+        write(context, trades.map { if (it.id == tradeId) t else it })
+        return t
     }
 
     /**
@@ -582,35 +726,47 @@ object PaperTradeStore {
         CloseReason.MANUAL -> price
     }
 
-    /** خلاصه‌ی کیف: سود محقق‌شده، سود باز و نرخ برد. */
-    fun summarize(trades: List<Trade>, pricesByCoinId: Map<String, Double>): Summary {
-        var wins = 0
-        var losses = 0
-        var realized = 0.0
+    /**
+     * خلاصه‌ی کیف: سرمایه، سود محقق‌شده، سود باز و نرخ برد.
+     * آمارِ [account] (سرمایه + سود/زیانِ ماندگارِ تاریخچه‌ی پاک‌شده) به مقادیرِ فعلی افزوده می‌شود.
+     */
+    fun summarize(
+        trades: List<Trade>,
+        pricesByCoinId: Map<String, Double>,
+        account: Account = Account()
+    ): Summary {
+        var wins = account.carriedWins
+        var losses = account.carriedLosses
+        var realized = account.carriedRealizedUsd
+        var fees = account.carriedFeesUsd
         var openPnl = 0.0
         var investedOpen = 0.0
         var openCount = 0
-        var closedCount = 0
+        var closedCount = account.carriedClosed
         for (trade in trades) {
             if (trade.isOpen) {
                 openCount++
                 investedOpen += trade.amountUsd
                 openPnl += trade.profitUsd(pricesByCoinId[trade.coinId]) ?: 0.0
+                fees += trade.totalFeeUsd(pricesByCoinId[trade.coinId]) ?: trade.buyFeeUsd
             } else {
                 closedCount++
                 val pnl = trade.profitUsd(null) ?: 0.0
                 realized += pnl
                 if (pnl > 0.0) wins++ else if (pnl < 0.0) losses++
+                fees += trade.totalFeeUsd(null) ?: trade.buyFeeUsd
             }
         }
         return Summary(
+            capitalUsd = account.capitalUsd,
             openCount = openCount,
             closedCount = closedCount,
             wins = wins,
             losses = losses,
             realizedUsd = realized,
             openUsd = openPnl,
-            investedOpenUsd = investedOpen
+            investedOpenUsd = investedOpen,
+            feesUsd = fees
         )
     }
 

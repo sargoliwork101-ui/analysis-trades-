@@ -52,6 +52,7 @@ fun PortfolioCategory(persian: Boolean) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var trades by remember { mutableStateOf<List<PaperTradeStore.Trade>>(emptyList()) }
+    var account by remember { mutableStateOf(PaperTradeStore.account(context)) }
     // با آخرین قیمت‌های کش‌شده شروع می‌شود تا آفلاین هم چیزی برای نمایش باشد.
     var prices by remember { mutableStateOf(PaperTradeStore.cachedPrices(context)) }
     var priceAt by remember { mutableStateOf(PaperTradeStore.pricesUpdatedAt(context)) }
@@ -99,6 +100,7 @@ fun PortfolioCategory(persian: Boolean) {
                 }
             }
             trades = withContext(Dispatchers.IO) { PaperTradeStore.all(context) }
+            account = withContext(Dispatchers.IO) { PaperTradeStore.account(context) }
         } finally {
             busy = false
         }
@@ -155,7 +157,11 @@ fun PortfolioCategory(persian: Boolean) {
 
     val open = trades.filter { it.isOpen }
     val closed = trades.filterNot { it.isOpen }
-    val summary = PaperTradeStore.summarize(trades, prices)
+    val summary = PaperTradeStore.summarize(trades, prices, account)
+
+    // پنجره‌های ویرایش
+    var showCapital by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<PaperTradeStore.Trade?>(null) }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         SectionHeader(
@@ -165,8 +171,8 @@ fun PortfolioCategory(persian: Boolean) {
 
         TradeSummaryCard(
             summary = summary,
-            feesUsd = PaperTradeStore.totalFees(trades, prices),
-            persian = persian
+            persian = persian,
+            onEditCapital = { showCapital = true }
         )
 
         if (offline && prices.isNotEmpty()) {
@@ -221,6 +227,7 @@ fun PortfolioCategory(persian: Boolean) {
                             refresh(showNotice = false)
                         }
                     },
+                    onEdit = { editing = trade },
                     onDelete = {
                         scope.launch {
                             withContext(Dispatchers.IO) { PaperTradeStore.remove(context, trade.id) }
@@ -240,6 +247,7 @@ fun PortfolioCategory(persian: Boolean) {
                     persian = persian,
                     onClick = { selectedCoinId = trade.coinId },
                     onSell = null,
+                    onEdit = { editing = trade },
                     onDelete = {
                         scope.launch {
                             withContext(Dispatchers.IO) { PaperTradeStore.remove(context, trade.id) }
@@ -263,6 +271,65 @@ fun PortfolioCategory(persian: Boolean) {
         Hint(
             "این بخش شبیه‌ساز است: هیچ سفارشی به هیچ صرافی فرستاده نمی‌شود و هیچ پولی جابه‌جا نمی‌شود. " +
                     "کارمزد هر دو سمت در محاسبه‌ی سود لحاظ شده است."
+        )
+    }
+
+    // ── پنجره‌ی سرمایه‌ی کیف ──
+    if (showCapital) {
+        CapitalEditDialog(
+            currentCapital = account.capitalUsd,
+            persian = persian,
+            onSetCapital = { value ->
+                scope.launch {
+                    withContext(Dispatchers.IO) { PaperTradeStore.setCapital(context, value) }
+                    refresh(showNotice = false)
+                }
+            },
+            onAddCapital = { delta ->
+                scope.launch {
+                    withContext(Dispatchers.IO) { PaperTradeStore.addCapital(context, delta) }
+                    refresh(showNotice = false)
+                }
+            },
+            onResetCarried = {
+                scope.launch {
+                    withContext(Dispatchers.IO) { PaperTradeStore.resetCarried(context) }
+                    notice = null
+                    refresh(showNotice = false)
+                }
+            },
+            onDismiss = { showCapital = false }
+        )
+    }
+
+    // ── پنجره‌ی ویرایش معامله ──
+    editing?.let { target ->
+        EditTradeDialog(
+            trade = target,
+            persian = persian,
+            onSave = { edit ->
+                scope.launch {
+                    withContext(Dispatchers.IO) {
+                        PaperTradeStore.edit(
+                            context = context,
+                            tradeId = target.id,
+                            amountUsd = edit.amountUsd,
+                            entryPrice = edit.entryPrice,
+                            takeProfitPct = edit.takeProfitPct,
+                            stopLossPct = edit.stopLossPct,
+                            feePct = edit.feePct,
+                            note = edit.note,
+                            clearTakeProfit = edit.clearTakeProfit,
+                            clearStopLoss = edit.clearStopLoss,
+                            closePrice = edit.closePrice,
+                            closeReason = edit.closeReason
+                        )
+                    }
+                    notice = "معامله ویرایش شد."
+                    refresh(showNotice = false)
+                }
+            },
+            onDismiss = { editing = null }
         )
     }
 

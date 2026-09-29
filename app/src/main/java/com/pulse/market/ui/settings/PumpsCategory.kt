@@ -929,7 +929,9 @@ private fun PaperWalletCard(
         )
         return
     }
-    val summary = PaperTradeStore.summarize(trades, prices)
+    val context = LocalContext.current
+    val account = remember(trades) { PaperTradeStore.account(context) }
+    val summary = PaperTradeStore.summarize(trades, prices, account)
     val open = trades.filter { it.isOpen }
     val closed = trades.filterNot { it.isOpen }.take(10)
 
@@ -940,7 +942,7 @@ private fun PaperWalletCard(
 
     if (!notice.isNullOrBlank()) InfoCard(notice)
 
-    TradeSummaryCard(summary, PaperTradeStore.totalFees(trades, prices), persian)
+    TradeSummaryCard(summary, persian)
 
     if (open.isNotEmpty()) {
         SectionHeader("معامله‌های باز")

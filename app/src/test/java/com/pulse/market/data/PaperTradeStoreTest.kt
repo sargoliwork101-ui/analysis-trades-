@@ -88,6 +88,36 @@ class PaperTradeStoreTest {
     }
 
     @Test
+    fun summaryAddsCapitalAndCarriedStats() {
+        val openTrade = trade()
+        val winner = trade().copy(id = "t2", closedAt = 2_000L, closePrice = 110.0)
+        val account = PaperTradeStore.Account(
+            capitalUsd = 1_000.0,
+            carriedRealizedUsd = 50.0,
+            carriedWins = 2,
+            carriedLosses = 1,
+            carriedClosed = 3
+        )
+        val summary = PaperTradeStore.summarize(
+            listOf(openTrade, winner),
+            mapOf("sol" to 120.0),
+            account
+        )
+        assertEquals(1_000.0, summary.capitalUsd, 0.0001)
+        // محقق‌شده = ۵۰ حمل‌شده + ۲۰ برنده‌ی فعلی
+        assertEquals(70.0, summary.realizedUsd, 0.0001)
+        assertEquals(40.0, summary.openUsd, 0.0001)
+        assertEquals(110.0, summary.totalPnlUsd, 0.0001)
+        // ارزش کل = سرمایه + محقق‌شده + باز
+        assertEquals(1_110.0, summary.equityUsd, 0.0001)
+        // برد/باخت و شمارشِ بسته‌ها شاملِ حمل‌شده‌ها
+        assertEquals(3, summary.wins)         // ۲ حمل‌شده + ۱ برنده‌ی فعلی
+        assertEquals(1, summary.losses)
+        assertEquals(4, summary.closedCount)  // ۳ حمل‌شده + ۱ بسته‌ی فعلی
+        assertEquals(1, summary.openCount)
+    }
+
+    @Test
     fun resultTextShowsSignedPercentAndAmount() {
         val text = PaperTradeStore.resultText(trade(), 120.0, persianDigits = false)
         assertTrue(text.startsWith("+"))
