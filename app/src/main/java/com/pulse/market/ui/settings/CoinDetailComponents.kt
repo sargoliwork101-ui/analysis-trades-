@@ -7,24 +7,32 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.ScreenRotation
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
@@ -34,10 +42,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.shape.RoundedCornerShape
 import com.pulse.market.data.AiReviewStore
 import com.pulse.market.data.Ichimoku
@@ -80,6 +91,7 @@ fun CoinChartCard(
     // اگر جفتِ USDT وجود نداشته باشد، خودکار به «نمودار داخلی» برمی‌گردیم و پیام می‌دهیم.
     var tvSymbol by remember(coinId) { mutableStateOf<String?>(null) }
     var tvUnavailable by remember(coinId) { mutableStateOf(false) }
+    var fullscreen by remember(coinId) { mutableStateOf(false) }
     LaunchedEffect(coinId, symbol, advanced) {
         if (!advanced || !hasSymbol || tvSymbol != null) return@LaunchedEffect
         when (val r = TradingViewSymbols.resolve(symbol)) {
@@ -165,12 +177,28 @@ fun CoinChartCard(
                             .height(480.dp)
                     )
                     Spacer(Modifier.height(6.dp))
-                    Text(
-                        "نمودار حرفه‌ای تریدینگ‌ویو داخل برنامه: با دو انگشت زوم کن، با کشیدن جابه‌جا کن، از نوار بالا " +
-                                "تایم‌فریم و اندیکاتور را عوض کن و از ذره‌بین، نماد را تغییر بده.",
-                        fontSize = 10.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "با دو انگشت زوم کن، با کشیدن جابه‌جا کن، از نوار بالا تایم‌فریم و اندیکاتور را عوض کن. " +
+                                    "برای بررسی بزرگ‌تر، «تمام‌صفحه» را بزن (چرخش افقی هم دارد).",
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = { fullscreen = true }) {
+                            Icon(Icons.Default.Fullscreen, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("تمام‌صفحه", fontSize = 11.sp)
+                        }
+                    }
+                    if (fullscreen) {
+                        FullscreenChartDialog(
+                            tvSymbol = ready,
+                            dark = dark,
+                            persian = persian,
+                            onDismiss = { fullscreen = false }
+                        )
+                    }
                 }
             } else {
                 if (tvUnavailable) {
@@ -322,6 +350,77 @@ fun TradingViewChart(
             }
         )
     }
+}
+
+/**
+ * نمایشِ نمودار حرفه‌ای در «تمام‌صفحه» — برای بررسی دقیق‌تر. یک دیالوگِ تمام‌صفحه که خودِ
+ * صفحه‌ی دستگاه را می‌گیرد و دکمه‌ی «چرخش» دارد تا نمودار را افقی (لنداسکیپ) هم ببینی.
+ *
+ * چرخش با ست‌کردنِ requestedOrientation انجام می‌شود؛ چون MainActivity در منیفست
+ * configChanges دارد، دستگاه بدون بازسازیِ اکتیویتی می‌چرخد و دیالوگ باز می‌ماند.
+ */
+@Composable
+fun FullscreenChartDialog(
+    tvSymbol: String,
+    dark: Boolean,
+    persian: Boolean,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val activity = remember(context) { context.findActivity() }
+    // ورود به تمام‌صفحه به‌صورت افقی (خواسته‌ی اصلی: دیدِ عریض‌تر)؛ با دکمه به عمودی هم می‌رود.
+    var landscape by remember { mutableStateOf(true) }
+
+    LaunchedEffect(landscape, activity) {
+        activity?.requestedOrientation = if (landscape) {
+            android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        } else {
+            android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
+    }
+    // با بسته‌شدن دیالوگ، جهتِ صفحه به حالتِ عادیِ برنامه برمی‌گردد.
+    DisposableEffect(activity) {
+        onDispose {
+            activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                TradingViewChart(
+                    tvSymbol = tvSymbol,
+                    dark = dark,
+                    persian = persian,
+                    modifier = Modifier.fillMaxSize()
+                )
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .statusBarsPadding()
+                        .padding(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilledTonalIconButton(onClick = { landscape = !landscape }) {
+                        Icon(Icons.Default.ScreenRotation, contentDescription = "چرخش افقی/عمودی")
+                    }
+                    FilledTonalIconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "بستن تمام‌صفحه")
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** یافتنِ Activityِ میزبان از روی Context (برای کنترلِ جهتِ صفحه). */
+internal tailrec fun android.content.Context.findActivity(): android.app.Activity? = when (this) {
+    is android.app.Activity -> this
+    is android.content.ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 
 /** نمادِ تریدینگ‌ویو از روی نماد کوین (جفت USDT رایج‌ترین بازار است). */
