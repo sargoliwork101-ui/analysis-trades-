@@ -168,36 +168,51 @@ fun CoinChartCard(
                         )
                     }
                 } else {
-                    TradingViewChart(
-                        tvSymbol = ready,
-                        dark = dark,
-                        persian = persian,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(480.dp)
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            "با دو انگشت زوم کن، با کشیدن جابه‌جا کن، از نوار بالا تایم‌فریم و اندیکاتور را عوض کن. " +
-                                    "برای بررسی بزرگ‌تر، «تمام‌صفحه» را بزن (چرخش افقی هم دارد).",
-                            fontSize = 10.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.weight(1f)
-                        )
-                        TextButton(onClick = { fullscreen = true }) {
-                            Icon(Icons.Default.Fullscreen, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("تمام‌صفحه", fontSize = 11.sp)
-                        }
-                    }
+                    // در حالت تمام‌صفحه، نمودارِ داخلِ کارت موقتاً بارگذاری نمی‌شود تا دو WebViewِ
+                    // تریدینگ‌ویو هم‌زمان اجرا نشوند (حافظه/باتری). با بستنِ تمام‌صفحه دوباره می‌آید.
                     if (fullscreen) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(480.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                "نمودار در حالت تمام‌صفحه باز است…",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                         FullscreenChartDialog(
                             tvSymbol = ready,
                             dark = dark,
                             persian = persian,
                             onDismiss = { fullscreen = false }
                         )
+                    } else {
+                        TradingViewChart(
+                            tvSymbol = ready,
+                            dark = dark,
+                            persian = persian,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(480.dp)
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "با دو انگشت زوم کن، با کشیدن جابه‌جا کن، از نوار بالا تایم‌فریم و اندیکاتور را عوض کن. " +
+                                        "برای بررسی بزرگ‌تر، «تمام‌صفحه» را بزن (چرخش افقی هم دارد).",
+                                fontSize = 10.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.weight(1f)
+                            )
+                            TextButton(onClick = { fullscreen = true }) {
+                                Icon(Icons.Default.Fullscreen, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("تمام‌صفحه", fontSize = 11.sp)
+                            }
+                        }
                     }
                 }
             } else {
@@ -368,6 +383,11 @@ fun FullscreenChartDialog(
 ) {
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
+    // جهتِ فعلیِ اکتیویتی پیش از تمام‌صفحه؛ هنگام بستن دقیقاً همین برگردانده می‌شود
+    // (به‌جای فرضِ ثابتِ UNSPECIFIED) تا رفتارِ برنامه بعد از خروج عوض نشود.
+    val originalOrientation = remember(activity) {
+        activity?.requestedOrientation ?: android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+    }
     // ورود به تمام‌صفحه به‌صورت افقی (خواسته‌ی اصلی: دیدِ عریض‌تر)؛ با دکمه به عمودی هم می‌رود.
     var landscape by remember { mutableStateOf(true) }
 
@@ -378,11 +398,9 @@ fun FullscreenChartDialog(
             android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         }
     }
-    // با بسته‌شدن دیالوگ، جهتِ صفحه به حالتِ عادیِ برنامه برمی‌گردد.
+    // با بسته‌شدن دیالوگ، جهتِ صفحه به همان حالتِ قبل از تمام‌صفحه برمی‌گردد.
     DisposableEffect(activity) {
-        onDispose {
-            activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-        }
+        onDispose { activity?.requestedOrientation = originalOrientation }
     }
 
     Dialog(
