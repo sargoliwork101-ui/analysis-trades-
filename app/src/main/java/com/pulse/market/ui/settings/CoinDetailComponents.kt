@@ -25,15 +25,18 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.shape.RoundedCornerShape
 import com.pulse.market.data.AiReviewStore
 import com.pulse.market.data.Ichimoku
@@ -57,10 +60,18 @@ fun CoinChartCard(
     coinId: String,
     price: Double?,
     persian: Boolean,
+    symbol: String = "",
     sparkFallback: List<Double> = emptyList(),
     rising: Boolean = true,
     modifier: Modifier = Modifier
 ) {
+    // «نمودار پیشرفته» = همان نمودار حرفه‌ای سایت‌ها (تریدینگ‌ویو) داخل خودِ برنامه، با همه‌ی
+    // امکاناتش: زوم، جابه‌جایی، ده‌ها اندیکاتور، ابزار ترسیم، عوض‌کردن تایم‌فریم و نماد.
+    // «نمودار داخلی» = نمودار شمعیِ خودِ برنامه که آفلاین و برای کوین‌های کم‌نام هم کار می‌کند.
+    val hasSymbol = symbol.isNotBlank()
+    var advanced by remember(coinId) { mutableStateOf(hasSymbol) }
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+
     var range by remember(coinId) { mutableStateOf(PumpOhlc.Range.WEEK) }
     var candles by remember(coinId) { mutableStateOf<List<PumpOhlc.Candle>>(emptyList()) }
     var chartBusy by remember(coinId) { mutableStateOf(false) }
@@ -69,7 +80,8 @@ fun CoinChartCard(
     // همچنان از کش استفاده می‌کند (سهمیه‌ی رایگان محدود است).
     var reloadKey by remember(coinId) { mutableStateOf(0) }
     var forceReload by remember(coinId) { mutableStateOf(false) }
-    LaunchedEffect(coinId, range, reloadKey) {
+    LaunchedEffect(coinId, range, reloadKey, advanced) {
+        if (advanced) return@LaunchedEffect   // در حالت پیشرفته داده از تریدینگ‌ویو می‌آید
         chartBusy = true
         val force = forceReload
         val loaded = PumpOhlc.load(coinId, range, force = force)
@@ -92,6 +104,40 @@ fun CoinChartCard(
         modifier = modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
+            // ── انتخاب نوع نمودار ──
+            if (hasSymbol) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = advanced,
+                        onClick = { advanced = true },
+                        label = { Text("نمودار پیشرفته", fontSize = 11.sp) }
+                    )
+                    FilterChip(
+                        selected = !advanced,
+                        onClick = { advanced = false },
+                        label = { Text("نمودار داخلی", fontSize = 11.sp) }
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+
+            if (advanced && hasSymbol) {
+                TradingViewChart(
+                    symbol = symbol,
+                    dark = dark,
+                    persian = persian,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(480.dp)
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "نمودار حرفه‌ای تریدینگ‌ویو داخل برنامه: با دو انگشت زوم کن، با کشیدن جابه‌جا کن، از نوار بالا " +
+                            "تایم‌فریم و اندیکاتور را عوض کن و از ذره‌بین، نماد را تغییر بده. اگر نماد پیدا نشد، به «نمودار داخلی» برگرد.",
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
@@ -162,9 +208,103 @@ fun CoinChartCard(
                 fontSize = 10.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            }
         }
     }
 }
+
+/**
+ * نمودار حرفه‌ایِ تریدینگ‌ویو داخل خودِ برنامه (WebView). دقیقاً همان نموداری که سایت‌های
+ * حرفه‌ای نشان می‌دهند: زوم، جابه‌جایی، اندیکاتورها، ابزار ترسیم، تغییر تایم‌فریم و نماد.
+ * برای عملکرد به اینترنت نیاز دارد؛ آفلاین باید به «نمودار داخلی» برگشت.
+ */
+@Composable
+fun TradingViewChart(
+    symbol: String,
+    dark: Boolean,
+    persian: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val html = remember(symbol, dark, persian) { tradingViewHtml(tradingViewSymbol(symbol), dark, persian) }
+    // با تغییر نماد/تم، WebView از نو ساخته و بارگذاری می‌شود.
+    key(html) {
+        AndroidView(
+            modifier = modifier,
+            factory = { ctx ->
+                android.webkit.WebView(ctx).apply {
+                    layoutParams = android.view.ViewGroup.LayoutParams(
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                    settings.javaScriptEnabled = true
+                    settings.domStorageEnabled = true
+                    settings.loadWithOverviewMode = true
+                    settings.useWideViewPort = true
+                    settings.mediaPlaybackRequiresUserGesture = false
+                    setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                    webViewClient = android.webkit.WebViewClient()
+                    webChromeClient = android.webkit.WebChromeClient()
+                    // تا وقتی کاربر روی نمودار می‌کشد، صفحه‌ی بالادستی اسکرول را نگیرد.
+                    setOnTouchListener { v, _ ->
+                        v.parent?.requestDisallowInterceptTouchEvent(true)
+                        false
+                    }
+                    loadDataWithBaseURL(
+                        "https://www.tradingview.com",
+                        html,
+                        "text/html",
+                        "utf-8",
+                        null
+                    )
+                }
+            }
+        )
+    }
+}
+
+/** نمادِ تریدینگ‌ویو از روی نماد کوین (جفت USDT رایج‌ترین بازار است). */
+internal fun tradingViewSymbol(symbol: String): String {
+    val clean = symbol.trim().uppercase().filter { it.isLetterOrDigit() }.take(12)
+    return if (clean.isEmpty()) "BTCUSDT" else "${clean}USDT"
+}
+
+/** HTMLِ ویجتِ «نمودار پیشرفتهٔ» تریدینگ‌ویو برای بارگذاری در WebView. */
+internal fun tradingViewHtml(tvSymbol: String, dark: Boolean, persian: Boolean): String {
+    val theme = if (dark) "dark" else "light"
+    val locale = if (persian) "fa_IR" else "en"
+    val bg = if (dark) "#0f1115" else "#ffffff"
+    return """
+        <!DOCTYPE html>
+        <html>
+        <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <style>html,body{height:100%;margin:0;padding:0;background:$bg;overflow:hidden}#tv{height:100%;width:100%}</style>
+        </head>
+        <body>
+        <div id="tv"></div>
+        <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+        <script type="text/javascript">
+        new TradingView.widget({
+          "autosize": true,
+          "symbol": "$tvSymbol",
+          "interval": "60",
+          "timezone": "Etc/UTC",
+          "theme": "$theme",
+          "style": "1",
+          "locale": "$locale",
+          "enable_publishing": false,
+          "hide_side_toolbar": false,
+          "allow_symbol_change": true,
+          "studies": ["IchimokuCloud@tv-basicstudies"],
+          "container_id": "tv"
+        });
+        </script>
+        </body>
+        </html>
+    """.trimIndent()
+}
+
 
 /** کارت نمایشِ یک تحلیلِ هوش مصنوعی. */
 @Composable

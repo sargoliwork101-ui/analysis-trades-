@@ -152,6 +152,7 @@ fun PumpDetailSheet(
                 coinId = coin.id,
                 price = coin.price,
                 persian = persian,
+                symbol = coin.symbol,
                 sparkFallback = coin.spark,
                 rising = (coin.change7d ?: 0.0) >= 0.0
             )

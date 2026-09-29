@@ -148,6 +148,7 @@ fun WalletDetailSheet(
                 coinId = trade.coinId,
                 price = reference,
                 persian = persian,
+                symbol = trade.symbol,
                 sparkFallback = marketCoin?.spark ?: emptyList(),
                 rising = (marketCoin?.change7d ?: 0.0) >= 0.0
             )
