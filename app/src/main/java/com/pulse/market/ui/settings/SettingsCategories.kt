@@ -1,6 +1,5 @@
 package com.pulse.market.ui.settings
 
-import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -551,7 +550,6 @@ private fun BuyPriceDialog(
     onDismiss: () -> Unit,
     onConfirm: (Double?, Long?) -> Unit
 ) {
-    val context = androidx.compose.ui.platform.LocalContext.current
     var textValue by remember(sym) {
         mutableStateOf(
             sym.buyPrice?.takeIf { it > 0.0 }?.let {
@@ -561,29 +559,19 @@ private fun BuyPriceDialog(
         )
     }
     var buyDate by remember(sym) { mutableStateOf(sym.buyDate?.takeIf { it > 0L }) }
+    var showDatePicker by remember { mutableStateOf(false) }
     val parsed = textValue.trim().replace(",", "").replace("٬", "").toDoubleOrNull()
     val unitText = sym.unit.trim()
 
-    fun pickDate() {
-        val cal = java.util.Calendar.getInstance().apply {
-            timeInMillis = buyDate ?: System.currentTimeMillis()
-        }
-        DatePickerDialog(
-            context,
-            { _, year, month, day ->
-                val c = java.util.Calendar.getInstance().apply {
-                    set(year, month, day, 0, 0, 0)
-                    set(java.util.Calendar.MILLISECOND, 0)
-                }
-                buyDate = c.timeInMillis
-            },
-            cal.get(java.util.Calendar.YEAR),
-            cal.get(java.util.Calendar.MONTH),
-            cal.get(java.util.Calendar.DAY_OF_MONTH)
-        ).apply {
-            // خرید در آینده معنا ندارد
-            datePicker.maxDate = System.currentTimeMillis()
-        }.show()
+    if (showDatePicker) {
+        com.pulse.market.ui.PersianDatePickerDialog(
+            initialMillis = buyDate ?: System.currentTimeMillis(),
+            onDismiss = { showDatePicker = false },
+            onConfirm = {
+                buyDate = it
+                showDatePicker = false
+            }
+        )
     }
 
     AlertDialog(
@@ -614,11 +602,11 @@ private fun BuyPriceDialog(
                     )
                 }
                 // ── تاریخ خرید ──
-                OutlinedButton(onClick = { pickDate() }, modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = { showDatePicker = true }, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Default.Schedule, contentDescription = null, modifier = Modifier.size(17.dp))
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        buyDate?.let { "تاریخ خرید: ${Format.date(it)}" } ?: "انتخاب تاریخ خرید",
+                        buyDate?.let { "تاریخ خرید: ${Format.date(it)}" } ?: "انتخاب تاریخ خرید (شمسی)",
                         fontSize = 12.5.sp
                     )
                 }

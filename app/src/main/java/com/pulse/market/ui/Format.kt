@@ -75,29 +75,31 @@ object Format {
     fun dateTime(ts: Long, persian: Boolean = true): String {
         if (ts <= 0L) return "—"
         val cal = java.util.Calendar.getInstance().apply { timeInMillis = ts }
+        val j = com.pulse.market.data.JalaliDate.fromMillis(ts)
         val text = String.format(
             Locale.US,
             "%04d/%02d/%02d، %02d:%02d",
-            cal.get(java.util.Calendar.YEAR),
-            cal.get(java.util.Calendar.MONTH) + 1,
-            cal.get(java.util.Calendar.DAY_OF_MONTH),
+            j.year, j.month, j.day,
             cal.get(java.util.Calendar.HOUR_OF_DAY),
             cal.get(java.util.Calendar.MINUTE)
         )
         return if (persian) toPersianDigits(text) else text
     }
 
-    /** فقط تاریخ (بدون ساعت) — برای نمایشِ فشرده مثل «تاریخ خرید» روی ویجت */
+    /** فقط تاریخ (بدون ساعت) — تقویمِ شمسی، برای نمایشِ فشرده مثل «تاریخ خرید» روی ویجت */
     fun date(ts: Long, persian: Boolean = true): String {
         if (ts <= 0L) return "—"
-        val cal = java.util.Calendar.getInstance().apply { timeInMillis = ts }
-        val text = String.format(
-            Locale.US,
-            "%04d/%02d/%02d",
-            cal.get(java.util.Calendar.YEAR),
-            cal.get(java.util.Calendar.MONTH) + 1,
-            cal.get(java.util.Calendar.DAY_OF_MONTH)
-        )
+        val j = com.pulse.market.data.JalaliDate.fromMillis(ts)
+        val text = String.format(Locale.US, "%04d/%02d/%02d", j.year, j.month, j.day)
+        return if (persian) toPersianDigits(text) else text
+    }
+
+    /** تاریخِ شمسی با نامِ ماه — مثلِ «۸ مهر ۱۴۰۴» */
+    fun dateLong(ts: Long, persian: Boolean = true): String {
+        if (ts <= 0L) return "—"
+        val j = com.pulse.market.data.JalaliDate.fromMillis(ts)
+        val name = com.pulse.market.data.JalaliDate.MONTHS.getOrElse(j.month - 1) { "" }
+        val text = "${j.day} $name ${j.year}"
         return if (persian) toPersianDigits(text) else text
     }
 
