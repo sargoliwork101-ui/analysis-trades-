@@ -515,6 +515,13 @@ fun SettingsScreen(
                                 persist(cfg.copy(symbols = list))
                             }
                         },
+                        onSetBuyPrice = { index, price ->
+                            val list = cfg.symbols.toMutableList()
+                            list.getOrNull(index)?.let { sym ->
+                                list[index] = sym.copy(buyPrice = price)
+                                persist(cfg.copy(symbols = list))
+                            }
+                        },
                         onDeleteTseSymbol = { sym ->
                             scope.launch {
                                 val updated = tseCustomSymbols.filterNot { it.code == sym.code }

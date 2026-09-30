@@ -12,6 +12,7 @@ import com.pulse.market.R
 import com.pulse.market.data.InternalGuard
 import com.pulse.market.data.Quote
 import com.pulse.market.data.MarketStatus
+import com.pulse.market.data.SymbolDef
 import com.pulse.market.data.TimePolicy
 import com.pulse.market.data.WidgetConfig
 import com.pulse.market.data.WidgetTheme
@@ -35,6 +36,7 @@ object WidgetRenderer {
     private const val SZ_SUB = 9.5f
     private const val SZ_PRICE = 14.5f
     private const val SZ_CHANGE = 9.5f
+    private const val SZ_PROFIT = 9f
 
     /** رنگ‌ها و پس‌زمینه‌ی هر تم — شامل دو رنگ متناوب برای جداکننده‌ی ردیف‌ها */
     private data class Palette(
@@ -188,7 +190,7 @@ object WidgetRenderer {
                     R.id.rows,
                     buildRow(
                         context, q, cfg, pal, i, sparkVisible, sparkWdp, sparkHdp, subVisible,
-                        scale, blinkOn, dataStale
+                        scale, blinkOn, dataStale, symbolFor(cfg, q)
                     )
                 )
             }
@@ -265,10 +267,12 @@ object WidgetRenderer {
         subVisible: Boolean,
         scale: Float,
         blinkOn: Boolean,
-        dataStale: Boolean
+        dataStale: Boolean,
+        matched: SymbolDef?
     ): RemoteViews {
         val row = RemoteViews(context.packageName, R.layout.widget_row)
         applyRowChrome(row, pal, cfg, index, scale)
+        val buyPrice = matched?.buyPrice?.takeIf { it.isFinite() && it > 0.0 }
 
         // ── LED وضعیت هر نماد: سبز=به‌روز شد (چشمک) | قرمز=نشد ولی آخرین مقدار مانده | خاکستری=بدون داده ──
         row.setImageViewResource(R.id.row_led, ledRes(q, blinkOn, dataStale))
@@ -277,7 +281,7 @@ object WidgetRenderer {
             R.id.row_label,
             if (cfg.persianDigits) Format.toPersianDigits(q.label) else q.label
         )
-        val sub = subLabel(q, cfg)
+        val sub = subLabel(q, cfg, buyPrice)
         row.setTextViewText(R.id.row_sub, text(sub, cfg))
         row.setViewVisibility(
             R.id.row_sub,
@@ -322,6 +326,25 @@ object WidgetRenderer {
             )
         }
 
+        // ── سود/زیان از زمانِ خرید ──
+        // اگر کاربر برای این نماد «قیمت خرید» ثبت کرده باشد، درصدِ سود/زیان نسبت به آن
+        // قیمت محاسبه و زیرِ همان نماد (کنارِ قیمت) با رنگِ سبز/قرمز نمایش داده می‌شود.
+        val pl = matched?.profitPct(q.price)
+        if (pl == null || !pl.isFinite()) {
+            row.setViewVisibility(R.id.row_profit, View.GONE)
+        } else {
+            row.setViewVisibility(R.id.row_profit, View.VISIBLE)
+            val up = pl > 0.0001
+            val down = pl < -0.0001
+            val word = if (up) "سود " else if (down) "زیان " else ""
+            row.setTextViewText(R.id.row_profit, text(word + Format.pct(pl, cfg.persianDigits), cfg))
+            row.setTextColor(
+                R.id.row_profit,
+                if (up) COLOR_UP else if (down) COLOR_DOWN else COLOR_FLAT
+            )
+            sp(row, R.id.row_profit, SZ_PROFIT, scale)
+        }
+
         // ── نمودار مینیاتوری: چند نقطه از انتهای سری (تعدادش را کاربر تعیین می‌کند) ──
         val points = q.spark.takeLast(cfg.sparkPoints.coerceIn(6, 60))
         if (sparkVisible && points.size >= 3) {
@@ -362,8 +385,11 @@ object WidgetRenderer {
         }
     }
 
-    /** خط دوم هر نماد: کد نماد + حجم معاملات — واحد زیر عدد قیمت می‌نشیند، اینجا نمی‌آید */
-    private fun subLabel(q: Quote, cfg: WidgetConfig): String {
+    /**
+     * خط دوم هر نماد: «قیمت خرید» (اگر کاربر ثبت کرده) + کد نماد + حجم معاملات —
+     * واحد زیر عدد قیمت می‌نشیند، اینجا نمی‌آید.
+     */
+    private fun subLabel(q: Quote, cfg: WidgetConfig, buyPrice: Double?): String {
         // خطا فقط وقتی نشان داده می‌شود که مقداری برای نمایش نداشته باشیم؛
         // در حالت stale (آخرین مقدار سالم) عدد می‌ماند و فقط LED قرمز می‌شود
         if (q.anomalyDetected) {
@@ -372,12 +398,22 @@ object WidgetRenderer {
         }
         if (q.error != null && q.price == null) return "⚠ ${q.error}"
         val parts = mutableListOf<String>()
+        if (buyPrice != null && buyPrice > 0.0) {
+            parts += "خرید ${Format.price(buyPrice, cfg.persianDigits, cfg.compactNumbers)}"
+        }
         if (cfg.showCode && q.code.isNotBlank()) parts += q.code
         if (cfg.showVolume && q.volume != null) {
             parts += "حجم ${Format.volume(q.volume, cfg.persianDigits)}"
         }
         return parts.joinToString(" • ")
     }
+
+    /** نمادِ متناظر با این Quote در تنظیمات (برای خواندنِ «قیمت خرید») — تطبیق با کد و منبع. */
+    private fun symbolFor(cfg: WidgetConfig, q: Quote): SymbolDef? =
+        cfg.symbols.firstOrNull {
+            it.code == q.code &&
+                (it.sourceId == q.sourceId || it.sourceId.isBlank() || q.sourceId.isBlank())
+        }
 
     /** HH:MM از دقیقه‌ی روز — برای نمایش بازه‌ی تازه‌سازی روی ویجت */
     private fun time2d(minute: Int) = "${minute / 60}:${(minute % 60).toString().padStart(2, '0')}"

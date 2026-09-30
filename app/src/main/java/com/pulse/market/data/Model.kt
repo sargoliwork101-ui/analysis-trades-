@@ -59,8 +59,28 @@ data class SymbolDef(
      */
     val unit: String = "",
     /** ضریب مخصوص همین نماد — null یعنی «ضریب منبع» */
-    val scale: Double? = null
-)
+    val scale: Double? = null,
+    /**
+     * قیمت خریدِ کاربر برای این نماد (به واحدِ همان نماد) — null یعنی «ثبت نشده».
+     *
+     * برای اینکه کاربر بداند خودش این نماد را چند خریده و از زمانِ خرید چقدر سود/زیان
+     * کرده است. سود/زیان به‌صورتِ درصد نسبت به همین قیمت محاسبه و روی ویجت زیرِ همان
+     * نماد نمایش داده می‌شود.
+     */
+    val buyPrice: Double? = null
+) {
+    /**
+     * درصدِ سود/زیان نسبت به «قیمت خرید» با توجه به قیمتِ فعلی.
+     * خروجی null یعنی قیمتِ خرید ثبت نشده یا قیمتِ فعلی نامعتبر است.
+     */
+    fun profitPct(current: Double?): Double? {
+        val bp = buyPrice
+        if (bp == null || !bp.isFinite() || bp <= 0.0) return null
+        if (current == null || !current.isFinite()) return null
+        val pct = (current - bp) / bp * 100.0
+        return if (pct.isFinite()) pct else null
+    }
+}
 
 /** تعریف یک «منبع داده» — چه سایت آماده چه منبع دلخواه کاربر */
 @Serializable

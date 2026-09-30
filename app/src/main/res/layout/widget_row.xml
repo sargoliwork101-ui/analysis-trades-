@@ -119,5 +119,19 @@
             android:textColor="#94A3B8"
             android:textSize="9.5sp"
             android:textStyle="bold" />
+
+        <!-- سود/زیان از زمان خرید — فقط وقتی کاربر «قیمت خرید» ثبت کرده باشد دیده می‌شود -->
+        <TextView
+            android:id="@+id/row_profit"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="end"
+            android:layout_marginTop="2dp"
+            android:maxLines="1"
+            android:text=""
+            android:textColor="#94A3B8"
+            android:textSize="9sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
     </LinearLayout>
 </LinearLayout>

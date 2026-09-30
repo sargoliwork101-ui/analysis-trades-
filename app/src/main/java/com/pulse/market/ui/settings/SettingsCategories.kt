@@ -19,13 +19,16 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -38,6 +41,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -51,6 +55,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pulse.market.data.AlertCondition
@@ -286,14 +291,18 @@ fun SymbolsCategory(
     onRemoveSymbol: (Int) -> Unit,
     onMoveSymbol: (Int, Int) -> Unit,
     onDeleteTseSymbol: (SymbolDef) -> Unit,
+    onSetBuyPrice: (Int, Double?) -> Unit = { _, _ -> },
     onOpenSymbolSearch: () -> Unit
 ) {
+    // کدام نماد در حالِ ویرایشِ «قیمت خرید» است (اندیس در selectedSymbols)
+    var buyPriceEditIndex by remember { mutableStateOf<Int?>(null) }
+
     Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
 
         // ── نمادهای این ویجت — یک کارت، هر ردیف: ترتیب + حذف ──
         SectionHeader(
             "نمادهای این ویجت",
-            "${Format.toPersianDigits("${selectedSymbols.size}")} از ${Format.toPersianDigits("$MAX_SYMBOLS")} نماد • با فلش‌ها جابه‌جا و با 🗑 حذف کن"
+            "${Format.toPersianDigits("${selectedSymbols.size}")} از ${Format.toPersianDigits("$MAX_SYMBOLS")} نماد • قیمت خرید را با ✏️ ثبت کن تا سود/زیان روی ویجت بیاید"
         )
         RowsCard {
             if (selectedSymbols.isEmpty()) {
@@ -313,9 +322,24 @@ fun SymbolsCategory(
                         canDown = i < selectedSymbols.size - 1,
                         onUp = { onMoveSymbol(i, i - 1) },
                         onDown = { onMoveSymbol(i, i + 1) },
-                        onRemove = { onRemoveSymbol(i) }
+                        onRemove = { onRemoveSymbol(i) },
+                        onEditBuyPrice = { buyPriceEditIndex = i }
                     )
                 }
+            }
+        }
+
+        // ── دیالوگِ ثبت/ویرایشِ قیمت خرید ──
+        buyPriceEditIndex?.let { idx ->
+            selectedSymbols.getOrNull(idx)?.let { sym ->
+                BuyPriceDialog(
+                    sym = sym,
+                    onDismiss = { buyPriceEditIndex = null },
+                    onConfirm = { newPrice ->
+                        onSetBuyPrice(idx, newPrice)
+                        buyPriceEditIndex = null
+                    }
+                )
             }
         }
 
@@ -455,7 +479,8 @@ private fun SelectedSymbolRow(
     canDown: Boolean,
     onUp: () -> Unit,
     onDown: () -> Unit,
-    onRemove: () -> Unit
+    onRemove: () -> Unit,
+    onEditBuyPrice: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -471,6 +496,25 @@ private fun SelectedSymbolRow(
             if (sym.code.isNotBlank()) {
                 Text(sym.code, fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            // قیمت خرید ثبت‌شده (اگر باشد) — زیرِ نام نماد
+            val bp = sym.buyPrice
+            if (bp != null && bp > 0.0) {
+                Text(
+                    "قیمت خرید: ${Format.price(bp)}",
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+        // ثبت/ویرایشِ قیمت خرید
+        IconButton(onClick = onEditBuyPrice, modifier = Modifier.size(34.dp)) {
+            Icon(
+                Icons.Default.Edit,
+                contentDescription = "ثبت قیمت خرید",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(17.dp)
+            )
         }
         IconButton(onClick = onUp, enabled = canUp, modifier = Modifier.size(34.dp)) {
             Icon(Icons.Default.ArrowUpward, contentDescription = "بالا", modifier = Modifier.size(17.dp))
@@ -487,6 +531,72 @@ private fun SelectedSymbolRow(
             )
         }
     }
+}
+
+/** دیالوگِ ثبت/ویرایش/حذفِ «قیمت خرید» برای یک نماد. */
+@Composable
+private fun BuyPriceDialog(
+    sym: SymbolDef,
+    onDismiss: () -> Unit,
+    onConfirm: (Double?) -> Unit
+) {
+    var textValue by remember(sym) {
+        mutableStateOf(
+            sym.buyPrice?.takeIf { it > 0.0 }?.let {
+                // بدونِ صفرهای اضافی: عددِ صحیح بدون ممیز
+                if (it % 1.0 == 0.0) it.toLong().toString() else it.toString()
+            } ?: ""
+        )
+    }
+    val parsed = textValue.trim().replace(",", "").replace("٬", "").toDoubleOrNull()
+    val unitText = sym.unit.trim()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("قیمت خرید — ${sym.label}") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "قیمتی که این نماد را خریدی وارد کن. سود/زیان از همین قیمت حساب و زیر همان نماد در ویجت نشان داده می‌شود." +
+                        if (unitText.isNotBlank()) " (واحد: $unitText)" else "",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = textValue,
+                    onValueChange = { textValue = it },
+                    singleLine = true,
+                    label = { Text("قیمت خرید") },
+                    suffix = { if (unitText.isNotBlank()) Text(unitText, fontSize = 11.sp) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (textValue.isNotBlank() && parsed == null) {
+                    Text(
+                        "عدد معتبر وارد کن",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(parsed?.takeIf { it.isFinite() && it > 0.0 }) },
+                enabled = textValue.isBlank() || parsed != null
+            ) { Text("ذخیره") }
+        },
+        dismissButton = {
+            Row {
+                if (sym.buyPrice != null) {
+                    TextButton(onClick = { onConfirm(null) }) {
+                        Text("حذف قیمت", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+                TextButton(onClick = onDismiss) { Text("انصراف") }
+            }
+        }
+    )
 }
 
 // ═══════════════════ ۳) مقادیر نمایشی ═══════════════════
