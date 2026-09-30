@@ -87,6 +87,20 @@ object Format {
         return if (persian) toPersianDigits(text) else text
     }
 
+    /** فقط تاریخ (بدون ساعت) — برای نمایشِ فشرده مثل «تاریخ خرید» روی ویجت */
+    fun date(ts: Long, persian: Boolean = true): String {
+        if (ts <= 0L) return "—"
+        val cal = java.util.Calendar.getInstance().apply { timeInMillis = ts }
+        val text = String.format(
+            Locale.US,
+            "%04d/%02d/%02d",
+            cal.get(java.util.Calendar.YEAR),
+            cal.get(java.util.Calendar.MONTH) + 1,
+            cal.get(java.util.Calendar.DAY_OF_MONTH)
+        )
+        return if (persian) toPersianDigits(text) else text
+    }
+
     fun toPersianDigits(input: String): String {
         val sb = StringBuilder()
         for (c in input) sb.append(if (c in '0'..'9') '۰' + (c - '0') else c)

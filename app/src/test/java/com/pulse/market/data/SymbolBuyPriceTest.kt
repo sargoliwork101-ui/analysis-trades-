@@ -36,15 +36,20 @@ class SymbolBuyPriceTest {
     }
 
     @Test
-    fun buyPriceSurvivesJsonRoundTripAndDefaultsToNull() {
+    fun buyPriceAndDateSurviveJsonRoundTripAndDefaultToNull() {
         val json = Json { ignoreUnknownKeys = true }
-        val original = SymbolDef(code = "sol", label = "Solana", sourceId = "crypto", buyPrice = 42.5)
+        val original = SymbolDef(
+            code = "sol", label = "Solana", sourceId = "crypto",
+            buyPrice = 42.5, buyDate = 1_700_000_000_000L
+        )
         val restored = json.decodeFromString(SymbolDef.serializer(), json.encodeToString(SymbolDef.serializer(), original))
         assertEquals(42.5, restored.buyPrice!!, 1e-9)
+        assertEquals(1_700_000_000_000L, restored.buyDate)
 
-        // سازگاری با تنظیماتِ قدیمی که فیلدِ buyPrice نداشتند → null
+        // سازگاری با تنظیماتِ قدیمی که فیلدهای buyPrice/buyDate نداشتند → null
         val legacy = json.decodeFromString(SymbolDef.serializer(), """{"code":"btc","label":"BTC"}""")
         assertNull(legacy.buyPrice)
+        assertNull(legacy.buyDate)
         assertTrue(legacy.profitPct(100.0) == null)
     }
 }

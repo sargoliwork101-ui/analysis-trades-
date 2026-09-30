@@ -281,7 +281,7 @@ object WidgetRenderer {
             R.id.row_label,
             if (cfg.persianDigits) Format.toPersianDigits(q.label) else q.label
         )
-        val sub = subLabel(q, cfg, buyPrice)
+        val sub = subLabel(q, cfg, buyPrice, matched?.buyDate?.takeIf { it > 0L })
         row.setTextViewText(R.id.row_sub, text(sub, cfg))
         row.setViewVisibility(
             R.id.row_sub,
@@ -389,7 +389,7 @@ object WidgetRenderer {
      * خط دوم هر نماد: «قیمت خرید» (اگر کاربر ثبت کرده) + کد نماد + حجم معاملات —
      * واحد زیر عدد قیمت می‌نشیند، اینجا نمی‌آید.
      */
-    private fun subLabel(q: Quote, cfg: WidgetConfig, buyPrice: Double?): String {
+    private fun subLabel(q: Quote, cfg: WidgetConfig, buyPrice: Double?, buyDate: Long?): String {
         // خطا فقط وقتی نشان داده می‌شود که مقداری برای نمایش نداشته باشیم؛
         // در حالت stale (آخرین مقدار سالم) عدد می‌ماند و فقط LED قرمز می‌شود
         if (q.anomalyDetected) {
@@ -399,7 +399,10 @@ object WidgetRenderer {
         if (q.error != null && q.price == null) return "⚠ ${q.error}"
         val parts = mutableListOf<String>()
         if (buyPrice != null && buyPrice > 0.0) {
-            parts += "خرید ${Format.price(buyPrice, cfg.persianDigits, cfg.compactNumbers)}"
+            val buyText = StringBuilder("خرید ")
+            buyText.append(Format.price(buyPrice, cfg.persianDigits, cfg.compactNumbers))
+            if (buyDate != null) buyText.append(" (").append(Format.date(buyDate, cfg.persianDigits)).append(")")
+            parts += buyText.toString()
         }
         if (cfg.showCode && q.code.isNotBlank()) parts += q.code
         if (cfg.showVolume && q.volume != null) {

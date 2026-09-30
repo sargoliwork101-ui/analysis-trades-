@@ -515,10 +515,10 @@ fun SettingsScreen(
                                 persist(cfg.copy(symbols = list))
                             }
                         },
-                        onSetBuyPrice = { index, price ->
+                        onSetBuyPrice = { index, price, date ->
                             val list = cfg.symbols.toMutableList()
                             list.getOrNull(index)?.let { sym ->
-                                list[index] = sym.copy(buyPrice = price)
+                                list[index] = sym.copy(buyPrice = price, buyDate = date)
                                 persist(cfg.copy(symbols = list))
                             }
                         },

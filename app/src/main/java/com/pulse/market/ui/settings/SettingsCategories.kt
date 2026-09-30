@@ -1,5 +1,6 @@
 package com.pulse.market.ui.settings
 
+import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -27,6 +28,7 @@ import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -291,7 +293,7 @@ fun SymbolsCategory(
     onRemoveSymbol: (Int) -> Unit,
     onMoveSymbol: (Int, Int) -> Unit,
     onDeleteTseSymbol: (SymbolDef) -> Unit,
-    onSetBuyPrice: (Int, Double?) -> Unit = { _, _ -> },
+    onSetBuyPrice: (Int, Double?, Long?) -> Unit = { _, _, _ -> },
     onOpenSymbolSearch: () -> Unit
 ) {
     // کدام نماد در حالِ ویرایشِ «قیمت خرید» است (اندیس در selectedSymbols)
@@ -302,7 +304,7 @@ fun SymbolsCategory(
         // ── نمادهای این ویجت — یک کارت، هر ردیف: ترتیب + حذف ──
         SectionHeader(
             "نمادهای این ویجت",
-            "${Format.toPersianDigits("${selectedSymbols.size}")} از ${Format.toPersianDigits("$MAX_SYMBOLS")} نماد • قیمت خرید را با ✏️ ثبت کن تا سود/زیان روی ویجت بیاید"
+            "${Format.toPersianDigits("${selectedSymbols.size}")} از ${Format.toPersianDigits("$MAX_SYMBOLS")} نماد • قیمت و تاریخ خرید را با ✏️ ثبت کن تا سود/زیان روی ویجت بیاید"
         )
         RowsCard {
             if (selectedSymbols.isEmpty()) {
@@ -335,8 +337,8 @@ fun SymbolsCategory(
                 BuyPriceDialog(
                     sym = sym,
                     onDismiss = { buyPriceEditIndex = null },
-                    onConfirm = { newPrice ->
-                        onSetBuyPrice(idx, newPrice)
+                    onConfirm = { newPrice, newDate ->
+                        onSetBuyPrice(idx, newPrice, newDate)
                         buyPriceEditIndex = null
                     }
                 )
@@ -496,11 +498,20 @@ private fun SelectedSymbolRow(
             if (sym.code.isNotBlank()) {
                 Text(sym.code, fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            // قیمت خرید ثبت‌شده (اگر باشد) — زیرِ نام نماد
+            // قیمت و تاریخ خرید ثبت‌شده (اگر باشد) — زیرِ نام نماد
             val bp = sym.buyPrice
             if (bp != null && bp > 0.0) {
+                val bd = sym.buyDate?.takeIf { it > 0L }
+                val line = buildString {
+                    append("قیمت خرید: ")
+                    append(Format.price(bp))
+                    if (bd != null) {
+                        append(" • ")
+                        append(Format.date(bd))
+                    }
+                }
                 Text(
-                    "قیمت خرید: ${Format.price(bp)}",
+                    line,
                     fontSize = 10.5.sp,
                     fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.primary
@@ -533,13 +544,14 @@ private fun SelectedSymbolRow(
     }
 }
 
-/** دیالوگِ ثبت/ویرایش/حذفِ «قیمت خرید» برای یک نماد. */
+/** دیالوگِ ثبت/ویرایش/حذفِ «قیمت خرید» و «تاریخ خرید» برای یک نماد. */
 @Composable
 private fun BuyPriceDialog(
     sym: SymbolDef,
     onDismiss: () -> Unit,
-    onConfirm: (Double?) -> Unit
+    onConfirm: (Double?, Long?) -> Unit
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     var textValue by remember(sym) {
         mutableStateOf(
             sym.buyPrice?.takeIf { it > 0.0 }?.let {
@@ -548,16 +560,39 @@ private fun BuyPriceDialog(
             } ?: ""
         )
     }
+    var buyDate by remember(sym) { mutableStateOf(sym.buyDate?.takeIf { it > 0L }) }
     val parsed = textValue.trim().replace(",", "").replace("٬", "").toDoubleOrNull()
     val unitText = sym.unit.trim()
 
+    fun pickDate() {
+        val cal = java.util.Calendar.getInstance().apply {
+            timeInMillis = buyDate ?: System.currentTimeMillis()
+        }
+        DatePickerDialog(
+            context,
+            { _, year, month, day ->
+                val c = java.util.Calendar.getInstance().apply {
+                    set(year, month, day, 0, 0, 0)
+                    set(java.util.Calendar.MILLISECOND, 0)
+                }
+                buyDate = c.timeInMillis
+            },
+            cal.get(java.util.Calendar.YEAR),
+            cal.get(java.util.Calendar.MONTH),
+            cal.get(java.util.Calendar.DAY_OF_MONTH)
+        ).apply {
+            // خرید در آینده معنا ندارد
+            datePicker.maxDate = System.currentTimeMillis()
+        }.show()
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("قیمت خرید — ${sym.label}") },
+        title = { Text("خرید — ${sym.label}") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    "قیمتی که این نماد را خریدی وارد کن. سود/زیان از همین قیمت حساب و زیر همان نماد در ویجت نشان داده می‌شود." +
+                    "قیمت و تاریخی که این نماد را خریدی وارد کن. سود/زیان از همین قیمت حساب و زیر همان نماد در ویجت نشان داده می‌شود." +
                         if (unitText.isNotBlank()) " (واحد: $unitText)" else "",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -578,19 +613,37 @@ private fun BuyPriceDialog(
                         color = MaterialTheme.colorScheme.error
                     )
                 }
+                // ── تاریخ خرید ──
+                OutlinedButton(onClick = { pickDate() }, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Default.Schedule, contentDescription = null, modifier = Modifier.size(17.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        buyDate?.let { "تاریخ خرید: ${Format.date(it)}" } ?: "انتخاب تاریخ خرید",
+                        fontSize = 12.5.sp
+                    )
+                }
+                if (buyDate != null) {
+                    TextButton(onClick = { buyDate = null }) {
+                        Text("حذف تاریخ", fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
+                    }
+                }
             }
         },
         confirmButton = {
             TextButton(
-                onClick = { onConfirm(parsed?.takeIf { it.isFinite() && it > 0.0 }) },
+                onClick = {
+                    val price = parsed?.takeIf { it.isFinite() && it > 0.0 }
+                    // اگر قیمتی نباشد، تاریخ هم بی‌معنی است.
+                    onConfirm(price, if (price != null) buyDate else null)
+                },
                 enabled = textValue.isBlank() || parsed != null
             ) { Text("ذخیره") }
         },
         dismissButton = {
             Row {
                 if (sym.buyPrice != null) {
-                    TextButton(onClick = { onConfirm(null) }) {
-                        Text("حذف قیمت", color = MaterialTheme.colorScheme.error)
+                    TextButton(onClick = { onConfirm(null, null) }) {
+                        Text("حذف خرید", color = MaterialTheme.colorScheme.error)
                     }
                 }
                 TextButton(onClick = onDismiss) { Text("انصراف") }
