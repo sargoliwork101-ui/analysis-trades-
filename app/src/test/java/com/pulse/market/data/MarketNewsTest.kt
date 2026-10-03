@@ -94,6 +94,26 @@ class MarketNewsTest {
     }
 
     @Test
+    fun onlyCompleteFivePartAiAnalysisIsDisplayReady() {
+        val base = MarketNewsItem(
+            id = "fa", title = "Original English title", sourceSummary = "English excerpt",
+            url = "https://example.com/news", source = "Source", publishedAt = 1L,
+            category = NewsCategory.ECONOMY, region = NewsRegion.WORLD, importance = 70
+        )
+        assertFalse(base.hasCompleteAiAnalysis)
+        assertFalse(base.copy(aiTitle = "عنوان فارسی", aiSummary = "چکیده فارسی").hasCompleteAiAnalysis)
+        assertTrue(
+            base.copy(
+                aiTitle = "عنوان فارسی",
+                aiOutlook = "سناریوی محتمل بازار",
+                marketImpact = "اثر احتمالی بر ارز",
+                historicalContext = "الگوی تاریخی مشابه",
+                aiSummary = "چکیده فارسی خبر"
+            ).hasCompleteAiAnalysis
+        )
+    }
+
+    @Test
     fun deduplicateKeepsRicherCopy() {
         val base = MarketNewsItem(
             id = "a", title = "Bitcoin ETF approved", sourceSummary = "short",

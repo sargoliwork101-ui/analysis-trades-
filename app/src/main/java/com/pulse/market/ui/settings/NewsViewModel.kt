@@ -82,14 +82,17 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
                     "تازه‌سازی کامل نشد؛ خبرهای ذخیره‌شده نمایش داده می‌شوند"
                 }
             } else {
-                // خلاصه‌ی AI خبرهای بدون تغییر را نگه دار تا هر refresh هزینه و زمان دوباره نداشته باشد.
+                // تحلیل کامل AI خبرهای بدون تغییر را نگه دار تا هر refresh هزینه و زمان دوباره نداشته باشد.
                 val previous = items.associateBy { it.id }
                 items = feed.items.map { item ->
                     val old = previous[item.id]
-                    if (old?.hasAiSummary == true) {
+                    if (old?.hasCompleteAiAnalysis == true) {
                         item.copy(
-                            aiSummary = old.aiSummary,
+                            aiTitle = old.aiTitle,
+                            aiOutlook = old.aiOutlook,
                             marketImpact = old.marketImpact,
+                            historicalContext = old.historicalContext,
+                            aiSummary = old.aiSummary,
                             importance = maxOf(item.importance, old.importance)
                         )
                     } else item
@@ -117,10 +120,10 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun summarizeMissing() {
         val config = aiConfig
         if (aiBusy || !config.enabled || !config.isReady) return
-        val pending = items.filterNot { it.hasAiSummary }
+        val pending = items.filterNot { it.hasCompleteAiAnalysis }
             .sortedWith(compareByDescending<MarketNewsItem> { it.importance }
                 .thenByDescending { it.publishedAt })
-            .take(18)
+            .take(15)
         if (pending.isEmpty()) return
         aiBusy = true
         aiError = null
@@ -131,8 +134,11 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
                 items = items.map { item ->
                     val enriched = outcome.items[item.id] ?: return@map item
                     item.copy(
-                        aiSummary = enriched.summary,
+                        aiTitle = enriched.persianTitle,
+                        aiOutlook = enriched.outlook,
                         marketImpact = enriched.marketImpact,
+                        historicalContext = enriched.historicalContext,
+                        aiSummary = enriched.summary,
                         importance = enriched.importance ?: item.importance
                     )
                 }.sortedWith(compareByDescending<MarketNewsItem> { it.importance }
@@ -142,7 +148,7 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
-            aiError = "خلاصه‌سازی AI کامل نشد؛ چکیده‌ی خود منابع نمایش داده می‌شود"
+            aiError = "ترجمه و تحلیل AI کامل نشد؛ متن انگلیسی یا کارت ناقص نمایش داده نمی‌شود"
         } finally {
             aiBusy = false
         }

@@ -37,7 +37,7 @@ enum class NewsRegion(val label: String) {
 data class MarketNewsItem(
     val id: String,
     val title: String,
-    /** چکیده‌ای که خود RSS منتشر کرده؛ همیشه به‌عنوان fallback باقی می‌ماند. */
+    /** چکیدهٔ خام RSS؛ فقط ورودی تحلیل است و تا فارسی/کامل نشود در کارت نمایش داده نمی‌شود. */
     val sourceSummary: String,
     val url: String,
     val source: String,
@@ -46,14 +46,20 @@ data class MarketNewsItem(
     val region: NewsRegion,
     /** امتیاز تقریبی ۰..۱۰۰ برای مرتب‌سازی؛ در صورت AI با برآورد مدل غنی می‌شود. */
     val importance: Int,
-    val aiSummary: String = "",
-    val marketImpact: String = ""
+    /** عنوان فارسیِ تولیدشده از همان خبر؛ عنوان/لینک اصلی دست‌نخورده می‌ماند. */
+    val aiTitle: String = "",
+    val aiOutlook: String = "",
+    val marketImpact: String = "",
+    val historicalContext: String = "",
+    val aiSummary: String = ""
 ) {
-    val summary: String
-        get() = aiSummary.ifBlank { sourceSummary }
+    val displayTitle: String
+        get() = aiTitle.ifBlank { title }
 
-    val hasAiSummary: Boolean
-        get() = aiSummary.isNotBlank()
+    /** فقط کارتِ دارای پنج بخش فارسی و کامل اجازه‌ی نمایش دارد. */
+    val hasCompleteAiAnalysis: Boolean
+        get() = aiTitle.isNotBlank() && aiOutlook.isNotBlank() &&
+            marketImpact.isNotBlank() && historicalContext.isNotBlank() && aiSummary.isNotBlank()
 
     /** میزبان واقعی لینک؛ نام منبعِ RSS به‌تنهایی قابل اعتماد نیست. */
     val host: String

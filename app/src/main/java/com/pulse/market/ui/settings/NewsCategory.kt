@@ -67,8 +67,9 @@ fun NewsCategory(
 
     val category = NewsCategory.entries.firstOrNull { it.name == categoryName }
     val region = NewsRegion.entries.firstOrNull { it.name == regionName }
-    val filtered = remember(vm.items, category, region) {
-        vm.items.filter { item ->
+    val analyzedItems = remember(vm.items) { vm.items.filter { it.hasCompleteAiAnalysis } }
+    val filtered = remember(analyzedItems, category, region) {
+        analyzedItems.filter { item ->
             (category == null || item.category == category) &&
                 (region == null || item.region == region)
         }
@@ -101,10 +102,10 @@ fun NewsCategory(
                     Spacer(Modifier.width(8.dp))
                     Text(
                         when {
-                            vm.aiBusy -> "هوش مصنوعی در حال خلاصه‌سازی خبرهای مهم است…"
+                            vm.aiBusy -> "هوش مصنوعی در حال ترجمه و تحلیل خبرهای مهم است…"
                             vm.aiConfig.enabled && vm.aiConfig.isReady ->
-                                "خلاصه‌سازی فارسی با ${vm.aiConfig.model} فعال است"
-                            else -> "خلاصه‌ی منبع فعال است؛ برای خلاصهٔ فارسی AI را تنظیم کن"
+                                "ترجمه و تحلیل کامل فارسی با ${vm.aiConfig.model} فعال است"
+                            else -> "برای نمایش خبرهای فارسی و تحلیل‌شده، هوش مصنوعی را تنظیم کن"
                         },
                         fontSize = 12.5.sp,
                         fontWeight = FontWeight.Bold,
@@ -112,8 +113,8 @@ fun NewsCategory(
                     )
                 }
                 Text(
-                    "AI فقط تیتر و چکیدهٔ منابع واقعی را خلاصه می‌کند و ممکن است اشتباه کند؛ " +
-                        "برای تصمیم مالی، متن کامل خبر و منبع را باز کن.",
+                    "هر خبر با عنوان و چکیدهٔ فارسی، نظر AI، اثر احتمالی و الگوی تاریخی نمایش داده می‌شود. " +
+                        "نظر و سابقه از دانش عمومی مدل است، جست‌وجوی زنده یا پیش‌بینی قطعی نیست؛ برای تصمیم مالی منبع را باز کن.",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -144,9 +145,9 @@ fun NewsCategory(
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                if (vm.items.isNotEmpty()) {
+                if (analyzedItems.isNotEmpty()) {
                     Text(
-                        "${Format.toPersianDigits(vm.items.size.toString())} خبر مرتبط",
+                        "${Format.toPersianDigits(analyzedItems.size.toString())} خبر فارسیِ تحلیل‌شده",
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -160,7 +161,7 @@ fun NewsCategory(
         }
 
         if (vm.message.isNotBlank()) InfoCard(vm.message)
-        vm.aiError?.let { InfoCard("خلاصه‌سازی هوش مصنوعی: $it") }
+        vm.aiError?.let { InfoCard("ترجمه و تحلیل هوش مصنوعی: $it") }
 
         Text("محدوده", fontSize = 12.sp, fontWeight = FontWeight.Bold)
         FlowRow(
@@ -203,8 +204,19 @@ fun NewsCategory(
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         when {
-            vm.loading && vm.items.isEmpty() -> InfoCard("در حال جمع‌آوری خبرها از منابع ایران و جهان…")
-            filtered.isEmpty() -> InfoCard("در این فیلتر خبری پیدا نشد؛ محدوده یا بازار دیگری را انتخاب کن.")
+            !vm.aiConfig.enabled || !vm.aiConfig.isReady -> InfoCard(
+                "برای اینکه همهٔ خبرها فارسی باشند و پیش از چکیده، نظر، اثر بازار و سابقهٔ تاریخی AI داشته باشند، ابتدا هوش مصنوعی را تنظیم کن."
+            )
+            (vm.loading || vm.aiBusy) && analyzedItems.isEmpty() -> InfoCard(
+                "در حال جمع‌آوری، ترجمه و تحلیل فارسی خبرهای مهم…"
+            )
+            filtered.isEmpty() -> InfoCard(
+                if (analyzedItems.isEmpty()) {
+                    "هنوز تحلیل فارسیِ کاملی آماده نشده؛ تازه‌سازی کن یا وضعیت سرویس AI را بررسی کن."
+                } else {
+                    "در این فیلتر خبر فارسیِ تحلیل‌شده‌ای پیدا نشد؛ محدوده یا بازار دیگری را انتخاب کن."
+                }
+            )
             else -> {
                 for (item in filtered.take(visibleCount)) {
                     NewsCard(
@@ -259,30 +271,36 @@ private fun NewsCard(item: MarketNewsItem, onOpen: () -> Unit) {
                 NewsBadge(item.category.label, accent)
                 NewsBadge(item.region.label, MaterialTheme.colorScheme.secondary)
                 if (item.importance >= 78) NewsBadge("مهم", MaterialTheme.colorScheme.error)
-                if (item.hasAiSummary) NewsBadge("خلاصه AI", MaterialTheme.colorScheme.primary)
+                NewsBadge("تحلیل کامل AI", MaterialTheme.colorScheme.primary)
             }
             Text(
-                item.title,
+                item.displayTitle,
                 fontSize = 14.sp,
                 lineHeight = 21.sp,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface
             )
-            Text(
-                item.summary.ifBlank { "چکیده‌ای از منبع دریافت نشد؛ متن کامل خبر را باز کن." },
-                fontSize = 12.sp,
-                lineHeight = 19.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+            NewsAnalysisSection(
+                label = "نظر هوش مصنوعی و سناریوی محتمل",
+                text = item.aiOutlook,
+                color = MaterialTheme.colorScheme.primary
             )
-            if (item.marketImpact.isNotBlank()) {
-                Text(
-                    "اثر احتمالی بر بازار: ${item.marketImpact}",
-                    fontSize = 11.5.sp,
-                    lineHeight = 18.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
+            NewsAnalysisSection(
+                label = "اثر احتمالی روی بازارها و دارایی‌ها",
+                text = item.marketImpact,
+                color = accent
+            )
+            NewsAnalysisSection(
+                label = "سابقه یا الگوی تاریخی مشابه",
+                text = item.historicalContext,
+                color = MaterialTheme.colorScheme.tertiary
+            )
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f))
+            NewsAnalysisSection(
+                label = "چکیدهٔ فارسی خبر",
+                text = item.aiSummary,
+                color = MaterialTheme.colorScheme.onSurface
+            )
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f))
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -308,6 +326,24 @@ private fun NewsCard(item: MarketNewsItem, onOpen: () -> Unit) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun NewsAnalysisSection(label: String, text: String, color: Color) {
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Text(
+            label,
+            fontSize = 10.5.sp,
+            fontWeight = FontWeight.Bold,
+            color = color
+        )
+        Text(
+            text,
+            fontSize = 11.7.sp,
+            lineHeight = 18.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
