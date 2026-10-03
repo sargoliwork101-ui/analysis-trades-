@@ -9,6 +9,8 @@ import okhttp3.Request
 import okhttp3.Response
 import java.io.File
 import java.io.IOException
+import java.text.SimpleDateFormat
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 /**
@@ -93,8 +95,12 @@ object Http {
             .build()
     }
 
-    /** خطای HTTP با کد وضعیت — تا خواننده‌ها بتوانند ۴۰۴ را از بقیه جدا کنند */
-    class HttpException(val code: Int, message: String) : IllegalStateException(message)
+    /** خطای HTTP با کد وضعیت و مهلت retry استاندارد، بدون افشای هدر/credential. */
+    class HttpException(
+        val code: Int,
+        message: String,
+        val retryAfterMillis: Long? = null
+    ) : IllegalStateException(message)
 
     /**
      * اجرای یک Request دلخواه با سقف حجم.
@@ -112,13 +118,10 @@ object Http {
      */
     private fun resolveFinal(request: Request, callTimeoutSeconds: Int? = null): Response {
         rejectSensitiveCleartext(request)
+        val requestClient = clientForTimeout(callTimeoutSeconds)
         var current = request
         repeat(MAX_REDIRECTS + 1) { redirectCount ->
-            val call = client.newCall(current)
-            callTimeoutSeconds?.let {
-                // سقف ۳۰۰ ثانیه: هم مدل‌های thinking کندند، هم دانلود APK روی موبایل.
-                call.timeout().timeout(it.coerceIn(3, 300).toLong(), TimeUnit.SECONDS)
-            }
+            val call = requestClient.newCall(current)
             val response = call.execute()
             if (!response.isRedirect) return response
             // پاسخِ redirect فقط برای هدر Location لازم است؛ بدنه‌اش بسته می‌شود.
@@ -283,7 +286,9 @@ object Http {
             try {
                 source.readUtf8()
             } catch (io: IOException) {
-                error("خواندن پاسخ ناتمام ماند")
+                // نوع IOException حفظ می‌شود تا مسیرهای AI بتوانند فقط خطای واقعاً
+                // گذرای خواندن/قطع شبکه را یک‌بار retry کنند.
+                throw IOException("خواندن پاسخ ناتمام ماند", io)
             }
         }
         if (!resp.isSuccessful) {
@@ -291,8 +296,45 @@ object Http {
             val detail = if (text.isNotBlank()) {
                 " — ${SensitiveText.redact(text.trim(), 240)}"
             } else ""
-            throw HttpException(resp.code, "HTTP ${resp.code}$detail")
+            throw HttpException(
+                resp.code,
+                "HTTP ${resp.code}$detail",
+                retryAfterMillis(resp.header("Retry-After"))
+            )
         }
         return text
+    }
+
+    internal fun boundedCallTimeoutSeconds(value: Int?): Int? = value?.coerceIn(3, 300)
+
+    /**
+     * Call.timeout به‌تنهایی readTimeout پانزده‌ثانیه‌ای را عوض نمی‌کند. کلاینت مشتق‌شده
+     * همان pool/dispatcher را به‌اشتراک می‌گذارد و فقط سه timeout مسیر بلند را تغییر می‌دهد.
+     */
+    internal fun clientForTimeout(callTimeoutSeconds: Int?): OkHttpClient {
+        val seconds = boundedCallTimeoutSeconds(callTimeoutSeconds) ?: return client
+        return client.newBuilder()
+            .readTimeout(seconds.toLong(), TimeUnit.SECONDS)
+            .writeTimeout(seconds.toLong(), TimeUnit.SECONDS)
+            .callTimeout(seconds.toLong(), TimeUnit.SECONDS)
+            .build()
+    }
+
+    /** Retry-After می‌تواند ثانیه یا تاریخ RFC 1123 باشد؛ مقدار منفی/غول‌آسا رد می‌شود. */
+    internal fun retryAfterMillis(
+        raw: String?,
+        nowMillis: Long = System.currentTimeMillis()
+    ): Long? {
+        val value = raw?.trim().orEmpty()
+        if (value.isEmpty()) return null
+        value.toLongOrNull()?.let { seconds ->
+            return seconds.takeIf { it in 0L..86_400L }?.times(1_000L)
+        }
+        val at = runCatching {
+            SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", Locale.US).apply {
+                isLenient = false
+            }.parse(value)?.time
+        }.getOrNull() ?: return null
+        return (at - nowMillis).takeIf { it in 0L..86_400_000L }
     }
 }

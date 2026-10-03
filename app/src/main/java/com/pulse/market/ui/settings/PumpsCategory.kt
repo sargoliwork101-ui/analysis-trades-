@@ -427,7 +427,7 @@ fun PumpsCategory(
             2 -> {
                 SectionHeader(
                     "نظر دوم هوش مصنوعی",
-                    "اختیاری و مستقل از مدل — API سازگار، نام مدل و کلید را خودت تعیین می‌کنی"
+                    "اتصال بومی Gemini/Claude یا API سازگار OpenAI — مدل و کلید دست خودت"
                 )
                 RowsCard {
                     SwitchRow(
@@ -476,7 +476,7 @@ fun PumpsCategory(
                             OutlinedTextField(
                                 value = aiConfig.endpoint,
                                 onValueChange = { vm.saveAiConfig(aiConfig.copy(endpoint = it.take(500))) },
-                                label = { Text("آدرس API سازگار") },
+                                label = { Text("آدرس API") },
                                 placeholder = { Text("https://example.com/v1") },
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
@@ -540,8 +540,8 @@ fun PumpsCategory(
                                 )
                             }
                             Hint(
-                                "تست، یک پیام خیلی کوتاه برای سرویس می‌فرستد (بدون داده‌ی کوین) و نتیجه‌ی دقیق " +
-                                        "آدرس، مدل و کلید را می‌گوید."
+                                "تست، یک پیام خیلی کوتاه و بدون داده‌ی کوین می‌فرستد و علاوه بر آدرس/مدل/کلید، " +
+                                        "مسیر واقعی (Gemini/Claude/OpenAI)، زمان پاسخ و کیفیت اتصال را نشان می‌دهد."
                             )
                         }
                         RowDivider()

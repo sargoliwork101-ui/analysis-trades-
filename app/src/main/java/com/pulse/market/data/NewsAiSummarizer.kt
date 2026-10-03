@@ -13,7 +13,7 @@ import kotlinx.serialization.json.put
 /** ترجمه، نظر، اثر و سابقه برای خبرهای واقعی؛ مدل اجازه‌ی ساخت لینک یا جایگزینی منبع را ندارد. */
 object NewsAiSummarizer {
     private const val MAX_ITEMS = 15
-    private const val BATCH_SIZE = 5
+    private const val BATCH_SIZE = 4
 
     data class Enrichment(
         val id: String,
@@ -32,8 +32,37 @@ object NewsAiSummarizer {
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
+    /** schema واقعی خروجی؛ Gemini آن را enforce می‌کند و OpenAI-compatible وارد JSON mode می‌شود. */
+    internal fun outputSchema(): JsonObject = buildJsonObject {
+        put("type", "OBJECT")
+        put("properties", buildJsonObject {
+            put("items", buildJsonObject {
+                put("type", "ARRAY")
+                put("items", buildJsonObject {
+                    put("type", "OBJECT")
+                    put("properties", buildJsonObject {
+                        for (field in listOf(
+                            "id", "persianTitle", "outlook", "marketImpact",
+                            "historicalContext", "summary"
+                        )) {
+                            put(field, buildJsonObject { put("type", "STRING") })
+                        }
+                        put("importance", buildJsonObject { put("type", "INTEGER") })
+                    })
+                    put("required", buildJsonArray {
+                        for (field in listOf(
+                            "id", "persianTitle", "outlook", "marketImpact",
+                            "historicalContext", "summary", "importance"
+                        )) add(JsonPrimitive(field))
+                    })
+                })
+            })
+        })
+        put("required", buildJsonArray { add(JsonPrimitive("items")) })
+    }
+
     /**
-     * پنج خبر در هر درخواست نگه داشته می‌شود تا پنج بخشِ فارسی هر خبر ناقص/بریده نشود.
+     * حداکثر چهار خبر در هر درخواست می‌رود تا پنج بخشِ فارسی در سقف توکن ناقص/بریده نشود.
      * شکست یک دسته، نتیجه‌ی دسته‌های موفق را از بین نمی‌برد.
      */
     suspend fun summarize(config: PumpAiConfig, items: List<MarketNewsItem>): Outcome {
@@ -98,7 +127,12 @@ object NewsAiSummarizer {
         // تحلیل پنج‌بخشی فارسی ممکن است روی مدل‌های reasoning/local کند باشد؛ هر مسیر
         // (حتی fallback کوتاهِ عمومی) برای خبرها تا پنج دقیقه فرصت کامل دارد.
         val completion = PumpAiReviewer.complete(
-            config, system, user, maxTokens = 4096, timeoutSeconds = 300
+            config = config,
+            system = system,
+            user = user,
+            maxTokens = 4096,
+            timeoutSeconds = 300,
+            responseSchema = outputSchema()
         )
         val content = completion.content ?: return Outcome(error = completion.error)
         val parsed = parse(content)

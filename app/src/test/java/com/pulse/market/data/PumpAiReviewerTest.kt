@@ -57,8 +57,8 @@ class PumpAiReviewerTest {
             PumpAiReviewer.chatCompletionsEndpoint("https://generativelanguage.googleapis.com/v1beta/openai")
         )
         assertEquals(
-            "https://api.anthropic.com/v1/chat/completions",
-            PumpAiReviewer.chatCompletionsEndpoint("https://api.anthropic.com/v1")
+            "https://api.anthropic.com/v1/messages",
+            PumpAiReviewer.anthropicEndpoint("https://api.anthropic.com/v1")
         )
     }
 
@@ -72,10 +72,17 @@ class PumpAiReviewerTest {
             )
             assertTrue(preset.id, config.isReady)
             assertTrue(preset.id, config.matches(preset))
-            assertTrue(
-                preset.id,
-                PumpAiReviewer.chatCompletionsEndpoint(preset.endpoint).endsWith("/chat/completions")
-            )
+            if (preset.id == "claude") {
+                assertTrue(
+                    preset.id,
+                    PumpAiReviewer.anthropicEndpoint(preset.endpoint).endsWith("/v1/messages")
+                )
+            } else {
+                assertTrue(
+                    preset.id,
+                    PumpAiReviewer.chatCompletionsEndpoint(preset.endpoint).endsWith("/chat/completions")
+                )
+            }
         }
     }
 
@@ -210,6 +217,72 @@ class PumpAiReviewerTest {
     }
 
     @Test
+    fun officialAnthropicUsesMessagesProtocolAndHeaders() {
+        val config = PumpAiConfig(
+            enabled = true,
+            endpoint = "https://api.anthropic.com/v1",
+            model = "claude-sonnet-4-5",
+            apiKey = "secret-test-key",
+            providerSearch = false
+        )
+        val coin = PumpScanner.PumpCoin(id = "sol", symbol = "sol", name = "Solana")
+        val route = PumpAiReviewer.reviewRoutes(config, coin).single()
+
+        assertTrue(route.nativeAnthropic)
+        assertEquals("https://api.anthropic.com/v1/messages", route.endpoint)
+        assertTrue(route.payload.toString().contains("\"system\""))
+        val request = PumpAiReviewer.buildRequest(config, route.endpoint, route.payload)
+        assertEquals("secret-test-key", request.header("x-api-key"))
+        assertEquals("2023-06-01", request.header("anthropic-version"))
+        assertNull(request.header("Authorization"))
+        assertEquals(
+            "پاسخ کلاد",
+            PumpAiReviewer.extractAnthropicContent(
+                """{"type":"message","content":[{"type":"thinking","thinking":"x"},{"type":"text","text":"پاسخ کلاد"}],"stop_reason":"end_turn"}"""
+            )
+        )
+    }
+
+    @Test
+    fun newsCompletionUsesStructuredOutputWithPlainFallback() {
+        val schema = NewsAiSummarizer.outputSchema()
+        val gemini = PumpAiReviewer.completionRoutes(
+            PumpAiConfig(
+                enabled = true,
+                endpoint = "https://generativelanguage.googleapis.com/v1beta",
+                model = "gemini-2.5-flash"
+            ),
+            "system", "user", 4096, schema
+        )
+        assertTrue(gemini.first().payload.toString().contains("responseSchema"))
+        assertTrue(gemini.first().payload.toString().contains("persianTitle"))
+        assertTrue(gemini.any { it.label.contains("متن ساده") })
+
+        val openAi = PumpAiReviewer.completionRoutes(
+            PumpAiConfig(
+                enabled = true,
+                endpoint = "https://api.openai.com/v1",
+                model = "gpt-4o-mini"
+            ),
+            "system", "user", 4096, schema
+        )
+        assertTrue(openAi.first().payload.toString().contains("response_format"))
+        assertTrue(!openAi.last().payload.toString().contains("response_format"))
+    }
+
+    @Test
+    fun transientFailuresHaveBoundedRetryAndQualityLabels() {
+        assertTrue(PumpAiReviewer.isRetryableHttp(Http.HttpException(503, "overloaded")))
+        assertTrue(PumpAiReviewer.isRetryableHttp(Http.HttpException(429, "slow_down", 2_000L)))
+        assertFalse(PumpAiReviewer.isRetryableHttp(Http.HttpException(429, "insufficient_quota")))
+        assertFalse(PumpAiReviewer.isRetryableHttp(Http.HttpException(429, "slow", 120_000L)))
+        assertEquals(2_000L, PumpAiReviewer.retryDelayMillis(0, 2_000L, 200L))
+        assertEquals(750L, PumpAiReviewer.retryDelayMillis(0, null, 0L))
+        assertEquals("عالی", PumpAiReviewer.connectionQuality(1_000L))
+        assertEquals("کند", PumpAiReviewer.connectionQuality(30_000L))
+    }
+
+    @Test
     fun thinkingPartsAreIgnoredAndEmptyAnswersAreExplained() {
         assertEquals(
             "پاسخ نهایی",
@@ -277,12 +350,20 @@ class PumpAiReviewerTest {
             model = "gemini-2.0-flash"
         )
         val compatRoutes = PumpAiReviewer.reviewRoutes(compatConfig, coin)
-        assertEquals(2, compatRoutes.size)
+        assertEquals(3, compatRoutes.size)
         assertTrue(!compatRoutes[0].nativeGemini)
-        assertTrue(compatRoutes[1].nativeGemini)
+        assertTrue(!compatRoutes[1].nativeGemini)
+        assertTrue(compatRoutes[2].nativeGemini)
 
         val openAi = PumpAiConfig(enabled = true, endpoint = "https://api.openai.com/v1", model = "gpt-4o-mini")
-        assertEquals(1, PumpAiReviewer.reviewRoutes(openAi, coin).size)
+        val openAiRoutes = PumpAiReviewer.reviewRoutes(openAi, coin)
+        assertEquals(3, openAiRoutes.size)
+        assertTrue(openAiRoutes[0].payload.toString().contains("web_search_options"))
+        assertTrue(openAiRoutes[0].payload.toString().contains("response_format"))
+        assertTrue(openAiRoutes[0].providerSearchRequested)
+        assertTrue(openAiRoutes.drop(1).none { it.providerSearchRequested })
+        assertTrue(!openAiRoutes.last().payload.toString().contains("web_search_options"))
+        assertTrue(!openAiRoutes.last().payload.toString().contains("response_format"))
     }
 
     @Test

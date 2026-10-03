@@ -2,6 +2,7 @@ package com.pulse.market.data
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -17,8 +18,10 @@ import kotlinx.serialization.json.put
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.IOException
 import java.net.URI
 import java.util.Locale
+import kotlin.random.Random
 
 /** نظر دوم اختیاری از هر سرویس OpenAI-compatible؛ تصمیم پایه‌ی برنامه را جایگزین نمی‌کند. */
 object PumpAiReviewer {
@@ -80,7 +83,10 @@ object PumpAiReviewer {
         val nativeGemini: Boolean,
         val label: String,
         /** سقف زمان همین مسیر (ثانیه) — مسیر اول بیشترین فرصت را دارد */
-        val timeoutSeconds: Int = REQUEST_TIMEOUT_SECONDS
+        val timeoutSeconds: Int = REQUEST_TIMEOUT_SECONDS,
+        val nativeAnthropic: Boolean = false,
+        /** آیا همین payload واقعاً ابزار جست‌وجوی provider را درخواست کرده است؟ */
+        val providerSearchRequested: Boolean = false
     )
 
     /**
@@ -92,6 +98,18 @@ object PumpAiReviewer {
         val system = systemPrompt()
         val user = userPrompt(coin)
         val noThinking = supportsThinkingBudget(config.model)
+        if (isAnthropicHost(config.endpoint)) {
+            return listOf(
+                Route(
+                    endpoint = anthropicEndpoint(config.endpoint),
+                    payload = anthropicBody(config.model, system, user, 2048, temperature = 0.2),
+                    nativeGemini = false,
+                    label = "Claude بومی",
+                    timeoutSeconds = REQUEST_TIMEOUT_SECONDS,
+                    nativeAnthropic = true
+                )
+            )
+        }
         if (isGeminiNative(config.endpoint)) {
             val native = geminiEndpoint(config.endpoint, config.model)
             val compat = geminiCompatEndpoint()
@@ -120,7 +138,47 @@ object PumpAiReviewer {
             )
         }
         val chat = chatCompletionsEndpoint(config.endpoint)
-        val routes = mutableListOf(Route(chat, requestBody(config, coin, chat), false, "سرویس"))
+        val routes = mutableListOf<Route>()
+        val jsonMode = supportsJsonMode(chat)
+        val withSearch = config.providerSearch && supportsProviderSearch(chat)
+        if (withSearch) {
+            // برخی مدل‌ها/حساب‌ها plugin وب را قبول نمی‌کنند؛ مسیر بعدی همان درخواست
+            // بدون plugin است تا ۴۰۰ یک قابلیت اختیاری کل تحلیل را خراب نکند.
+            routes += Route(
+                chat,
+                requestBody(
+                    config, coin, chat,
+                    includeProviderSearch = true,
+                    jsonMode = jsonMode
+                ),
+                false,
+                if (jsonMode) "سرویس + وب + JSON" else "سرویس + جست‌وجوی وب",
+                providerSearchRequested = true
+            )
+        }
+        if (jsonMode) {
+            routes += Route(
+                chat,
+                requestBody(
+                    config, coin, chat,
+                    includeProviderSearch = false,
+                    jsonMode = true
+                ),
+                false, "سرویس بدون وب + JSON",
+                if (withSearch) FALLBACK_TIMEOUT_SECONDS else REQUEST_TIMEOUT_SECONDS
+            )
+        }
+        routes += Route(
+            chat,
+            requestBody(
+                config, coin, chat,
+                includeProviderSearch = false,
+                jsonMode = false
+            ),
+            false,
+            "سرویس متن ساده",
+            if (!jsonMode && !withSearch) REQUEST_TIMEOUT_SECONDS else FALLBACK_TIMEOUT_SECONDS
+        )
         if (isGoogleHost(config.endpoint)) {
             // آدرس سازگار با OpenAI گوگل داده شده؛ مسیر بومی به‌عنوان پشتیبان می‌ماند.
             val native = geminiEndpoint(GOOGLE_BASE, config.model)
@@ -149,11 +207,11 @@ object PumpAiReviewer {
         var lastError: String? = null
         for (route in routes) {
             val raw = try {
-                Http.execute(
-                    buildRequest(config, route.endpoint, route.payload),
-                    maxBytes = 512L * 1024,
-                    // جست‌وجوی وب و مدل‌های کند گاهی بیش از ۲۵ ثانیه‌ی پیش‌فرض طول می‌کشند.
-                    callTimeoutSeconds = route.timeoutSeconds
+                executeAiRoute(
+                    config = config,
+                    route = route,
+                    timeoutSeconds = route.timeoutSeconds,
+                    maxBytes = 512L * 1024
                 )
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -166,9 +224,12 @@ object PumpAiReviewer {
                 lastError = networkErrorText(failure)
                 continue
             }
-            val content =
-                if (route.nativeGemini) extractGeminiContent(raw) else extractAssistantContent(raw)
-            if (content != null) return@withContext Outcome(review = parseReview(content, config.providerSearch))
+            val content = extractRouteContent(route, raw)
+            if (content != null) {
+                return@withContext Outcome(
+                    review = parseReview(content, route.providerSearchRequested)
+                )
+            }
             lastError = emptyContentReason(raw)
         }
         Outcome(error = lastError ?: "ارتباط با سرویس AI یا خواندن پاسخ ممکن نشد")
@@ -185,22 +246,27 @@ object PumpAiReviewer {
         user: String,
         maxTokens: Int = 2400,
         /** مهلت اختصاصی قابلیت‌های سنگین؛ null یعنی زمان پیش‌فرض همان مسیر. */
-        timeoutSeconds: Int? = null
+        timeoutSeconds: Int? = null,
+        /** در سرویس‌های پشتیبان، schema/JSON mode فعال و مسیر ساده هم حفظ می‌شود. */
+        responseSchema: JsonObject? = null
     ): CompletionOutcome = withContext(Dispatchers.IO) {
         if (!config.enabled) return@withContext CompletionOutcome(error = "بررسی هوش مصنوعی خاموش است")
         if (!config.isReady) return@withContext CompletionOutcome(error = "آدرس API و نام مدل را کامل کن")
         val routes = try {
-            completionRoutes(config, system, user, maxTokens.coerceIn(128, 4096))
+            completionRoutes(
+                config, system, user, maxTokens.coerceIn(128, 4096), responseSchema
+            )
         } catch (invalid: IllegalArgumentException) {
             return@withContext CompletionOutcome(error = invalid.message ?: "آدرس یا نام مدل نامعتبر است")
         }
         var lastError: String? = null
         for (route in routes) {
             val raw = try {
-                Http.execute(
-                    buildRequest(config, route.endpoint, route.payload),
-                    maxBytes = 512L * 1024,
-                    callTimeoutSeconds = completionTimeout(route.timeoutSeconds, timeoutSeconds)
+                executeAiRoute(
+                    config = config,
+                    route = route,
+                    timeoutSeconds = completionTimeout(route.timeoutSeconds, timeoutSeconds),
+                    maxBytes = 512L * 1024
                 )
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -214,25 +280,22 @@ object PumpAiReviewer {
                 lastError = networkErrorText(failure)
                 continue
             }
-            val content = if (route.nativeGemini) {
-                extractGeminiContent(raw)
-            } else {
-                extractAssistantContent(raw)
-            }
+            val content = extractRouteContent(route, raw)
             if (!content.isNullOrBlank()) return@withContext CompletionOutcome(content = content)
             lastError = emptyContentReason(raw)
         }
         CompletionOutcome(error = lastError ?: "ارتباط با سرویس AI یا خواندن پاسخ ممکن نشد")
     }
 
-    /** مسیرهای تکمیل عمومی؛ بدون ابزار وب و بدون schema اختصاصی تحلیل پامپ. */
+    /** مسیرهای تکمیل عمومی؛ بدون ابزار وب، با structured-output اختیاری و fallback ساده. */
     internal fun completionRoutes(
         config: PumpAiConfig,
         system: String,
         user: String,
-        maxTokens: Int
+        maxTokens: Int,
+        responseSchema: JsonObject? = null
     ): List<Route> {
-        fun chatPayload(): JsonObject = buildJsonObject {
+        fun chatPayload(jsonMode: Boolean): JsonObject = buildJsonObject {
             put("model", config.model)
             put("temperature", 0.15)
             put("max_tokens", maxTokens)
@@ -240,33 +303,84 @@ object PumpAiReviewer {
                 add(buildJsonObject { put("role", "system"); put("content", system) })
                 add(buildJsonObject { put("role", "user"); put("content", user) })
             })
+            if (jsonMode) {
+                put("response_format", buildJsonObject { put("type", "json_object") })
+            }
         }
-        val noThinking = supportsThinkingBudget(config.model)
-        if (isGeminiNative(config.endpoint)) {
+        if (isAnthropicHost(config.endpoint)) {
             return listOf(
                 Route(
-                    geminiEndpoint(config.endpoint, config.model),
-                    geminiBody(system, user, maxTokens, disableThinking = noThinking),
-                    true,
-                    "Gemini بومی",
-                    REQUEST_TIMEOUT_SECONDS
-                ),
-                Route(
-                    geminiCompatEndpoint(), chatPayload(), false,
-                    "Gemini سازگار OpenAI", FALLBACK_TIMEOUT_SECONDS
+                    endpoint = anthropicEndpoint(config.endpoint),
+                    payload = anthropicBody(config.model, system, user, maxTokens, temperature = 0.15),
+                    nativeGemini = false,
+                    label = "Claude بومی",
+                    timeoutSeconds = REQUEST_TIMEOUT_SECONDS,
+                    nativeAnthropic = true
                 )
             )
         }
+        val noThinking = supportsThinkingBudget(config.model)
+        if (isGeminiNative(config.endpoint)) {
+            val routes = mutableListOf(
+                Route(
+                    geminiEndpoint(config.endpoint, config.model),
+                    geminiBody(
+                        system, user, maxTokens,
+                        jsonOutput = responseSchema != null,
+                        disableThinking = noThinking,
+                        responseSchema = responseSchema
+                    ),
+                    true,
+                    if (responseSchema != null) "Gemini بومی + JSON ساختاری" else "Gemini بومی",
+                    REQUEST_TIMEOUT_SECONDS
+                )
+            )
+            if (responseSchema != null) {
+                routes += Route(
+                    geminiEndpoint(config.endpoint, config.model),
+                    geminiBody(system, user, maxTokens, disableThinking = noThinking),
+                    true, "Gemini بومی (متن ساده)", FALLBACK_TIMEOUT_SECONDS
+                )
+                routes += Route(
+                    geminiCompatEndpoint(), chatPayload(jsonMode = true), false,
+                    "Gemini سازگار OpenAI + JSON", FALLBACK_TIMEOUT_SECONDS
+                )
+            } else {
+                routes += Route(
+                    geminiCompatEndpoint(), chatPayload(jsonMode = false), false,
+                    "Gemini سازگار OpenAI", FALLBACK_TIMEOUT_SECONDS
+                )
+            }
+            return routes
+        }
         val chat = chatCompletionsEndpoint(config.endpoint)
-        val routes = mutableListOf(
-            Route(chat, chatPayload(), false, "سازگار OpenAI", REQUEST_TIMEOUT_SECONDS)
-        )
+        val routes = mutableListOf<Route>()
+        if (responseSchema != null && supportsJsonMode(chat)) {
+            routes += Route(
+                chat, chatPayload(jsonMode = true), false,
+                "سازگار OpenAI + JSON", REQUEST_TIMEOUT_SECONDS
+            )
+            routes += Route(
+                chat, chatPayload(jsonMode = false), false,
+                "سازگار OpenAI (متن ساده)", FALLBACK_TIMEOUT_SECONDS
+            )
+        } else {
+            routes += Route(
+                chat, chatPayload(jsonMode = false), false,
+                "سازگار OpenAI", REQUEST_TIMEOUT_SECONDS
+            )
+        }
         if (isGoogleHost(config.endpoint)) {
             routes += Route(
                 geminiEndpoint(GOOGLE_BASE, config.model),
-                geminiBody(system, user, maxTokens, disableThinking = noThinking),
+                geminiBody(
+                    system, user, maxTokens,
+                    jsonOutput = responseSchema != null,
+                    disableThinking = noThinking,
+                    responseSchema = responseSchema
+                ),
                 true,
-                "Gemini بومی",
+                if (responseSchema != null) "Gemini بومی + JSON ساختاری" else "Gemini بومی",
                 FALLBACK_TIMEOUT_SECONDS
             )
         }
@@ -301,29 +415,155 @@ object PumpAiReviewer {
     /** سقف زمان مسیرهای پشتیبان — کاربر نباید سه بار ۱۸۰ ثانیه منتظر بماند. */
     internal const val FALLBACK_TIMEOUT_SECONDS = 60
 
-    private fun buildRequest(config: PumpAiConfig, endpoint: String, payload: JsonObject): Request =
+    private const val MAX_AI_RETRIES = 1
+    private const val MAX_RETRY_AFTER_MS = 60_000L
+    private const val MIN_RETRY_CALL_WINDOW_MS = 3_000L
+
+    /** فقط خطاهای گذرا retry می‌شوند؛ خطای اعتبار/مدل/صورتحساب دوباره‌کاری نمی‌شود. */
+    internal fun isRetryableHttp(http: Http.HttpException): Boolean {
+        if (http.retryAfterMillis != null && http.retryAfterMillis > MAX_RETRY_AFTER_MS) return false
+        val detail = http.message.orEmpty().lowercase(Locale.ROOT)
+        if (detail.contains("insufficient_quota") || detail.contains("billing") ||
+            detail.contains("credit balance")
+        ) return false
+        return http.code == 408 || http.code == 425 || http.code == 429 ||
+            http.code in 500..504
+    }
+
+    internal fun retryDelayMillis(
+        attempt: Int,
+        retryAfterMillis: Long?,
+        jitterMillis: Long
+    ): Long {
+        retryAfterMillis?.let { return it.coerceIn(0L, MAX_RETRY_AFTER_MS) }
+        val exponential = 750L * (1L shl attempt.coerceIn(0, 4))
+        return (exponential + jitterMillis.coerceIn(0L, 250L)).coerceAtMost(MAX_RETRY_AFTER_MS)
+    }
+
+    /** اجرای مسیر AI با یک retry محدود، backoff+jitter و احترام به Retry-After. */
+    private suspend fun executeAiRoute(
+        config: PumpAiConfig,
+        route: Route,
+        timeoutSeconds: Int,
+        maxBytes: Long
+    ): String {
+        val request = buildRequest(config, route.endpoint, route.payload)
+        val deadlineNanos = System.nanoTime() + timeoutSeconds.toLong() * 1_000_000_000L
+        var attempt = 0
+        while (true) {
+            val attemptTimeout = if (attempt == 0) {
+                timeoutSeconds
+            } else {
+                ((deadlineNanos - System.nanoTime()) / 1_000_000_000L)
+                    .coerceAtMost(timeoutSeconds.toLong()).toInt()
+            }
+            try {
+                return Http.execute(request, maxBytes, attemptTimeout)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (http: Http.HttpException) {
+                if (attempt >= MAX_AI_RETRIES || !isRetryableHttp(http)) throw http
+                val wait = retryDelayMillis(
+                    attempt, http.retryAfterMillis, Random.nextLong(0L, 251L)
+                )
+                if (!hasRetryWindow(deadlineNanos, wait)) throw http
+                delay(wait)
+                if (!hasRetryWindow(deadlineNanos, 0L)) throw http
+                attempt++
+            } catch (io: IOException) {
+                if (attempt >= MAX_AI_RETRIES) throw io
+                val wait = retryDelayMillis(attempt, null, Random.nextLong(0L, 251L))
+                if (!hasRetryWindow(deadlineNanos, wait)) throw io
+                delay(wait)
+                if (!hasRetryWindow(deadlineNanos, 0L)) throw io
+                attempt++
+            }
+        }
+    }
+
+    /** backoff نیز داخل سقف کلی همان route است؛ retry زمان پنج‌دقیقه‌ای را دوبرابر نمی‌کند. */
+    private fun hasRetryWindow(deadlineNanos: Long, waitMillis: Long): Boolean {
+        val remainingMillis = (deadlineNanos - System.nanoTime()) / 1_000_000L
+        return remainingMillis >= waitMillis + MIN_RETRY_CALL_WINDOW_MS
+    }
+
+    internal fun buildRequest(config: PumpAiConfig, endpoint: String, payload: JsonObject): Request =
         Request.Builder()
             .url(endpoint)
             .post(payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
             .header("Accept", "application/json")
             .apply {
                 if (config.apiKey.isNotBlank()) {
-                    if (isGeminiNative(endpoint)) {
-                        // کلید AI Studio فقط با این هدر پذیرفته می‌شود.
-                        header("X-goog-api-key", config.apiKey)
-                        return@apply
-                    }
-                    header("Authorization", "Bearer ${config.apiKey}")
-                    // Anthropic هم هدر اختصاصی خودش را می‌پذیرد و هم Bearer؛ فرستادن هر دو
-                    // جلوی خطای «authentication» در مسیر سازگار با OpenAI را می‌گیرد.
-                    val host = hostOf(endpoint)
-                    if (host.endsWith("anthropic.com") || host.endsWith("llmsrelay.com")) {
-                        header("x-api-key", config.apiKey)
-                        header("anthropic-version", "2023-06-01")
+                    when {
+                        isGeminiNative(endpoint) -> {
+                            // کلید AI Studio فقط با این هدر پذیرفته می‌شود.
+                            header("X-goog-api-key", config.apiKey)
+                        }
+                        isAnthropicHost(endpoint) -> {
+                            // API رسمی Claude Bearer/OpenAI-compatible نیست؛ Messages API
+                            // فقط x-api-key + نسخه‌ی پروتکل را می‌خواهد.
+                            header("x-api-key", config.apiKey)
+                            header("anthropic-version", "2023-06-01")
+                        }
+                        else -> {
+                            header("Authorization", "Bearer ${config.apiKey}")
+                            if (hostOf(endpoint).endsWith("llmsrelay.com")) {
+                                header("x-api-key", config.apiKey)
+                                header("anthropic-version", "2023-06-01")
+                            }
+                        }
                     }
                 }
             }
             .build()
+
+    /** API رسمی Anthropic از POST /v1/messages استفاده می‌کند، نه chat/completions. */
+    internal fun isAnthropicHost(endpoint: String): Boolean {
+        val host = hostOf(endpoint)
+        return host == "api.anthropic.com" || host.endsWith(".anthropic.com")
+    }
+
+    internal fun anthropicEndpoint(raw: String): String {
+        require(PumpAiConfig.isValidEndpoint(raw)) { "آدرس API نامعتبر است" }
+        val clean = raw.trim().trimEnd('/')
+        return when {
+            clean.endsWith("/messages", ignoreCase = true) -> clean
+            clean.endsWith("/v1", ignoreCase = true) -> "$clean/messages"
+            else -> "$clean/v1/messages"
+        }
+    }
+
+    internal fun anthropicBody(
+        model: String,
+        system: String,
+        user: String,
+        maxTokens: Int,
+        temperature: Double
+    ): JsonObject = buildJsonObject {
+        put("model", model.trim())
+        put("max_tokens", maxTokens)
+        put("temperature", temperature)
+        put("system", system)
+        put("messages", buildJsonArray {
+            add(buildJsonObject {
+                put("role", "user")
+                put("content", user)
+            })
+        })
+    }
+
+    /** plugin وب فقط برای دو payload شناخته‌شده فرستاده می‌شود و همیشه fallback ساده دارد. */
+    internal fun supportsProviderSearch(endpoint: String): Boolean {
+        val host = hostOf(endpoint)
+        return host == "api.openai.com" || host == "openrouter.ai" ||
+            host.endsWith(".openrouter.ai")
+    }
+
+    /** JSON mode شناخته‌شده؛ endpoint دلخواه با پارامتر ناسازگار خراب نمی‌شود. */
+    internal fun supportsJsonMode(endpoint: String): Boolean {
+        val host = hostOf(endpoint)
+        return supportsProviderSearch(endpoint) || host.endsWith("generativelanguage.googleapis.com")
+    }
 
     /**
      * کلیدهای Google AI Studio روی مسیر بومی Gemini کار می‌کنند
@@ -379,7 +619,9 @@ object PumpAiReviewer {
          */
         jsonOutput: Boolean = false,
         /** خاموش‌کردن فاز «تفکر» مدل‌های 2.5 — سرعت پاسخ چند برابر می‌شود. */
-        disableThinking: Boolean = false
+        disableThinking: Boolean = false,
+        /** schema اختصاصی قابلیت؛ null + jsonOutput یعنی schema تحلیل پامپ. */
+        responseSchema: JsonObject? = null
     ): JsonObject = buildJsonObject {
         put("systemInstruction", buildJsonObject {
             put("parts", buildJsonArray { add(buildJsonObject { put("text", system) }) })
@@ -396,9 +638,9 @@ object PumpAiReviewer {
             if (disableThinking) {
                 put("thinkingConfig", buildJsonObject { put("thinkingBudget", 0) })
             }
-            if (jsonOutput) {
+            if (jsonOutput || responseSchema != null) {
                 put("responseMimeType", "application/json")
-                put("responseSchema", reviewSchema())
+                put("responseSchema", responseSchema ?: reviewSchema())
             }
         })
     }
@@ -458,6 +700,24 @@ object PumpAiReviewer {
         return text.takeIf { it.isNotBlank() }
     }
 
+    /** پاسخ رسمی Messages API کلاد: content[].type=text/content[].text. */
+    internal fun extractAnthropicContent(raw: String): String? {
+        val root = runCatching { json.parseToJsonElement(raw) as? JsonObject }.getOrNull() ?: return null
+        val blocks = root["content"] as? JsonArray ?: return null
+        return blocks.mapNotNull { element ->
+            val block = element as? JsonObject ?: return@mapNotNull null
+            val type = (block["type"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+            if (!type.equals("text", ignoreCase = true)) null
+            else (block["text"] as? JsonPrimitive)?.contentOrNull
+        }.joinToString("\n").trim().takeIf { it.isNotBlank() }
+    }
+
+    private fun extractRouteContent(route: Route, raw: String): String? = when {
+        route.nativeGemini -> extractGeminiContent(raw)
+        route.nativeAnthropic -> extractAnthropicContent(raw)
+        else -> extractAssistantContent(raw)
+    }
+
     /**
      * چرا پاسخ متن نداشت؟ متداول‌ترین حالت، تمام‌شدن سقف توکن روی مدل‌های «thinking»
      * است (کل بودجه صرف تفکر می‌شود و بخش متن خالی می‌ماند).
@@ -477,6 +737,18 @@ object PumpAiReviewer {
                 as? JsonPrimitive)?.contentOrNull
         if (!blockReason.isNullOrBlank()) {
             return "درخواست توسط فیلتر ایمنی سرویس رد شد ($blockReason)"
+        }
+        // Messages API کلاد: stop_reason و stop_details/refusal احتمالی.
+        if ((root["type"] as? JsonPrimitive)?.contentOrNull.equals("message", true)) {
+            val reason = (root["stop_reason"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+            val refusal = ((root["stop_details"] as? JsonObject)?.get("explanation")
+                as? JsonPrimitive)?.contentOrNull
+            return when {
+                !refusal.isNullOrBlank() -> "مدل پاسخ‌دادن را رد کرد: ${refusal.take(120)}"
+                reason.equals("max_tokens", true) -> "سقف طول پاسخ کلاد پر شد"
+                reason.isNotBlank() -> "کلاد بدون متن پاسخ داد (دلیل پایان: $reason)"
+                else -> "کلاد پاسخ داد ولی متن قابل‌خواندن نداشت"
+            }
         }
         // مسیر سازگار با OpenAI: choices[0].finish_reason و refusal احتمالی
         ((root["choices"] as? JsonArray)?.firstOrNull() as? JsonObject)?.let { choice ->
@@ -594,7 +866,19 @@ object PumpAiReviewer {
         }
     }
 
-    data class TestResult(val ok: Boolean, val message: String)
+    data class TestResult(
+        val ok: Boolean,
+        val message: String,
+        val latencyMillis: Long? = null,
+        val route: String = ""
+    )
+
+    internal fun connectionQuality(latencyMillis: Long): String = when {
+        latencyMillis < 2_000L -> "عالی"
+        latencyMillis < 8_000L -> "خوب"
+        latencyMillis < 20_000L -> "متوسط"
+        else -> "کند"
+    }
 
     /**
      * تست اتصال: یک درخواست بسیار کوچک می‌فرستد تا معلوم شود آدرس، مدل و کلید
@@ -623,11 +907,13 @@ object PumpAiReviewer {
         }
         var lastMessage = "❌ ارتباط با سرویس AI ممکن نشد"
         for (route in routes) {
+            val startedAt = System.nanoTime()
             val raw = try {
-                Http.execute(
-                    buildRequest(config, route.endpoint, route.payload),
-                    maxBytes = 64L * 1024,
-                    callTimeoutSeconds = 60
+                executeAiRoute(
+                    config = config,
+                    route = route,
+                    timeoutSeconds = 60,
+                    maxBytes = 64L * 1024
                 )
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -640,14 +926,15 @@ object PumpAiReviewer {
                 lastMessage = "❌ " + networkErrorText(failure)
                 continue
             }
-            val content =
-                (if (route.nativeGemini) extractGeminiContent(raw) else extractAssistantContent(raw))
-                    ?.trim().orEmpty()
+            val content = extractRouteContent(route, raw)?.trim().orEmpty()
             if (content.isNotBlank()) {
+                val latency = ((System.nanoTime() - startedAt) / 1_000_000L).coerceAtLeast(0L)
                 return@withContext TestResult(
-                    true,
-                    "✅ اتصال برقرار شد — مدل «${config.model}» از مسیر ${route.label} پاسخ داد: " +
-                            content.take(40)
+                    ok = true,
+                    message = "✅ اتصال ${connectionQuality(latency)} (${latency}ms) — " +
+                        "مدل «${config.model}» از مسیر ${route.label} پاسخ داد: ${content.take(40)}",
+                    latencyMillis = latency,
+                    route = route.label
                 )
             }
             lastMessage = "⚠️ " + emptyContentReason(raw)
@@ -666,6 +953,17 @@ object PumpAiReviewer {
             put("messages", buildJsonArray {
                 add(buildJsonObject { put("role", "user"); put("content", user) })
             })
+        }
+        if (isAnthropicHost(config.endpoint)) {
+            return listOf(
+                Route(
+                    endpoint = anthropicEndpoint(config.endpoint),
+                    payload = anthropicBody(config.model, system, user, 16, temperature = 0.0),
+                    nativeGemini = false,
+                    label = "Claude بومی",
+                    nativeAnthropic = true
+                )
+            )
         }
         if (isGeminiNative(config.endpoint)) {
             return listOf(
@@ -790,7 +1088,9 @@ object PumpAiReviewer {
     private fun requestBody(
         config: PumpAiConfig,
         coin: PumpScanner.PumpCoin,
-        endpoint: String
+        endpoint: String,
+        includeProviderSearch: Boolean = config.providerSearch,
+        jsonMode: Boolean = false
     ): JsonObject {
         val system = systemPrompt()
         val user = userPrompt(coin)
@@ -802,7 +1102,10 @@ object PumpAiReviewer {
                 add(buildJsonObject { put("role", "system"); put("content", system) })
                 add(buildJsonObject { put("role", "user"); put("content", user) })
             })
-            if (config.providerSearch) {
+            if (jsonMode) {
+                put("response_format", buildJsonObject { put("type", "json_object") })
+            }
+            if (includeProviderSearch) {
                 // افزونه‌ی جست‌وجوی دو ارائه‌دهنده‌ی رایج؛ سایر سرویس‌ها می‌توانند
                 // جست‌وجو را با قابلیت داخلی خود مدل و بر اساس prompt انجام دهند.
                 val host = runCatching {

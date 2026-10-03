@@ -48,10 +48,7 @@ data class PumpAiConfig(
     )
 
     companion object {
-        /**
-         * سرویس‌های آماده؛ همه از مسیر سازگار با OpenAI (chat/completions) و هدر
-         * Authorization: Bearer پشتیبانی می‌کنند، پس نیازی به کد اختصاصی نیست.
-         */
+        /** سرویس‌های آماده؛ Gemini و Claude از API بومی خودشان و بقیه از OpenAI-compatible. */
         val PRESETS: List<Preset> = listOf(
             Preset(
                 id = "gemini",
@@ -75,7 +72,7 @@ data class PumpAiConfig(
                 title = "Claude (کلاد)",
                 endpoint = "https://api.anthropic.com/v1",
                 model = "claude-sonnet-4-5",
-                hint = "کلید از console.anthropic.com؛ Anthropic مسیر سازگار با OpenAI را پشتیبانی می‌کند.",
+                hint = "کلید از console.anthropic.com؛ برنامه مستقیم از Messages API رسمی Claude با هدرهای x-api-key و anthropic-version استفاده می‌کند.",
                 providerSearch = false
             ),
             Preset(
