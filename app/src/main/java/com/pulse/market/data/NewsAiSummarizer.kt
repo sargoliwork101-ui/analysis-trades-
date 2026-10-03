@@ -95,7 +95,11 @@ object NewsAiSummarizer {
             "historicalContext":"...","summary":"...","importance":0}]}
         """.trimIndent()
         val user = "این خبرهای واقعی را ترجمه و تحلیل کن. idها را دقیقاً بدون تغییر برگردان:\n$payload"
-        val completion = PumpAiReviewer.complete(config, system, user, maxTokens = 4096)
+        // تحلیل پنج‌بخشی فارسی ممکن است روی مدل‌های reasoning/local کند باشد؛ هر مسیر
+        // (حتی fallback کوتاهِ عمومی) برای خبرها تا پنج دقیقه فرصت کامل دارد.
+        val completion = PumpAiReviewer.complete(
+            config, system, user, maxTokens = 4096, timeoutSeconds = 300
+        )
         val content = completion.content ?: return Outcome(error = completion.error)
         val parsed = parse(content)
         return if (parsed.isEmpty()) {

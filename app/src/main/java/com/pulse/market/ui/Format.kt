@@ -86,6 +86,23 @@ object Format {
         return if (persian) toPersianDigits(text) else text
     }
 
+    /** فاصله‌ی خوانا از زمان انتشار خبر؛ now ورودی است تا منطق خالص و قابل تست بماند. */
+    fun relativeTime(ts: Long, now: Long = System.currentTimeMillis()): String {
+        if (ts <= 0L) return "زمان نامشخص"
+        val age = (now - ts).coerceAtLeast(0L)
+        val minutes = age / 60_000L
+        val hours = age / (60L * 60_000L)
+        val days = age / (24L * 60L * 60_000L)
+        return when {
+            minutes < 1L -> "لحظاتی پیش"
+            minutes < 60L -> "${toPersianDigits(minutes.toString())} دقیقه پیش"
+            hours < 24L -> "${toPersianDigits(hours.toString())} ساعت پیش"
+            hours < 48L -> "دیروز"
+            days < 30L -> "${toPersianDigits(days.toString())} روز پیش"
+            else -> dateLong(ts)
+        }
+    }
+
     /** فقط تاریخ (بدون ساعت) — تقویمِ شمسی، برای نمایشِ فشرده مثل «تاریخ خرید» روی ویجت */
     fun date(ts: Long, persian: Boolean = true): String {
         if (ts <= 0L) return "—"

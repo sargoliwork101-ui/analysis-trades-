@@ -133,6 +133,7 @@ enum class SettingsSection(val title: String) {
 fun SettingsScreen(
     widgetId: Int = 0,
     isAddFlow: Boolean = false,
+    openNewsRequest: Int = 0,
     onApply: (WidgetConfig) -> Unit
 ) {
 
@@ -169,6 +170,15 @@ fun SettingsScreen(
 
     val editingWidget = widgetId != 0
     val mainTabsAvailable = !isAddFlow && !editingWidget
+
+    // لمس اعلانِ «خبرها آماده شد» مستقیماً همین تب را باز می‌کند؛ درخواست جدید در
+    // Activity تک‌نمونه‌ای هم با شمارنده‌ی تازه دوباره اجرا می‌شود.
+    LaunchedEffect(openNewsRequest, mainTabsAvailable) {
+        if (openNewsRequest > 0 && mainTabsAvailable) {
+            section = null
+            mainTab = 1
+        }
+    }
 
     // ─── ذخیره‌ی خودکار هر تغییر (با اسکوپ دائمی — با بسته شدن صفحه از بین نمی‌رود) ───
 
@@ -222,12 +232,12 @@ fun SettingsScreen(
     val notifPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { }
-    // درخواست مجوز فقط وقتی کاربر وارد یکی از بخش‌های اعلان‌دار می‌شود؛ درخواست ناگهانی در
-    // اولین اجرای برنامه هم نرخ رد شدن را بالا می‌برد و هم با سیاست فروشگاه‌ها ناسازگار است.
-    LaunchedEffect(section) {
-        if ((section == SettingsSection.ALERTS || section == SettingsSection.PUMPS) &&
-            Build.VERSION.SDK_INT >= 33
-        ) {
+    // درخواست مجوز فقط وقتی کاربر وارد هشدارها، پامپ‌ها یا تب خبرها می‌شود؛ درخواست ناگهانی
+    // در اولین اجرای برنامه هم نرخ رد شدن را بالا می‌برد و هم با سیاست فروشگاه‌ها ناسازگار است.
+    LaunchedEffect(section, mainTab) {
+        val notificationFeatureVisible = section == SettingsSection.ALERTS ||
+            section == SettingsSection.PUMPS || (mainTabsAvailable && mainTab == 1)
+        if (notificationFeatureVisible && Build.VERSION.SDK_INT >= 33) {
             val granted = ContextCompat.checkSelfPermission(
                 context, Manifest.permission.POST_NOTIFICATIONS
             ) == PackageManager.PERMISSION_GRANTED

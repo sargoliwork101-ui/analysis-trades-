@@ -10,6 +10,7 @@ import com.pulse.market.data.MarketNews
 import com.pulse.market.data.MarketNewsItem
 import com.pulse.market.data.NewsAiSummarizer
 import com.pulse.market.data.NewsCacheStore
+import com.pulse.market.data.NewsNotifier
 import com.pulse.market.data.PumpAiConfig
 import com.pulse.market.data.PumpAiConfigStore
 import kotlinx.coroutines.CancellationException
@@ -131,6 +132,8 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
             val outcome = NewsAiSummarizer.summarize(config, pending)
             outcome.error?.let { aiError = it }
             if (outcome.items.isNotEmpty()) {
+                val completedIds = pending.asSequence().map { it.id }
+                    .filter { it in outcome.items }.toSet()
                 items = items.map { item ->
                     val enriched = outcome.items[item.id] ?: return@map item
                     item.copy(
@@ -144,6 +147,13 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
                 }.sortedWith(compareByDescending<MarketNewsItem> { it.importance }
                     .thenByDescending { it.publishedAt })
                 withContext(Dispatchers.IO) { NewsCacheStore.save(ctx, fetchedAt, items) }
+                val newestCompleted = items.filter { it.id in completedIds }
+                    .maxByOrNull { it.publishedAt }
+                NewsNotifier.notifyReady(
+                    ctx,
+                    completedIds.size,
+                    newestCompleted?.displayTitle.orEmpty()
+                )
             }
         } catch (cancelled: CancellationException) {
             throw cancelled

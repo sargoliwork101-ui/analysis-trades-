@@ -43,6 +43,14 @@ class PumpAiReviewerTest {
     }
 
     @Test
+    fun heavyCompletionCanExtendEveryRouteToFiveMinutes() {
+        assertEquals(300, PumpAiReviewer.completionTimeout(60, 300))
+        assertEquals(180, PumpAiReviewer.completionTimeout(180, 30))
+        assertEquals(300, PumpAiReviewer.completionTimeout(60, 900))
+        assertEquals(60, PumpAiReviewer.completionTimeout(60, null))
+    }
+
+    @Test
     fun endpointKeepsGoogleCompatiblePath() {
         assertEquals(
             "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",

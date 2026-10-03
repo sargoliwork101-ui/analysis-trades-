@@ -183,7 +183,9 @@ object PumpAiReviewer {
         config: PumpAiConfig,
         system: String,
         user: String,
-        maxTokens: Int = 2400
+        maxTokens: Int = 2400,
+        /** مهلت اختصاصی قابلیت‌های سنگین؛ null یعنی زمان پیش‌فرض همان مسیر. */
+        timeoutSeconds: Int? = null
     ): CompletionOutcome = withContext(Dispatchers.IO) {
         if (!config.enabled) return@withContext CompletionOutcome(error = "بررسی هوش مصنوعی خاموش است")
         if (!config.isReady) return@withContext CompletionOutcome(error = "آدرس API و نام مدل را کامل کن")
@@ -198,7 +200,7 @@ object PumpAiReviewer {
                 Http.execute(
                     buildRequest(config, route.endpoint, route.payload),
                     maxBytes = 512L * 1024,
-                    callTimeoutSeconds = route.timeoutSeconds
+                    callTimeoutSeconds = completionTimeout(route.timeoutSeconds, timeoutSeconds)
                 )
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -288,6 +290,10 @@ object PumpAiReviewer {
             else -> "$clean/v1/chat/completions"
         }
     }
+
+    /** زمان درخواستیِ قابلیت سنگین فقط می‌تواند مهلت مسیر را بیشتر کند، نه کمتر. */
+    internal fun completionTimeout(defaultSeconds: Int, requestedSeconds: Int?): Int =
+        requestedSeconds?.coerceIn(3, 300)?.let { maxOf(defaultSeconds, it) } ?: defaultSeconds
 
     /** سقف زمان یک درخواست AI (ثانیه) — مدل‌های کند و جست‌وجوی وب وقت بیشتری می‌خواهند. */
     internal const val REQUEST_TIMEOUT_SECONDS = 180

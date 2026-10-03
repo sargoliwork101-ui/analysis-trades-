@@ -77,4 +77,15 @@ class FormatTest {
     fun dateTimeHandlesEmptyTimestamp() {
         assertEquals("—", Format.dateTime(0L))
     }
+
+    @Test
+    fun relativeNewsTimeUsesClearPersianAgeLabels() {
+        val now = 10L * 24L * 60L * 60L * 1000L
+        assertEquals("زمان نامشخص", Format.relativeTime(0L, now))
+        assertEquals("لحظاتی پیش", Format.relativeTime(now - 20_000L, now))
+        assertEquals("۵ دقیقه پیش", Format.relativeTime(now - 5L * 60_000L, now))
+        assertEquals("۳ ساعت پیش", Format.relativeTime(now - 3L * 60L * 60_000L, now))
+        assertEquals("دیروز", Format.relativeTime(now - 25L * 60L * 60_000L, now))
+        assertEquals("۵ روز پیش", Format.relativeTime(now - 5L * 24L * 60L * 60_000L, now))
+    }
 }

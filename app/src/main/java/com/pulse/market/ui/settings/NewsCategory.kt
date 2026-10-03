@@ -48,6 +48,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.pulse.market.data.MarketNewsItem
 import com.pulse.market.data.NewsCategory
 import com.pulse.market.data.NewsRegion
+import com.pulse.market.data.NewsSortOrder
+import com.pulse.market.data.sortedFor
 import com.pulse.market.ui.Format
 
 /** تب اصلی خبرها: ایران/جهان، فیلتر بازار، خلاصه AI و لینک کاملِ منبع. */
@@ -60,19 +62,21 @@ fun NewsCategory(
     val context = LocalContext.current
     var categoryName by rememberSaveable { mutableStateOf("") }
     var regionName by rememberSaveable { mutableStateOf("") }
+    var sortName by rememberSaveable { mutableStateOf(NewsSortOrder.NEWEST.name) }
     var visibleCount by rememberSaveable { mutableIntStateOf(15) }
 
     LaunchedEffect(Unit) { vm.onVisible() }
-    LaunchedEffect(categoryName, regionName) { visibleCount = 15 }
+    LaunchedEffect(categoryName, regionName, sortName) { visibleCount = 15 }
 
     val category = NewsCategory.entries.firstOrNull { it.name == categoryName }
     val region = NewsRegion.entries.firstOrNull { it.name == regionName }
+    val sortOrder = NewsSortOrder.entries.firstOrNull { it.name == sortName } ?: NewsSortOrder.NEWEST
     val analyzedItems = remember(vm.items) { vm.items.filter { it.hasCompleteAiAnalysis } }
-    val filtered = remember(analyzedItems, category, region) {
+    val filtered = remember(analyzedItems, category, region, sortOrder) {
         analyzedItems.filter { item ->
             (category == null || item.category == category) &&
                 (region == null || item.region == region)
-        }
+        }.sortedFor(sortOrder)
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -102,7 +106,7 @@ fun NewsCategory(
                     Spacer(Modifier.width(8.dp))
                     Text(
                         when {
-                            vm.aiBusy -> "هوش مصنوعی در حال ترجمه و تحلیل خبرهای مهم است…"
+                            vm.aiBusy -> "هوش مصنوعی در حال تحلیل است؛ هر دسته تا ۵ دقیقه فرصت پاسخ دارد…"
                             vm.aiConfig.enabled && vm.aiConfig.isReady ->
                                 "ترجمه و تحلیل کامل فارسی با ${vm.aiConfig.model} فعال است"
                             else -> "برای نمایش خبرهای فارسی و تحلیل‌شده، هوش مصنوعی را تنظیم کن"
@@ -153,7 +157,7 @@ fun NewsCategory(
                     )
                 }
             }
-            OutlinedButton(onClick = vm::refresh, enabled = !vm.loading) {
+            OutlinedButton(onClick = vm::refresh, enabled = !vm.loading && !vm.aiBusy) {
                 Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(17.dp))
                 Spacer(Modifier.width(5.dp))
                 Text("تازه‌سازی", fontSize = 11.5.sp)
@@ -196,6 +200,20 @@ fun NewsCategory(
                 FilterChip(
                     selected = category == option,
                     onClick = { categoryName = option.name },
+                    label = { Text(option.label, fontSize = 11.sp) }
+                )
+            }
+        }
+
+        Text("مرتب‌سازی", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            for (option in NewsSortOrder.entries) {
+                FilterChip(
+                    selected = sortOrder == option,
+                    onClick = { sortName = option.name },
                     label = { Text(option.label, fontSize = 11.sp) }
                 )
             }
@@ -245,6 +263,7 @@ fun NewsCategory(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun NewsCard(item: MarketNewsItem, onOpen: () -> Unit) {
     val accent = when (item.category) {
@@ -264,15 +283,27 @@ private fun NewsCard(item: MarketNewsItem, onOpen: () -> Unit) {
             modifier = Modifier.padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(9.dp)
         ) {
-            Row(
+            FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(7.dp),
-                verticalAlignment = Alignment.CenterVertically
+                verticalArrangement = Arrangement.spacedBy(5.dp)
             ) {
                 NewsBadge(item.category.label, accent)
                 NewsBadge(item.region.label, MaterialTheme.colorScheme.secondary)
+                if (item.isFresh()) NewsBadge("تازه • ۲۴ ساعت اخیر", MaterialTheme.colorScheme.primary)
                 if (item.importance >= 78) NewsBadge("مهم", MaterialTheme.colorScheme.error)
                 NewsBadge("تحلیل کامل AI", MaterialTheme.colorScheme.primary)
             }
+            Text(
+                if (item.publishedAt > 0L) {
+                    "تاریخ انتشار: ${Format.dateTime(item.publishedAt)} • ${Format.relativeTime(item.publishedAt)}"
+                } else {
+                    "تاریخ انتشار: نامشخص"
+                },
+                fontSize = 10.8.sp,
+                lineHeight = 17.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
             Text(
                 item.displayTitle,
                 fontSize = 14.sp,
@@ -312,11 +343,6 @@ private fun NewsCard(item: MarketNewsItem, onOpen: () -> Unit) {
                         listOf(item.source, item.host).filter { it.isNotBlank() }.distinct().joinToString(" • "),
                         fontSize = 10.5.sp,
                         color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        if (item.publishedAt > 0L) Format.dateTime(item.publishedAt) else "زمان انتشار نامشخص",
-                        fontSize = 10.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 TextButton(onClick = onOpen) {

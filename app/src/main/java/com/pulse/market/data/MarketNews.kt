@@ -32,6 +32,12 @@ enum class NewsRegion(val label: String) {
     WORLD("جهان")
 }
 
+enum class NewsSortOrder(val label: String) {
+    NEWEST("جدیدترین"),
+    OLDEST("قدیمی‌ترین"),
+    IMPORTANT("مهم‌ترین")
+}
+
 /** یک خبرِ پاک‌سازی‌شده؛ متن AI فقط غنی‌سازی است و لینک/منبع اصلی را عوض نمی‌کند. */
 @Serializable
 data class MarketNewsItem(
@@ -64,6 +70,31 @@ data class MarketNewsItem(
     /** میزبان واقعی لینک؛ نام منبعِ RSS به‌تنهایی قابل اعتماد نیست. */
     val host: String
         get() = runCatching { URI(url).host.orEmpty().lowercase(Locale.ROOT) }.getOrDefault("")
+
+    /** برچسب «تازه» برای خبرهای منتشرشده در ۲۴ ساعت اخیر؛ ساعت آینده/نامعتبر تازه نیست. */
+    fun isFresh(now: Long = System.currentTimeMillis()): Boolean =
+        publishedAt > 0L && now - publishedAt in 0L..FRESH_NEWS_MS
+}
+
+internal const val FRESH_NEWS_MS = 24L * 60L * 60L * 1000L
+
+/** تاریخ نامشخص همیشه آخر می‌ماند؛ حتی در مرتب‌سازی قدیمی‌ترین. */
+fun List<MarketNewsItem>.sortedFor(order: NewsSortOrder): List<MarketNewsItem> = when (order) {
+    NewsSortOrder.NEWEST -> sortedWith(
+        compareByDescending<MarketNewsItem> { it.publishedAt > 0L }
+            .thenByDescending { it.publishedAt }
+            .thenByDescending { it.importance }
+    )
+    NewsSortOrder.OLDEST -> sortedWith(
+        compareByDescending<MarketNewsItem> { it.publishedAt > 0L }
+            .thenBy { if (it.publishedAt > 0L) it.publishedAt else Long.MAX_VALUE }
+            .thenByDescending { it.importance }
+    )
+    NewsSortOrder.IMPORTANT -> sortedWith(
+        compareByDescending<MarketNewsItem> { it.publishedAt > 0L }
+            .thenByDescending { it.importance }
+            .thenByDescending { it.publishedAt }
+    )
 }
 
 data class MarketNewsFeed(

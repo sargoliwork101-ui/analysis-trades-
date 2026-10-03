@@ -12,6 +12,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.LayoutDirection.Rtl
@@ -27,6 +28,8 @@ class MainActivity : ComponentActivity() {
 
     /** صفر = الگوی پیش‌فرض؛ هر شماره‌ی دیگر = تنظیمات همان ویجت */
     private val widgetIdState = mutableStateOf(0)
+    /** با هر کلیک اعلان زیاد می‌شود تا حتی در Activity زنده، تب خبرها دوباره انتخاب شود. */
+    private val openNewsRequestState = mutableIntStateOf(0)
     private var closingConfigure = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -34,6 +37,7 @@ class MainActivity : ComponentActivity() {
         // رابط برنامه فارسی است؛ جهت صفحه نباید به زبان تنظیم‌شده‌ی گوشی وابسته باشد.
         window.decorView.layoutDirection = View.LAYOUT_DIRECTION_RTL
         readWidgetId(intent)
+        readNavigation(intent)
 
         // در جریان «افزودن ویجت»، حتی با دکمه‌ی برگشت هم ویجت اضافه شود
         // (اگر نتیجه cancel شود، لانچر پیام Couldn't add widget را نشان می‌دهد)
@@ -68,6 +72,7 @@ class MainActivity : ComponentActivity() {
                             SettingsScreen(
                                 widgetId = widgetIdState.value,
                                 isAddFlow = intent?.action == AppWidgetManager.ACTION_APPWIDGET_CONFIGURE,
+                                openNewsRequest = openNewsRequestState.intValue,
                                 onApply = { finishConfigure() }
                             )
                         }
@@ -97,6 +102,13 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         readWidgetId(intent)
+        readNavigation(intent)
+    }
+
+    private fun readNavigation(intent: Intent?) {
+        if (intent?.action == ACTION_OPEN_NEWS) {
+            openNewsRequestState.intValue += 1
+        }
     }
 
     private fun readWidgetId(intent: Intent?) {
@@ -129,5 +141,9 @@ class MainActivity : ComponentActivity() {
             )
             finish()
         }
+    }
+
+    companion object {
+        const val ACTION_OPEN_NEWS = "com.pulse.market.action.OPEN_NEWS"
     }
 }

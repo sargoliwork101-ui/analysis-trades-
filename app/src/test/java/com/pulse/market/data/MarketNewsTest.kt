@@ -114,6 +114,39 @@ class MarketNewsTest {
     }
 
     @Test
+    fun newsSortingKeepsUnknownDatesLastAndSupportsAllOrders() {
+        fun item(id: String, publishedAt: Long, importance: Int) = MarketNewsItem(
+            id = id, title = id, sourceSummary = "خلاصه بازار",
+            url = "https://example.com/$id", source = "منبع", publishedAt = publishedAt,
+            category = NewsCategory.ECONOMY, region = NewsRegion.IRAN, importance = importance
+        )
+        val news = listOf(
+            item("old", 1_000L, 20),
+            item("new", 3_000L, 50),
+            item("important", 2_000L, 90),
+            item("unknown", 0L, 100)
+        )
+
+        assertEquals(listOf("new", "important", "old", "unknown"), news.sortedFor(NewsSortOrder.NEWEST).map { it.id })
+        assertEquals(listOf("old", "important", "new", "unknown"), news.sortedFor(NewsSortOrder.OLDEST).map { it.id })
+        assertEquals(listOf("important", "new", "old", "unknown"), news.sortedFor(NewsSortOrder.IMPORTANT).map { it.id })
+    }
+
+    @Test
+    fun freshBadgeUsesPublishedTimeAndRejectsFutureOrUnknown() {
+        val now = 100L * FRESH_NEWS_MS
+        val item = MarketNewsItem(
+            id = "fresh", title = "خبر", sourceSummary = "خلاصه",
+            url = "https://example.com/fresh", source = "منبع", publishedAt = now - 60_000L,
+            category = NewsCategory.ECONOMY, region = NewsRegion.IRAN, importance = 50
+        )
+        assertTrue(item.isFresh(now))
+        assertFalse(item.copy(publishedAt = now - FRESH_NEWS_MS - 1L).isFresh(now))
+        assertFalse(item.copy(publishedAt = now + 1L).isFresh(now))
+        assertFalse(item.copy(publishedAt = 0L).isFresh(now))
+    }
+
+    @Test
     fun deduplicateKeepsRicherCopy() {
         val base = MarketNewsItem(
             id = "a", title = "Bitcoin ETF approved", sourceSummary = "short",
