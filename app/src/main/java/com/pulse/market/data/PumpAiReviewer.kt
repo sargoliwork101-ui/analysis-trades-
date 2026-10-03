@@ -584,11 +584,17 @@ object PumpAiReviewer {
      * (`finish_reason = length`) و کاربر خطای گمراه‌کننده می‌بیند؛ پس برای این مدل‌ها
      * کف بودجه بالا برده می‌شود.
      */
-    internal fun tokenBudget(model: String, requested: Int): Int =
-        if (needsModernTokenParam(model)) maxOf(requested, MIN_REASONING_TOKENS) else requested
+    internal fun tokenBudget(model: String, requested: Int): Int = if (needsModernTokenParam(model)) {
+        (requested + REASONING_TOKEN_RESERVE).coerceAtMost(MAX_REASONING_TOKENS)
+    } else {
+        requested
+    }
 
-    /** کف بودجه‌ی خروجی مدل‌های استدلالی. */
-    internal const val MIN_REASONING_TOKENS = 1_024
+    /** ذخیره‌ی اضافه برای توکن‌های «تفکر»، تا متن پاسخ قربانی آن‌ها نشود. */
+    internal const val REASONING_TOKEN_RESERVE = 1_024
+
+    /** سقف نهایی بودجه‌ی این مدل‌ها؛ جلوی هزینه/تأخیر بی‌مرز را می‌گیرد. */
+    internal const val MAX_REASONING_TOKENS = 8_192
 
     /** مدل‌های استدلالی OpenAI: o1، o3-mini، o4-mini… (نه o1-preview از سرویس دیگر مهم است). */
     private val O_SERIES = Regex("^o[1-9][0-9]?(\\z|[-_.])")

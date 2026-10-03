@@ -224,10 +224,17 @@ class PumpAiFailoverTest {
 
     @Test
     fun reasoningModelsGetAWorkableOutputBudget() {
-        // سقف ۱۶ توکنیِ تست اتصال روی مدل استدلالی، پاسخ را بی‌متن می‌کرد.
-        assertEquals(PumpAiReviewer.MIN_REASONING_TOKENS, PumpAiReviewer.tokenBudget("gpt-5-mini", 16))
-        assertEquals(PumpAiReviewer.MIN_REASONING_TOKENS, PumpAiReviewer.tokenBudget("o3-mini", 1200))
-        assertEquals(4096, PumpAiReviewer.tokenBudget("gpt-5", 4096))
+        // سقف ۱۶ توکنیِ تست اتصال روی مدل استدلالی، پاسخ را بی‌متن می‌کرد: توکن‌های
+        // «تفکر» از همان سقف کم می‌شوند، پس برای این مدل‌ها ذخیره‌ی اضافه لازم است.
+        val reserve = PumpAiReviewer.REASONING_TOKEN_RESERVE
+        assertEquals(16 + reserve, PumpAiReviewer.tokenBudget("gpt-5-mini", 16))
+        assertEquals(1200 + reserve, PumpAiReviewer.tokenBudget("o3-mini", 1200))
+        assertEquals(4096 + reserve, PumpAiReviewer.tokenBudget("gpt-5", 4096))
+        assertEquals(
+            PumpAiReviewer.MAX_REASONING_TOKENS,
+            PumpAiReviewer.tokenBudget("o3", PumpAiReviewer.MAX_REASONING_TOKENS)
+        )
+        // مدل‌های معمولی دقیقاً همان بودجه‌ی خواسته‌شده را می‌گیرند.
         assertEquals(16, PumpAiReviewer.tokenBudget("gpt-4o-mini", 16))
         assertEquals(1200, PumpAiReviewer.tokenBudget("gemini-2.0-flash", 1200))
     }
