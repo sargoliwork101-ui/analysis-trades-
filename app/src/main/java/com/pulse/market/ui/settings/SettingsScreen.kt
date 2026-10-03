@@ -594,6 +594,9 @@ fun SettingsScreen(
                         },
                         onAddAlert = { editingAlert = null; alertDialogOpen = true },
                         onToggleVibrate = { on -> persist(cfg.copy(alertVibrate = on)) },
+                        onOpenNotificationSettings = {
+                            AlertEngine.openNotificationSettings(context, cfg.alertVibrate)
+                        },
                         onTestNotification = { AlertEngine.notifyTest(context, cfg.alertVibrate) },
                         history = alertHistory,
                         onClearHistory = {
@@ -984,8 +987,8 @@ private fun themeName(theme: WidgetTheme): String = when (theme) {
     WidgetTheme.DARK -> "تیره"
     WidgetTheme.LIGHT -> "روشن"
     WidgetTheme.GLASS -> "شیشه‌ای"
-    WidgetTheme.AURORA -> "شفق قطبی"
-    WidgetTheme.NEON -> "نئون"
+    WidgetTheme.OCEAN -> "اقیانوس"
+    WidgetTheme.MOCHA -> "موکا"
 }
 
 // ═══════════════════ درباره‌ی اپ ═══════════════════

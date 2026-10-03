@@ -143,7 +143,7 @@ data class Quote(
     val anomalyPct: Double? = null
 )
 
-/** تم ویجت — تیره/روشن + سه تم ترند: شیشه‌ای، شفق قطبی، نئون */
+/** تم ویجت — تیره/روشن + سه ظاهر مدرن: شیشه‌ای، اقیانوس و موکا */
 @Serializable(with = WidgetThemeSerializer::class)
 enum class WidgetTheme {
     /** تیره‌ی کلاسیک */
@@ -155,14 +155,17 @@ enum class WidgetTheme {
     /** شیشه‌ای (Glassmorphism) — نیمه‌شفاف با حاشیه‌ی روشن */
     GLASS,
 
-    /** شفق قطبی (Aurora) — گرادیان بنفش/نیلی/فیروزه‌ای */
-    AURORA,
+    /** اقیانوس — آبیِ عمیق و سبزآبیِ آرام با کنتراست بالا */
+    OCEAN,
 
-    /** نئون (Cyber) — مشکی بنفش با تأکید نئونی */
-    NEON
+    /** موکا — طیف گرم قهوه‌ای با متن کرم و ظاهر مینیمال */
+    MOCHA
 }
 
-/** سازگاری با نسخه‌های قدیمی: AMOLED حذف شد و به «شیشه‌ای» مهاجرت می‌کند */
+/**
+ * سازگاری با تنظیمات قدیمی: تم‌های حذف‌شده به نزدیک‌ترین تم تازه مهاجرت می‌کنند؛
+ * در نتیجه بکاپ یا ویجتِ نسخه‌ی قبل خراب نمی‌شود و در ذخیره‌ی بعدی نام تازه ثبت می‌شود.
+ */
 object WidgetThemeSerializer : KSerializer<WidgetTheme> {
 
     override val descriptor: SerialDescriptor =
@@ -177,6 +180,8 @@ object WidgetThemeSerializer : KSerializer<WidgetTheme> {
         return WidgetTheme.entries.firstOrNull { it.name == name }
             ?: when (name) {
                 "AMOLED" -> WidgetTheme.GLASS
+                "AURORA" -> WidgetTheme.OCEAN
+                "NEON" -> WidgetTheme.MOCHA
                 else -> WidgetTheme.DARK
             }
     }

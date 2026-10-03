@@ -19,9 +19,14 @@ import kotlin.math.abs
 object PumpAlertEngine {
     private const val PREF = "pulse_pump_alerts"
     // دو کانال: با لرزش و بی‌لرزش (کاربر از تنظیمات هشدار انتخاب می‌کند).
-    private const val CHANNEL_ID = "pulse_pump_alerts_v1"
-    private const val CHANNEL_ID_SILENT = "pulse_pump_alerts_novib_v1"
-    private val VIBRATION_PATTERN = longArrayOf(0L, 70L)
+    // id تازه لازم است چون اندروید اجازه‌ی اصلاح لرزشِ کانالِ ازقبل‌ساخته‌شده را نمی‌دهد.
+    private const val CHANNEL_ID = "pulse_pump_alerts_v2"
+    private const val CHANNEL_ID_SILENT = "pulse_pump_alerts_novib_v2"
+    private val OBSOLETE_CHANNEL_IDS = arrayOf(
+        "pulse_pump_alerts_v1",
+        "pulse_pump_alerts_novib_v1"
+    )
+    private val VIBRATION_PATTERN = longArrayOf(0L, 220L, 120L, 280L)
     private fun channelId(vibrate: Boolean) = if (vibrate) CHANNEL_ID else CHANNEL_ID_SILENT
     private const val LAST_BACKGROUND_CHECK = "last_background_check"
     private const val MIN_SCAN_INTERVAL_MS = 15 * 60 * 1000L
@@ -179,6 +184,11 @@ object PumpAlertEngine {
     private fun ensureChannel(context: Context, vibrate: Boolean) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        for (oldId in OBSOLETE_CHANNEL_IDS) {
+            if (manager.getNotificationChannel(oldId) != null) {
+                runCatching { manager.deleteNotificationChannel(oldId) }
+            }
+        }
         val id = channelId(vibrate)
         if (manager.getNotificationChannel(id) != null) return
         val channel = NotificationChannel(

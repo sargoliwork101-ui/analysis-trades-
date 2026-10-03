@@ -6,7 +6,9 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.pulse.market.R
@@ -32,16 +34,22 @@ object AlertEngine {
     private const val PREF = "pulse_alerts"
     // دو کانال: یکی با لرزش، یکی بی‌لرزش. در اندروید ۸+ لرزش را کانال تعیین می‌کند
     // (نه تک‌تک نوتیف‌ها)، پس برای اختیاری‌کردنِ لرزش باید کانالِ مناسب انتخاب شود.
-    private const val CHANNEL_ID = "pulse_price_alerts_v2"
-    private const val CHANNEL_ID_SILENT = "pulse_price_alerts_novib_v2"
+    // شناسه‌ی v3 عمداً تازه است: ویژگی لرزشِ کانال پس از ساخته‌شدن immutable است و کانالِ
+    // قدیمیِ بعضی نصب‌ها بی‌لرزش مانده بود؛ ساخت کانال تازه تنظیم خراب را واقعاً اصلاح می‌کند.
+    private const val CHANNEL_ID = "pulse_price_alerts_v3"
+    private const val CHANNEL_ID_SILENT = "pulse_price_alerts_novib_v3"
+    private val OBSOLETE_CHANNEL_IDS = arrayOf(
+        "pulse_price_alerts_v2",
+        "pulse_price_alerts_novib_v2"
+    )
 
     /** پیش‌فرض «یادآوری بعداً» روی نوتیف (دقیقه) */
     const val SNOOZE_DEFAULT_MIN = 15
 
     private fun channelId(vibrate: Boolean) = if (vibrate) CHANNEL_ID else CHANNEL_ID_SILENT
 
-    /** یک «تپ» کوتاه و محتاطانه (۷۰ میلی‌ثانیه) — بدون ویبره‌ی طولانی و تکراری */
-    private val VIBRATION_PATTERN = longArrayOf(0L, 70L)
+    /** دو ضربه‌ی واضح؛ الگوی قبلیِ ۷۰ms روی بسیاری از گوشی‌ها عملاً حس نمی‌شد. */
+    private val VIBRATION_PATTERN = longArrayOf(0L, 220L, 120L, 280L)
 
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
@@ -404,6 +412,22 @@ object AlertEngine {
         postAlertNotification(context, notifId, reminderTitle, text, bigText, vibrate)
     }
 
+    /** صفحه‌ی تنظیمات اعلانِ خود اندروید؛ برای رام‌هایی که لرزش را جداگانه می‌بندند. */
+    fun openNotificationSettings(context: Context, vibrate: Boolean = true): Boolean {
+        ensureChannel(context, vibrate)
+        val intent = (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+            }
+        } else {
+            Intent(
+                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.parse("package:${context.packageName}")
+            )
+        }).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return runCatching { context.startActivity(intent) }.isSuccess
+    }
+
     /** برای دکمه‌ی «تست هشدار» در تنظیمات */
     fun notifyTest(context: Context, vibrate: Boolean = true) {
         ensureChannel(context, vibrate)
@@ -432,6 +456,13 @@ object AlertEngine {
     private fun ensureChannel(context: Context, vibrate: Boolean) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        // کانال‌های قبلی فقط تنظیماتِ منسوخ را در صفحه‌ی سیستم شلوغ می‌کنند. چون تنظیمِ
+        // vibration یک کانال موجود قابل بازنویسی نیست، مهاجرت باید با id تازه انجام شود.
+        for (oldId in OBSOLETE_CHANNEL_IDS) {
+            if (manager.getNotificationChannel(oldId) != null) {
+                runCatching { manager.deleteNotificationChannel(oldId) }
+            }
+        }
         val id = channelId(vibrate)
         if (manager.getNotificationChannel(id) != null) return
         val channel = NotificationChannel(

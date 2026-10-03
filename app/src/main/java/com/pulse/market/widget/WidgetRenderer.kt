@@ -64,14 +64,14 @@ object WidgetRenderer {
             0xFFEAF2FF.toInt(), 0xFF9DB4D4.toInt(), 0xFF3A4E73.toInt()
         )
 
-        WidgetTheme.AURORA -> Palette(
-            R.drawable.widget_bg_aurora, R.drawable.row_bg_aurora_a, R.drawable.row_bg_aurora_b,
-            0xFFFFFFFF.toInt(), 0xFFDDD6FE.toInt(), 0xFF6D5BD0.toInt()
+        WidgetTheme.OCEAN -> Palette(
+            R.drawable.widget_bg_ocean, R.drawable.row_bg_ocean_a, R.drawable.row_bg_ocean_b,
+            0xFFF0FDFA.toInt(), 0xFF99F6E4.toInt(), 0xFF287C80.toInt()
         )
 
-        WidgetTheme.NEON -> Palette(
-            R.drawable.widget_bg_neon, R.drawable.row_bg_neon_a, R.drawable.row_bg_neon_b,
-            0xFFF5F3FF.toInt(), 0xFF67E8F9.toInt(), 0xFF3B0764.toInt()
+        WidgetTheme.MOCHA -> Palette(
+            R.drawable.widget_bg_mocha, R.drawable.row_bg_mocha_a, R.drawable.row_bg_mocha_b,
+            0xFFFFF7ED.toInt(), 0xFFD6C2B5.toInt(), 0xFF6B554B.toInt()
         )
     }
 

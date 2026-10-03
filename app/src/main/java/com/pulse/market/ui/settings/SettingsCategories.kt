@@ -81,8 +81,8 @@ private fun themeBrush(theme: WidgetTheme): Brush = when (theme) {
     WidgetTheme.DARK -> Brush.linearGradient(listOf(Color(0xFF1B2A46), Color(0xFF0B1220)))
     WidgetTheme.LIGHT -> Brush.linearGradient(listOf(Color(0xFFFFFFFF), Color(0xFFE8EEF6)))
     WidgetTheme.GLASS -> Brush.linearGradient(listOf(Color(0xFF3B4D6E), Color(0xFF151E30)))
-    WidgetTheme.AURORA -> Brush.linearGradient(listOf(Color(0xFF7C3AED), Color(0xFF4F46E5), Color(0xFF0E7490)))
-    WidgetTheme.NEON -> Brush.linearGradient(listOf(Color(0xFF2A1546), Color(0xFF0D0518)))
+    WidgetTheme.OCEAN -> Brush.linearGradient(listOf(Color(0xFF0C4A6E), Color(0xFF115E59), Color(0xFF082F49)))
+    WidgetTheme.MOCHA -> Brush.linearGradient(listOf(Color(0xFF4A3934), Color(0xFF2D211E), Color(0xFF181210)))
 }
 
 private data class PreviewColors(val text: Color, val sub: Color, val rowA: Color, val rowB: Color)
@@ -91,16 +91,16 @@ private fun previewColors(theme: WidgetTheme): PreviewColors = when (theme) {
     WidgetTheme.DARK -> PreviewColors(Color(0xFFF1F5F9), Color(0xFF8B9AB1), Color(0xFF2C3E5E), Color(0xFF1E2C48))
     WidgetTheme.LIGHT -> PreviewColors(Color(0xFF0F172A), Color(0xFF64748B), Color(0xFFFFFFFF), Color(0xFFEEF3F9))
     WidgetTheme.GLASS -> PreviewColors(Color(0xFFEAF2FF), Color(0xFF9DB4D4), Color(0x38FFFFFF), Color(0x24FFFFFF))
-    WidgetTheme.AURORA -> PreviewColors(Color(0xFFFFFFFF), Color(0xFFDDD6FE), Color(0x38FFFFFF), Color(0x22FFFFFF))
-    WidgetTheme.NEON -> PreviewColors(Color(0xFFF5F3FF), Color(0xFF67E8F9), Color(0xFF2E1B4E), Color(0xFF1C1032))
+    WidgetTheme.OCEAN -> PreviewColors(Color(0xFFF0FDFA), Color(0xFF99F6E4), Color(0xFF176B70), Color(0xFF105A63))
+    WidgetTheme.MOCHA -> PreviewColors(Color(0xFFFFF7ED), Color(0xFFD6C2B5), Color(0xFF493934), Color(0xFF382A26))
 }
 
 private fun themeLabel(theme: WidgetTheme): String = when (theme) {
     WidgetTheme.DARK -> "🌙 تیره"
     WidgetTheme.LIGHT -> "☀️ روشن"
     WidgetTheme.GLASS -> "🫧 شیشه‌ای"
-    WidgetTheme.AURORA -> "🌌 شفق قطبی"
-    WidgetTheme.NEON -> "⚡ نئون"
+    WidgetTheme.OCEAN -> "🌊 اقیانوس"
+    WidgetTheme.MOCHA -> "☕ موکا"
 }
 
 // ═══════════════════ ۱) منابع داده ═══════════════════
@@ -1084,6 +1084,7 @@ fun AlertsCategory(
     onDeleteAlert: (AlertRule) -> Unit,
     onAddAlert: () -> Unit,
     onToggleVibrate: (Boolean) -> Unit = {},
+    onOpenNotificationSettings: () -> Unit = {},
     onTestNotification: () -> Unit,
     history: List<AlertEvent> = emptyList(),
     onClearHistory: () -> Unit = {}
@@ -1095,10 +1096,24 @@ fun AlertsCategory(
         RowsCard {
             SwitchRow(
                 "لرزش هنگام هشدار",
-                "اگر خاموش کنی، هشدار می‌آید ولی گوشی نمی‌لرزد",
+                "دو لرزش واضح؛ اگر خاموش کنی، هشدار بی‌لرزش می‌آید",
                 cfg.alertVibrate,
                 onToggleVibrate
             )
+            RowDivider()
+            InnerRow {
+                Text(
+                    "اگر حالت مزاحم‌نشدن یا تنظیم لرزشِ گوشی بسته باشد، از تنظیمات سیستم بررسی کن.",
+                    fontSize = 11.5.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedButton(
+                    onClick = onOpenNotificationSettings,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("تنظیمات نوتیفیکیشن گوشی", fontSize = 12.sp)
+                }
+            }
         }
 
         // ── خواب موقت: نوتیف‌ها فعلاً می‌خوابند ──
