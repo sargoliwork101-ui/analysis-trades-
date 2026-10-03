@@ -418,6 +418,7 @@ object PumpAiReviewer {
     private const val MAX_AI_RETRIES = 1
     private const val MAX_RETRY_AFTER_MS = 60_000L
     private const val MIN_RETRY_CALL_WINDOW_MS = 3_000L
+    internal const val CONNECTION_TEST_TIMEOUT_SECONDS = 20
 
     /** فقط خطاهای گذرا retry می‌شوند؛ خطای اعتبار/مدل/صورتحساب دوباره‌کاری نمی‌شود. */
     internal fun isRetryableHttp(http: Http.HttpException): Boolean {
@@ -873,6 +874,33 @@ object PumpAiReviewer {
         val route: String = ""
     )
 
+    /** مقصد واقعیِ بدون کلید/query که درخواست به آن فرستاده می‌شود؛ برای شفافیت UI. */
+    data class ConnectionTarget(
+        val route: String,
+        val scheme: String,
+        val host: String,
+        val path: String
+    ) {
+        val display: String get() = "$scheme://$host$path"
+    }
+
+    internal fun connectionTarget(config: PumpAiConfig): ConnectionTarget? = runCatching {
+        val route = testRoutes(config).first()
+        val uri = URI(route.endpoint)
+        ConnectionTarget(
+            route = route.label,
+            scheme = uri.scheme.orEmpty().lowercase(Locale.ROOT),
+            host = uri.host.orEmpty().lowercase(Locale.ROOT),
+            path = uri.rawPath.orEmpty().ifBlank { "/" }
+        ).takeIf { it.scheme.isNotBlank() && it.host.isNotBlank() }
+    }.getOrNull()
+
+    private fun routeDestination(route: Route): String = runCatching {
+        val uri = URI(route.endpoint)
+        uri.scheme.orEmpty().lowercase(Locale.ROOT) + "://" +
+            uri.host.orEmpty().lowercase(Locale.ROOT) + uri.rawPath.orEmpty().ifBlank { "/" }
+    }.getOrDefault("مقصد نامعتبر")
+
     internal fun connectionQuality(latencyMillis: Long): String = when {
         latencyMillis < 2_000L -> "عالی"
         latencyMillis < 8_000L -> "خوب"
@@ -907,23 +935,24 @@ object PumpAiReviewer {
         }
         var lastMessage = "❌ ارتباط با سرویس AI ممکن نشد"
         for (route in routes) {
+            val destination = routeDestination(route)
             val startedAt = System.nanoTime()
             val raw = try {
                 executeAiRoute(
                     config = config,
                     route = route,
-                    timeoutSeconds = 60,
+                    timeoutSeconds = CONNECTION_TEST_TIMEOUT_SECONDS,
                     maxBytes = 64L * 1024
                 )
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (http: Http.HttpException) {
                 val message = httpErrorText(http)
-                lastMessage = "❌ $message"
+                lastMessage = "❌ $message — مقصد مستقیم: $destination"
                 if (isFatalServiceError(http, message)) return@withContext TestResult(false, lastMessage)
                 continue
             } catch (failure: Exception) {
-                lastMessage = "❌ " + networkErrorText(failure)
+                lastMessage = "❌ ${networkErrorText(failure)} — مقصد مستقیم: $destination"
                 continue
             }
             val content = extractRouteContent(route, raw)?.trim().orEmpty()
@@ -932,12 +961,13 @@ object PumpAiReviewer {
                 return@withContext TestResult(
                     ok = true,
                     message = "✅ اتصال ${connectionQuality(latency)} (${latency}ms) — " +
-                        "مدل «${config.model}» از مسیر ${route.label} پاسخ داد: ${content.take(40)}",
+                        "مدل «${config.model}» از مسیر ${route.label} روی $destination پاسخ داد: " +
+                        content.take(40),
                     latencyMillis = latency,
                     route = route.label
                 )
             }
-            lastMessage = "⚠️ " + emptyContentReason(raw)
+            lastMessage = "⚠️ ${emptyContentReason(raw)} — مقصد مستقیم: $destination"
         }
         TestResult(false, lastMessage)
     }

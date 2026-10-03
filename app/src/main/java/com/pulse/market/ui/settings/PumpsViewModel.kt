@@ -111,12 +111,21 @@ class PumpsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun testAiConnection() {
+        if (aiTestBusy) return
         val config = aiConfig
         aiTestBusy = true
         aiTestResult = null
         viewModelScope.launch {
             try {
                 aiTestResult = PumpAiReviewer.testConnection(config)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                val destination = PumpAiReviewer.connectionTarget(config)?.display ?: config.endpoint
+                aiTestResult = PumpAiReviewer.TestResult(
+                    false,
+                    "❌ تست اتصال کامل نشد — مقصد مستقیم: $destination"
+                )
             } finally {
                 aiTestBusy = false
             }

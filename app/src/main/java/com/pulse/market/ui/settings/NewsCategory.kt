@@ -49,6 +49,7 @@ import com.pulse.market.data.MarketNewsItem
 import com.pulse.market.data.NewsCategory
 import com.pulse.market.data.NewsRegion
 import com.pulse.market.data.NewsSortOrder
+import com.pulse.market.data.PumpAiReviewer
 import com.pulse.market.data.sortedFor
 import com.pulse.market.ui.Format
 
@@ -71,6 +72,7 @@ fun NewsCategory(
     val category = NewsCategory.entries.firstOrNull { it.name == categoryName }
     val region = NewsRegion.entries.firstOrNull { it.name == regionName }
     val sortOrder = NewsSortOrder.entries.firstOrNull { it.name == sortName } ?: NewsSortOrder.NEWEST
+    val aiTarget = remember(vm.aiConfig) { PumpAiReviewer.connectionTarget(vm.aiConfig) }
     val analyzedItems = remember(vm.items) { vm.items.filter { it.hasCompleteAiAnalysis } }
     val filtered = remember(analyzedItems, category, region, sortOrder) {
         analyzedItems.filter { item ->
@@ -106,7 +108,9 @@ fun NewsCategory(
                     Spacer(Modifier.width(8.dp))
                     Text(
                         when {
-                            vm.aiBusy -> "هوش مصنوعی در حال تحلیل است؛ هر دسته تا ۵ دقیقه فرصت پاسخ دارد…"
+                            vm.aiBusy -> vm.aiProgress.ifBlank {
+                                "هوش مصنوعی در حال تحلیل است؛ هر دسته تا ۵ دقیقه فرصت پاسخ دارد…"
+                            }
                             vm.aiConfig.enabled && vm.aiConfig.isReady ->
                                 "ترجمه و تحلیل کامل فارسی با ${vm.aiConfig.model} فعال است"
                             else -> "برای نمایش خبرهای فارسی و تحلیل‌شده، هوش مصنوعی را تنظیم کن"
@@ -121,6 +125,16 @@ fun NewsCategory(
                         "نظر و سابقه از دانش عمومی مدل است، جست‌وجوی زنده یا پیش‌بینی قطعی نیست؛ برای تصمیم مالی منبع را باز کن.",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    "تیترها مستقیماً از RSS گوگل‌نیوز، نبض بورس، اقتصاد۲۴، اقتصاد آنلاین، CoinDesk و CNBC خوانده می‌شوند. " +
+                        if (aiTarget != null) {
+                            "ترجمه/تحلیل با همان API تنظیم‌شده و مستقیم روی ${aiTarget.display} (${aiTarget.route}) انجام می‌شود."
+                        } else {
+                            "برای ترجمه/تحلیل هنوز مقصد AI معتبری تنظیم نشده است."
+                        },
+                    fontSize = 10.5.sp,
+                    color = MaterialTheme.colorScheme.primary
                 )
                 if (!vm.aiConfig.enabled || !vm.aiConfig.isReady) {
                     OutlinedButton(onClick = onConfigureAi, modifier = Modifier.fillMaxWidth()) {

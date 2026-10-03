@@ -66,6 +66,7 @@ import com.pulse.market.data.MAX_SYMBOLS
 import com.pulse.market.data.PumpAiConfig
 import com.pulse.market.data.PaperTradeStore
 import com.pulse.market.data.PumpAlertEngine
+import com.pulse.market.data.PumpAiReviewer
 import com.pulse.market.data.PumpScanner
 import com.pulse.market.data.PumpSortPeriod
 import com.pulse.market.data.SymbolDef
@@ -113,6 +114,7 @@ fun PumpsCategory(
     val aiStorageError = vm.aiStorageError
     val aiTestBusy = vm.aiTestBusy
     val aiTestResult = vm.aiTestResult
+    val aiTarget = remember(aiConfig) { PumpAiReviewer.connectionTarget(aiConfig) }
     val previousMatches = vm.previousMatches
     val trades = vm.trades
     val tradeNotice = vm.tradeNotice
@@ -513,9 +515,15 @@ fun PumpsCategory(
                             }
                             Hint(
                                 "کلید با Android Keystore رمزگذاری می‌شود و وارد بکاپ دستی نمی‌شود. " +
-                                        "با زدن دکمه، نام کوین و داده‌های قیمت/حجم/ریسک برای همین API فرستاده می‌شود. " +
-                                        "برای خبر، جست‌وجوی وب خود سرویس درخواست می‌شود؛ این قابلیت باید توسط مدل/API پشتیبانی شود."
+                                    "نام کوین و داده‌های قیمت/حجم/ریسک برای همین API فرستاده می‌شود. " +
+                                    "تیتر خبرها جداگانه از RSSهای معتبر گرفته می‌شود و ترجمه/تحلیل آن‌ها نیز با همین تنظیم AI انجام می‌شود."
                             )
+                            aiTarget?.let { target ->
+                                Hint(
+                                    "مقصد واقعی و مستقیم: ${target.display} • پروتکل: ${target.route} • " +
+                                        "مدل: ${aiConfig.model}"
+                                )
+                            }
                         }
                         RowDivider()
                         InnerRow {
@@ -527,7 +535,11 @@ fun PumpsCategory(
                                 Icon(Icons.Default.NetworkCheck, contentDescription = null, modifier = Modifier.size(17.dp))
                                 Spacer(Modifier.width(6.dp))
                                 Text(
-                                    if (aiTestBusy) "در حال تست اتصال…" else "تست اتصال به سرویس AI",
+                                    if (aiTestBusy) {
+                                        "در حال تست مستقیم ${aiTarget?.host ?: "API"}…"
+                                    } else {
+                                        "تست اتصال به سرویس AI"
+                                    },
                                     fontSize = 11.5.sp
                                 )
                             }
@@ -540,8 +552,9 @@ fun PumpsCategory(
                                 )
                             }
                             Hint(
-                                "تست، یک پیام خیلی کوتاه و بدون داده‌ی کوین می‌فرستد و علاوه بر آدرس/مدل/کلید، " +
-                                        "مسیر واقعی (Gemini/Claude/OpenAI)، زمان پاسخ و کیفیت اتصال را نشان می‌دهد."
+                                "تست یک پیام کوتاه و بدون داده‌ی کوین مستقیماً به مقصد بالا می‌فرستد؛ " +
+                                    "هر مسیر حداکثر ${PumpAiReviewer.CONNECTION_TEST_TIMEOUT_SECONDS} ثانیه فرصت دارد و " +
+                                    "نتیجه، مقصد واقعی، پروتکل، زمان پاسخ و کیفیت اتصال را نشان می‌دهد."
                             )
                         }
                         RowDivider()

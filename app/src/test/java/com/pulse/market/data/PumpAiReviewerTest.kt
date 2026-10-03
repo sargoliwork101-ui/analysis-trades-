@@ -280,6 +280,29 @@ class PumpAiReviewerTest {
         assertEquals(750L, PumpAiReviewer.retryDelayMillis(0, null, 0L))
         assertEquals("عالی", PumpAiReviewer.connectionQuality(1_000L))
         assertEquals("کند", PumpAiReviewer.connectionQuality(30_000L))
+        assertEquals(20, PumpAiReviewer.CONNECTION_TEST_TIMEOUT_SECONDS)
+    }
+
+    @Test
+    fun connectionTargetShowsTheExactDirectProtocolDestination() {
+        val gemini = PumpAiReviewer.connectionTarget(
+            PumpAiConfig(
+                endpoint = "https://generativelanguage.googleapis.com/v1beta",
+                model = "gemini-2.0-flash"
+            )
+        )!!
+        assertEquals("Gemini بومی", gemini.route)
+        assertEquals("generativelanguage.googleapis.com", gemini.host)
+        assertTrue(gemini.path.endsWith("/models/gemini-2.0-flash:generateContent"))
+
+        val claude = PumpAiReviewer.connectionTarget(
+            PumpAiConfig(
+                endpoint = "https://api.anthropic.com/v1",
+                model = "claude-sonnet-4-5"
+            )
+        )!!
+        assertEquals("Claude بومی", claude.route)
+        assertEquals("https://api.anthropic.com/v1/messages", claude.display)
     }
 
     @Test

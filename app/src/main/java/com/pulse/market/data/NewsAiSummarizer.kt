@@ -30,6 +30,15 @@ object NewsAiSummarizer {
         val error: String? = null
     )
 
+    /** پیشرفت واقعی هر دسته؛ UI به‌جای spinner مبهم نتیجه‌های کامل را تدریجی نشان می‌دهد. */
+    data class BatchProgress(
+        val batchNumber: Int,
+        val totalBatches: Int,
+        val completedItems: Int,
+        val newItems: Map<String, Enrichment> = emptyMap(),
+        val running: Boolean
+    )
+
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
     /** schema واقعی خروجی؛ Gemini آن را enforce می‌کند و OpenAI-compatible وارد JSON mode می‌شود. */
@@ -65,14 +74,39 @@ object NewsAiSummarizer {
      * حداکثر چهار خبر در هر درخواست می‌رود تا پنج بخشِ فارسی در سقف توکن ناقص/بریده نشود.
      * شکست یک دسته، نتیجه‌ی دسته‌های موفق را از بین نمی‌برد.
      */
-    suspend fun summarize(config: PumpAiConfig, items: List<MarketNewsItem>): Outcome {
+    suspend fun summarize(
+        config: PumpAiConfig,
+        items: List<MarketNewsItem>,
+        onProgress: suspend (BatchProgress) -> Unit = {}
+    ): Outcome {
         if (items.isEmpty()) return Outcome()
         val results = linkedMapOf<String, Enrichment>()
         var lastError: String? = null
-        for (batch in items.take(MAX_ITEMS).chunked(BATCH_SIZE)) {
+        val batches = items.take(MAX_ITEMS).chunked(BATCH_SIZE)
+        for ((index, batch) in batches.withIndex()) {
+            onProgress(
+                BatchProgress(
+                    batchNumber = index + 1,
+                    totalBatches = batches.size,
+                    completedItems = results.size,
+                    running = true
+                )
+            )
             val outcome = summarizeBatch(config, batch)
             results.putAll(outcome.items)
+            onProgress(
+                BatchProgress(
+                    batchNumber = index + 1,
+                    totalBatches = batches.size,
+                    completedItems = results.size,
+                    newItems = outcome.items,
+                    running = false
+                )
+            )
             if (outcome.error != null) lastError = outcome.error
+            // وقتی اولین درخواست هیچ نتیجه‌ای نگرفت، تکرار همان API خراب برای سه دسته‌ی
+            // دیگر فقط spinner و هزینه را چند برابر می‌کند؛ خطا فوراً به کاربر برمی‌گردد.
+            if (results.isEmpty() && outcome.items.isEmpty() && outcome.error != null) break
         }
         return when {
             results.isEmpty() -> Outcome(error = lastError ?: "پاسخ AI ساختار خبر قابل‌خواندن نداشت")
@@ -135,7 +169,9 @@ object NewsAiSummarizer {
             responseSchema = outputSchema()
         )
         val content = completion.content ?: return Outcome(error = completion.error)
-        val parsed = parse(content)
+        val expectedIds = items.mapTo(hashSetOf()) { it.id }
+        // id تازه/ساختگی از مدل هرگز نباید به‌عنوان پیشرفت یا خبر معتبر پذیرفته شود.
+        val parsed = parse(content).filter { it.id in expectedIds }
         return if (parsed.isEmpty()) {
             Outcome(error = "پاسخ AI فارسی یا ساختار خبر قابل‌خواندن نداشت")
         } else {

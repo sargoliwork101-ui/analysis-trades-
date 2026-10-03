@@ -13,6 +13,7 @@ import com.pulse.market.data.NewsCacheStore
 import com.pulse.market.data.NewsNotifier
 import com.pulse.market.data.PumpAiConfig
 import com.pulse.market.data.PumpAiConfigStore
+import com.pulse.market.data.PumpAiReviewer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -23,6 +24,7 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
     var items by mutableStateOf<List<MarketNewsItem>>(emptyList()); private set
     var loading by mutableStateOf(false); private set
     var aiBusy by mutableStateOf(false); private set
+    var aiProgress by mutableStateOf(""); private set
     var message by mutableStateOf(""); private set
     var aiError by mutableStateOf<String?>(null); private set
     var failedSources by mutableStateOf<List<String>>(emptyList()); private set
@@ -128,25 +130,35 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
         if (pending.isEmpty()) return
         aiBusy = true
         aiError = null
+        val target = PumpAiReviewer.connectionTarget(config)
+        val destination = target?.display ?: config.endpoint
+        aiProgress = "در حال اتصال مستقیم به $destination…"
         try {
-            val outcome = NewsAiSummarizer.summarize(config, pending)
-            outcome.error?.let { aiError = it }
+            val outcome = NewsAiSummarizer.summarize(config, pending) { progress ->
+                aiProgress = if (progress.running) {
+                    "اتصال مستقیم به $destination — تحلیل دستهٔ ${progress.batchNumber} از " +
+                        "${progress.totalBatches} (${progress.completedItems} خبر آماده)"
+                } else {
+                    "دستهٔ ${progress.batchNumber} از ${progress.totalBatches} تمام شد — " +
+                        "${progress.completedItems} خبر آماده"
+                }
+                if (progress.newItems.isNotEmpty()) {
+                    applyEnrichments(progress.newItems)
+                    // نتیجه‌ی هر دسته همان لحظه نمایش و ذخیره می‌شود؛ دسته‌های بعدی دیگر
+                    // صفحه را با spinner خالی نگه نمی‌دارند.
+                    val snapshot = items
+                    val savedAt = fetchedAt
+                    withContext(Dispatchers.IO) { NewsCacheStore.save(ctx, savedAt, snapshot) }
+                }
+            }
+            outcome.error?.let { aiError = "$it — مقصد مستقیم: $destination" }
             if (outcome.items.isNotEmpty()) {
                 val completedIds = pending.asSequence().map { it.id }
                     .filter { it in outcome.items }.toSet()
-                items = items.map { item ->
-                    val enriched = outcome.items[item.id] ?: return@map item
-                    item.copy(
-                        aiTitle = enriched.persianTitle,
-                        aiOutlook = enriched.outlook,
-                        marketImpact = enriched.marketImpact,
-                        historicalContext = enriched.historicalContext,
-                        aiSummary = enriched.summary,
-                        importance = enriched.importance ?: item.importance
-                    )
-                }.sortedWith(compareByDescending<MarketNewsItem> { it.importance }
-                    .thenByDescending { it.publishedAt })
-                withContext(Dispatchers.IO) { NewsCacheStore.save(ctx, fetchedAt, items) }
+                applyEnrichments(outcome.items)
+                val snapshot = items
+                val savedAt = fetchedAt
+                withContext(Dispatchers.IO) { NewsCacheStore.save(ctx, savedAt, snapshot) }
                 val newestCompleted = items.filter { it.id in completedIds }
                     .maxByOrNull { it.publishedAt }
                 NewsNotifier.notifyReady(
@@ -158,9 +170,26 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
-            aiError = "ترجمه و تحلیل AI کامل نشد؛ متن انگلیسی یا کارت ناقص نمایش داده نمی‌شود"
+            aiError = "ترجمه و تحلیل AI کامل نشد؛ متن انگلیسی یا کارت ناقص نمایش داده نمی‌شود — " +
+                "مقصد مستقیم: $destination"
         } finally {
             aiBusy = false
+            aiProgress = ""
         }
+    }
+
+    private fun applyEnrichments(enrichments: Map<String, NewsAiSummarizer.Enrichment>) {
+        items = items.map { item ->
+            val enriched = enrichments[item.id] ?: return@map item
+            item.copy(
+                aiTitle = enriched.persianTitle,
+                aiOutlook = enriched.outlook,
+                marketImpact = enriched.marketImpact,
+                historicalContext = enriched.historicalContext,
+                aiSummary = enriched.summary,
+                importance = enriched.importance ?: item.importance
+            )
+        }.sortedWith(compareByDescending<MarketNewsItem> { it.importance }
+            .thenByDescending { it.publishedAt })
     }
 }
