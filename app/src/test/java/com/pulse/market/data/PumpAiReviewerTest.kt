@@ -1,6 +1,7 @@
 package com.pulse.market.data
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -21,6 +22,24 @@ class PumpAiReviewerTest {
             "https://example.com/custom/chat/completions",
             PumpAiReviewer.chatCompletionsEndpoint("https://example.com/custom/chat/completions")
         )
+    }
+
+    @Test
+    fun genericCompletionUsesConfiguredModelWithoutWebPlugin() {
+        val config = PumpAiConfig(
+            enabled = true,
+            endpoint = "https://openrouter.ai/api/v1",
+            model = "test/model",
+            providerSearch = true
+        )
+        val route = PumpAiReviewer.completionRoutes(config, "system", "user", 900).single()
+        val body = route.payload.toString()
+
+        assertTrue(route.endpoint.endsWith("/chat/completions"))
+        assertTrue(body.contains("test/model"))
+        assertTrue(body.contains("system"))
+        assertFalse(body.contains("plugins"))
+        assertFalse(body.contains("web_search_options"))
     }
 
     @Test

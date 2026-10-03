@@ -70,6 +70,9 @@ object PumpAiReviewer {
 
     data class Outcome(val review: Review? = null, val error: String? = null)
 
+    /** پاسخ متنی عمومی برای قابلیت‌هایی مثل خلاصه‌سازی خبر؛ از همان تنظیم امن AI استفاده می‌کند. */
+    data class CompletionOutcome(val content: String? = null, val error: String? = null)
+
     /** یک مسیر قابل امتحان: آدرس نهایی، بدنه و اینکه پاسخ به سبک Gemini خوانده شود یا OpenAI. */
     internal data class Route(
         val endpoint: String,
@@ -169,6 +172,103 @@ object PumpAiReviewer {
             lastError = emptyContentReason(raw)
         }
         Outcome(error = lastError ?: "ارتباط با سرویس AI یا خواندن پاسخ ممکن نشد")
+    }
+
+    /**
+     * تکمیل متنی عمومی با همان endpoint/model/key امنِ تحلیل پامپ. این مسیر عمداً افزونه‌ی
+     * جست‌وجوی وب را فعال نمی‌کند: محتوای خبر و لینک واقعی را خود برنامه می‌دهد تا مدل
+     * منبع جعلی نسازد یا خبر دیگری را با آن قاطی نکند.
+     */
+    suspend fun complete(
+        config: PumpAiConfig,
+        system: String,
+        user: String,
+        maxTokens: Int = 2400
+    ): CompletionOutcome = withContext(Dispatchers.IO) {
+        if (!config.enabled) return@withContext CompletionOutcome(error = "بررسی هوش مصنوعی خاموش است")
+        if (!config.isReady) return@withContext CompletionOutcome(error = "آدرس API و نام مدل را کامل کن")
+        val routes = try {
+            completionRoutes(config, system, user, maxTokens.coerceIn(128, 4096))
+        } catch (invalid: IllegalArgumentException) {
+            return@withContext CompletionOutcome(error = invalid.message ?: "آدرس یا نام مدل نامعتبر است")
+        }
+        var lastError: String? = null
+        for (route in routes) {
+            val raw = try {
+                Http.execute(
+                    buildRequest(config, route.endpoint, route.payload),
+                    maxBytes = 512L * 1024,
+                    callTimeoutSeconds = route.timeoutSeconds
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (http: Http.HttpException) {
+                lastError = httpErrorText(http)
+                if (isFatalServiceError(http, lastError)) {
+                    return@withContext CompletionOutcome(error = lastError)
+                }
+                continue
+            } catch (failure: Exception) {
+                lastError = networkErrorText(failure)
+                continue
+            }
+            val content = if (route.nativeGemini) {
+                extractGeminiContent(raw)
+            } else {
+                extractAssistantContent(raw)
+            }
+            if (!content.isNullOrBlank()) return@withContext CompletionOutcome(content = content)
+            lastError = emptyContentReason(raw)
+        }
+        CompletionOutcome(error = lastError ?: "ارتباط با سرویس AI یا خواندن پاسخ ممکن نشد")
+    }
+
+    /** مسیرهای تکمیل عمومی؛ بدون ابزار وب و بدون schema اختصاصی تحلیل پامپ. */
+    internal fun completionRoutes(
+        config: PumpAiConfig,
+        system: String,
+        user: String,
+        maxTokens: Int
+    ): List<Route> {
+        fun chatPayload(): JsonObject = buildJsonObject {
+            put("model", config.model)
+            put("temperature", 0.15)
+            put("max_tokens", maxTokens)
+            put("messages", buildJsonArray {
+                add(buildJsonObject { put("role", "system"); put("content", system) })
+                add(buildJsonObject { put("role", "user"); put("content", user) })
+            })
+        }
+        val noThinking = supportsThinkingBudget(config.model)
+        if (isGeminiNative(config.endpoint)) {
+            return listOf(
+                Route(
+                    geminiEndpoint(config.endpoint, config.model),
+                    geminiBody(system, user, maxTokens, disableThinking = noThinking),
+                    true,
+                    "Gemini بومی",
+                    REQUEST_TIMEOUT_SECONDS
+                ),
+                Route(
+                    geminiCompatEndpoint(), chatPayload(), false,
+                    "Gemini سازگار OpenAI", FALLBACK_TIMEOUT_SECONDS
+                )
+            )
+        }
+        val chat = chatCompletionsEndpoint(config.endpoint)
+        val routes = mutableListOf(
+            Route(chat, chatPayload(), false, "سازگار OpenAI", REQUEST_TIMEOUT_SECONDS)
+        )
+        if (isGoogleHost(config.endpoint)) {
+            routes += Route(
+                geminiEndpoint(GOOGLE_BASE, config.model),
+                geminiBody(system, user, maxTokens, disableThinking = noThinking),
+                true,
+                "Gemini بومی",
+                FALLBACK_TIMEOUT_SECONDS
+            )
+        }
+        return routes
     }
 
     /** خطایی که امتحان مسیر دیگر هم آن را حل نمی‌کند. */

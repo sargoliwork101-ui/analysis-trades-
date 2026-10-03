@@ -88,6 +88,7 @@ import com.pulse.market.ui.QuoteText
 fun PumpsCategory(
     cfg: WidgetConfig,
     alertOwnerKey: String,
+    initialTab: Int = 0,
     onChange: (WidgetConfig) -> Unit,
     onAlertToggle: (Boolean) -> Unit,
     onAddSymbol: (SymbolDef) -> Unit
@@ -120,7 +121,7 @@ fun PumpsCategory(
     var showHelp by remember { mutableStateOf(false) }
     var showAllResults by remember { mutableStateOf(false) }
     var selectedCoinId by remember { mutableStateOf<String?>(null) }
-    var pumpTab by rememberSaveable { mutableStateOf(0) }
+    var pumpTab by rememberSaveable(initialTab) { mutableStateOf(initialTab.coerceIn(0, 3)) }
 
     val room = (MAX_SYMBOLS - cfg.symbols.size).coerceAtLeast(0)
     // تغییر آستانه یک فیلتر محلی است و نباید تا اسکن شبکه‌ی بعدی بی‌اثر بماند.

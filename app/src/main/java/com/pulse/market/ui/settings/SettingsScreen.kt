@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.Newspaper
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
@@ -51,15 +52,19 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -143,21 +148,27 @@ fun SettingsScreen(
     var busy by remember { mutableStateOf(false) }
     var testResult by remember { mutableStateOf("") }
     var section by remember { mutableStateOf<SettingsSection?>(null) }
+    // تب‌های اصلی فقط در ورود مستقیم به برنامه دیده می‌شوند؛ جریان تنظیم ویجت خلوت می‌ماند.
+    var mainTab by rememberSaveable { mutableIntStateOf(0) }
+    var pumpsInitialTab by rememberSaveable { mutableIntStateOf(0) }
 
     var showAddDialog by remember { mutableStateOf(false) }
     var showSymbolSearchDialog by remember { mutableStateOf(false) }
     var alertDialogOpen by remember { mutableStateOf(false) }
     var editingAlert by remember { mutableStateOf<AlertRule?>(null) }
 
-    // دکمه‌ی Back در زیرصفحه‌ها باید اول به منوی تنظیمات برگردد؛ در جریان افزودن
-    // ویجت، فقط Back از خودِ منوی اصلی پایان موفق پیکربندی را اعلام می‌کند.
-    BackHandler(enabled = section != null) { section = null }
+    // دکمه‌ی Back در زیرصفحه‌ها اول به منو و در تب خبرها اول به تب تنظیمات برمی‌گردد؛
+    // در جریان افزودن ویجت، Back از منوی اصلی همچنان پایان موفق پیکربندی است.
+    BackHandler(enabled = section != null || mainTab != 0) {
+        if (section != null) section = null else mainTab = 0
+    }
 
     // ─── بکاپ و خواب موقت هشدارها ───
     var backupResult by remember { mutableStateOf("") }
     var snoozeUntil by remember { mutableStateOf(AlertEngine.snoozeUntil(context)) }
 
     val editingWidget = widgetId != 0
+    val mainTabsAvailable = !isAddFlow && !editingWidget
 
     // ─── ذخیره‌ی خودکار هر تغییر (با اسکوپ دائمی — با بسته شدن صفحه از بین نمی‌رود) ───
 
@@ -319,11 +330,13 @@ fun SettingsScreen(
                 title = {
                     Column {
                         Text(
-                            section?.title ?: "تنظیمات ویجت",
+                            section?.title ?: if (mainTabsAvailable && mainTab == 1) "خبرها" else "تنظیمات ویجت",
                             fontWeight = FontWeight.Bold
                         )
                         Text(
                             when {
+                                section == null && mainTabsAvailable && mainTab == 1 ->
+                                    "خبرهای مهم بازار ایران و جهان"
                                 isAddFlow -> "ویجت تازه — با برگشتن هم اضافه می‌شود"
                                 editingWidget -> "همین ویجت — روی دیگر ویجت‌ها اثر ندارد"
                                 else -> "الگوی پیش‌فرض ویجت‌های تازه"
@@ -354,7 +367,29 @@ fun SettingsScreen(
                 .padding(padding)
         ) {
 
-            // محتوا — منو یا بخش انتخاب‌شده
+            // دو تب سطح اول فقط در صفحه‌ی اصلی برنامه؛ تنظیم یک ویجت همچنان مستقیم است.
+            if (mainTabsAvailable && section == null) {
+                TabRow(
+                    selectedTabIndex = mainTab,
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    contentColor = MaterialTheme.colorScheme.primary
+                ) {
+                    Tab(
+                        selected = mainTab == 0,
+                        onClick = { mainTab = 0 },
+                        text = { Text("تنظیمات", fontSize = 12.sp) },
+                        icon = { Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(19.dp)) }
+                    )
+                    Tab(
+                        selected = mainTab == 1,
+                        onClick = { mainTab = 1 },
+                        text = { Text("خبرها", fontSize = 12.sp) },
+                        icon = { Icon(Icons.Default.Newspaper, contentDescription = null, modifier = Modifier.size(19.dp)) }
+                    )
+                }
+            }
+
+            // محتوا — منو، خبرها یا بخش انتخاب‌شده
             Column(
                 modifier = Modifier
                     .weight(1f)
@@ -362,15 +397,26 @@ fun SettingsScreen(
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(18.dp)
             ) {
-                when (section) {
-
-                    // ───── صفحه‌ی منو ─────
-                    null -> LandingMenu(
-                        cfg = cfg,
-                        selectedSources = selectedSources,
-                        healthySourceCount = sourceHealth.count { it.sourceId in selectedIds && it.isHealthy },
-                        onOpen = { section = it }
+                if (mainTabsAvailable && mainTab == 1 && section == null) {
+                    NewsCategory(
+                        onConfigureAi = {
+                            pumpsInitialTab = 2
+                            section = SettingsSection.PUMPS
+                        }
                     )
+                } else {
+                    when (section) {
+
+                        // ───── صفحه‌ی منو ─────
+                        null -> LandingMenu(
+                            cfg = cfg,
+                            selectedSources = selectedSources,
+                            healthySourceCount = sourceHealth.count { it.sourceId in selectedIds && it.isHealthy },
+                            onOpen = {
+                                pumpsInitialTab = 0
+                                section = it
+                            }
+                        )
 
                     SettingsSection.SOURCES -> SourcesCategory(
                         allSources = allSources,
@@ -608,6 +654,7 @@ fun SettingsScreen(
                     SettingsSection.PUMPS -> PumpsCategory(
                         cfg = cfg,
                         alertOwnerKey = "widget_$widgetId",
+                        initialTab = pumpsInitialTab,
                         onChange = { new -> persist(new) },
                         onAlertToggle = { enabled ->
                             if (cfgLoaded) {
@@ -644,18 +691,20 @@ fun SettingsScreen(
 
                     SettingsSection.PORTFOLIO -> PortfolioCategory(persian = cfg.persianDigits)
 
-                    SettingsSection.ABOUT -> AboutCategory()
+                        SettingsSection.ABOUT -> AboutCategory()
+                    }
                 }
 
                 Spacer(Modifier.height(6.dp))
             }
 
-            // نوار اقدام پایین — تغییرات خودکار ذخیره می‌شوند؛ این دکمه تأیید نهایی است
-            Surface(
-                shadowElevation = 10.dp,
-                color = MaterialTheme.colorScheme.surface
-            ) {
-                Column(
+            // نوار اقدامِ تنظیمات در تب خبرها کاربردی ندارد و فضا را اشغال نمی‌کند.
+            if (!(mainTabsAvailable && mainTab == 1 && section == null)) {
+                Surface(
+                    shadowElevation = 10.dp,
+                    color = MaterialTheme.colorScheme.surface
+                ) {
+                    Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 12.dp),
@@ -771,6 +820,7 @@ fun SettingsScreen(
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
+            }
             }
         }
     }
