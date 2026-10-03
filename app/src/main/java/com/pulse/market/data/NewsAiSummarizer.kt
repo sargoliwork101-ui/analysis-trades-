@@ -13,7 +13,6 @@ import kotlinx.serialization.json.put
 /** ترجمه، نظر، اثر و سابقه برای خبرهای واقعی؛ مدل اجازه‌ی ساخت لینک یا جایگزینی منبع را ندارد. */
 object NewsAiSummarizer {
     private const val MAX_ITEMS = 15
-    private const val ECONOMY_MAX_ITEMS = 8
     private const val BATCH_SIZE = 4
     private const val EXCERPT_CHARS = 700
     private const val ECONOMY_EXCERPT_CHARS = 320
@@ -85,10 +84,10 @@ object NewsAiSummarizer {
         if (items.isEmpty()) return Outcome()
         val results = linkedMapOf<String, Enrichment>()
         var lastError: String? = null
-        // در حالت کم‌مصرف خبرهای کمتری تحلیل می‌شود؛ هر دسته یک درخواست کامل است و
-        // دستور سیستمی در هر دسته تکرار می‌شود، پس تعداد دسته مستقیم روی هزینه اثر دارد.
-        val maxItems = if (config.economyMode) ECONOMY_MAX_ITEMS else MAX_ITEMS
-        val batches = items.take(maxItems).chunked(BATCH_SIZE)
+        // تعداد خبرها در حالت کم‌مصرف هم کم نمی‌شود: کارت بدون تحلیل اصلاً در تب خبر
+        // نمایش داده نمی‌شود، پس کم‌کردن خبرها یعنی «کم‌شدن خبرِ دیده‌شده»، نه صرفه‌جویی
+        // درست. صرفه‌جویی از دستور فشرده و خلاصه‌ی کوتاه‌ترِ منبع می‌آید.
+        val batches = items.take(MAX_ITEMS).chunked(BATCH_SIZE)
         for ((index, batch) in batches.withIndex()) {
             onProgress(
                 BatchProgress(

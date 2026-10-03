@@ -2,6 +2,8 @@ package com.pulse.market.data
 
 import android.content.Context
 import java.util.Calendar
+import java.util.GregorianCalendar
+import java.util.TimeZone
 import java.util.Locale
 import org.json.JSONArray
 import org.json.JSONObject
@@ -34,7 +36,9 @@ object AiUsageStore {
 
     /** کلید روز جاری؛ تغییر روز به‌صورت خودکار شمارنده را صفر می‌کند. */
     fun dayKey(millis: Long = System.currentTimeMillis()): Int {
-        val cal = Calendar.getInstance()
+        // تقویم میلادیِ صریح؛ با locale دستگاه عوض نمی‌شود، وگرنه کلیدِ روز بین دو
+        // اجرا جابه‌جا می‌شد و شمارنده بی‌دلیل صفر می‌شد.
+        val cal = GregorianCalendar(TimeZone.getDefault())
         cal.timeInMillis = millis
         return cal.get(Calendar.YEAR) * 10_000 +
                 (cal.get(Calendar.MONTH) + 1) * 100 +

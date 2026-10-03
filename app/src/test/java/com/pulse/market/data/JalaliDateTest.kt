@@ -63,4 +63,27 @@ class JalaliDateTest {
         val ymd = JalaliDate.fromMillis(ms)
         assertEquals(JalaliDate.Ymd(1403, 7, 8), ymd)
     }
+
+    @Test
+    fun datesStayGregorianEvenOnALocaleWithItsOwnCalendar() {
+        // روی locale تایلندی، Calendar.getInstance() تقویم بودایی می‌دهد (سال ۲۵۶۸)
+        // و تبدیل شمسی را کاملاً خراب می‌کرد؛ تبدیل باید مستقل از locale دستگاه باشد.
+        val previous = java.util.Locale.getDefault()
+        val previousZone = java.util.TimeZone.getDefault()
+        try {
+            java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("UTC"))
+            val noon = java.util.GregorianCalendar(java.util.TimeZone.getTimeZone("UTC")).apply {
+                clear()
+                set(2024, 2, 20, 12, 0, 0)
+            }.timeInMillis
+            val expected = JalaliDate.Ymd(1403, 1, 1)
+            assertEquals(expected, JalaliDate.fromMillis(noon))
+            java.util.Locale.setDefault(java.util.Locale("th", "TH"))
+            assertEquals(expected, JalaliDate.fromMillis(noon))
+            assertEquals(noon / 86_400_000L, JalaliDate.toMillis(1403, 1, 1) / 86_400_000L)
+        } finally {
+            java.util.Locale.setDefault(previous)
+            java.util.TimeZone.setDefault(previousZone)
+        }
+    }
 }

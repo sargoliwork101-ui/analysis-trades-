@@ -38,7 +38,9 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
     fun onVisible() {
         viewModelScope.launch {
             val loadedConfig = withContext(Dispatchers.IO) { PumpAiConfigStore.load(ctx) }
-            val configChanged = loadedConfig != aiConfig
+            // فقط عوض‌شدن خودِ سرویس دلیل تحلیل دوباره است؛ تغییر تنظیم‌های مصرف
+            // (حالت کم‌مصرف/سقف روزانه) نباید یک تحلیل تازه و پولی راه بیندازد.
+            val configChanged = !loadedConfig.sameProviderAs(aiConfig)
             aiConfig = loadedConfig
 
             if (!started) {

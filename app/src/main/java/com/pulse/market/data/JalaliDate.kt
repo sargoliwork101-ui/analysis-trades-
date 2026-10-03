@@ -1,6 +1,7 @@
 package com.pulse.market.data
 
 import java.util.Calendar
+import java.util.GregorianCalendar
 import java.util.TimeZone
 
 /**
@@ -109,7 +110,10 @@ object JalaliDate {
 
     /** میلی‌ثانیه‌ی زمان (منطقه‌ی محلی) → سال/ماه/روزِ شمسی */
     fun fromMillis(ts: Long): Ymd {
-        val cal = Calendar.getInstance().apply { timeInMillis = ts }
+        // عمداً GregorianCalendar صریح: روی دستگاهی که locale پیش‌فرضش تقویم دیگری
+        // دارد (مثلاً th_TH با تقویم بودایی)، Calendar.getInstance() سالِ غیرمیلادی
+        // برمی‌گرداند و همه‌ی تاریخ‌های شمسی برنامه غلط می‌شد.
+        val cal = GregorianCalendar(TimeZone.getDefault()).apply { timeInMillis = ts }
         return gregorianToJalali(
             cal.get(Calendar.YEAR),
             cal.get(Calendar.MONTH) + 1,
@@ -120,7 +124,7 @@ object JalaliDate {
     /** سال/ماه/روزِ شمسی → میلی‌ثانیه‌ی ابتدای همان روز (منطقه‌ی محلی) */
     fun toMillis(jy: Int, jm: Int, jd: Int): Long {
         val g = jalaliToGregorian(jy, jm, jd)
-        val cal = Calendar.getInstance(TimeZone.getDefault()).apply {
+        val cal = GregorianCalendar(TimeZone.getDefault()).apply {
             clear()
             set(g.year, g.month - 1, g.day, 0, 0, 0)
         }
