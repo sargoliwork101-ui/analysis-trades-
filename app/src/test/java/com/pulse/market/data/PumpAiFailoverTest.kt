@@ -308,4 +308,98 @@ class PumpAiFailoverTest {
         assertFalse(print.contains("0123456789"))
         assertEquals("ذخیره نشده", PumpAiReviewer.keyFingerprint(""))
     }
+
+    @Test
+    fun economyModeShrinksPromptAndOutputBudget() {
+        val coin = PumpScanner.PumpCoin(
+            id = "sol", symbol = "sol", name = "Solana",
+            price = 150.0, change1h = 1.0, change24h = 12.0,
+            high24h = 155.0, low24h = 135.0, volume = 5e8, marketCap = 7e10,
+            spark = (1..40).map { 100.0 + it }
+        )
+        val full = PumpAiReviewer.systemPrompt(economy = false)
+        val compact = PumpAiReviewer.systemPrompt(economy = true)
+        assertTrue(compact.length < full.length * 2 / 3)
+        // قواعد حیاتی نباید در نسخه‌ی فشرده گم شود.
+        for (key in listOf("stopLoss", "project", "invalidation", "news", "کلی‌گویی ممنوع")) {
+            assertTrue(key, compact.contains(key))
+        }
+        val longPrompt = PumpAiReviewer.userPrompt(coin, economy = false)
+        val shortPrompt = PumpAiReviewer.userPrompt(coin, economy = true)
+        assertTrue(shortPrompt.length < longPrompt.length)
+        assertTrue(shortPrompt.contains("ایچیموکو"))
+        assertTrue(shortPrompt.contains("Solana"))
+
+        val economy = PumpAiConfig(
+            enabled = true,
+            endpoint = "https://openrouter.ai/api/v1",
+            model = "openai/gpt-4o-mini",
+            economyMode = true
+        )
+        val rich = economy.copy(economyMode = false)
+        assertEquals(800, PumpAiReviewer.reviewOutputTokens(economy, nativeRoute = false))
+        assertEquals(1200, PumpAiReviewer.reviewOutputTokens(rich, nativeRoute = false))
+        assertEquals(1100, PumpAiReviewer.reviewOutputTokens(economy, nativeRoute = true))
+        assertEquals(2048, PumpAiReviewer.reviewOutputTokens(rich, nativeRoute = true))
+        assertEquals(2457, PumpAiReviewer.completionTokens(economy, 4096))
+        assertEquals(4096, PumpAiReviewer.completionTokens(rich, 4096))
+        // سقف خیلی کوچک نباید پاسخ را ناقص کند.
+        assertEquals(768, PumpAiReviewer.completionTokens(economy, 900))
+
+        val body = PumpAiReviewer.reviewRoutes(economy, coin).first().payload.toString()
+        assertTrue(body.contains("\"max_tokens\":800"))
+        assertTrue(body.contains("\"max_results\":3"))
+    }
+
+    @Test
+    fun usageIsReadFromEveryProviderShape() {
+        val openai = PumpAiReviewer.parseUsage(
+            """{"usage":{"prompt_tokens":1200,"completion_tokens":300,"total_tokens":1500}}"""
+        )
+        assertEquals(1200, openai?.input)
+        assertEquals(300, openai?.output)
+        val anthropic = PumpAiReviewer.parseUsage("""{"usage":{"input_tokens":90,"output_tokens":40}}""")
+        assertEquals(130, anthropic?.total)
+        val gemini = PumpAiReviewer.parseUsage(
+            """{"usageMetadata":{"promptTokenCount":500,"candidatesTokenCount":200,"thoughtsTokenCount":50}}"""
+        )
+        assertEquals(500, gemini?.input)
+        assertEquals(250, gemini?.output)
+        assertNull(PumpAiReviewer.parseUsage("""{"choices":[]}"""))
+        // تخمین جایگزین وقتی سرویس چیزی گزارش نمی‌کند.
+        assertEquals(3, PumpAiReviewer.estimateTokens("abcdefghijk"))
+    }
+
+    @Test
+    fun dailyBudgetStopsNewRequestsButZeroMeansUnlimited() {
+        assertNull(PumpAiReviewer.budgetMessage(budget = 0, usedToday = 999_999))
+        assertNull(PumpAiReviewer.budgetMessage(budget = 10_000, usedToday = 9_999))
+        val blocked = PumpAiReviewer.budgetMessage(budget = 10_000, usedToday = 10_000)
+        assertTrue(blocked!!.contains("سقف مصرف روزانه"))
+        assertTrue(blocked.contains("10000"))
+    }
+
+    @Test
+    fun economyPolicyIsSharedWithBackupProviders() {
+        val config = PumpAiConfig(
+            enabled = true,
+            endpoint = "https://api.openai.com/v1",
+            model = "gpt-4o-mini",
+            apiKey = "sk-0123456789abcdefghij",
+            economyMode = true,
+            dailyTokenBudget = 50_000,
+            reuseMinutes = 30,
+            backups = listOf(
+                PumpAiBackup(
+                    endpoint = "https://api.avalai.ir/v1",
+                    model = "gpt-4o-mini",
+                    apiKey = "aa-0123456789abcdefghij"
+                )
+            )
+        )
+        val backup = config.chain[1]
+        assertTrue(backup.economyMode)
+        assertEquals(50_000, backup.dailyTokenBudget)
+        assertEquals(30, backup.reuseMinutes)
+    }
 }

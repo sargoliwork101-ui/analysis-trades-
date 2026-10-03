@@ -49,7 +49,19 @@ data class PumpAiConfig(
     val apiKey: String = "",
     val providerSearch: Boolean = true,
     /** سرویس‌های جایگزین؛ فقط وقتی استفاده می‌شوند که سرویس قبلی پاسخ ندهد. */
-    val backups: List<PumpAiBackup> = emptyList()
+    val backups: List<PumpAiBackup> = emptyList(),
+    /**
+     * حالت کم‌مصرف: دستور سیستمیِ فشرده، سقف پاسخ کوتاه‌تر و خبرهای کمتر در هر درخواست.
+     * پیش‌فرض روشن است چون هزینه‌ی توکن مستقیم روی حساب کاربر است.
+     */
+    val economyMode: Boolean = true,
+    /** سقف مصرف توکن در هر شبانه‌روز؛ ۰ یعنی بدون سقف. */
+    val dailyTokenBudget: Int = 0,
+    /**
+     * تا این چند دقیقه، تحلیل ذخیره‌شده‌ی همان کوین دوباره نمایش داده می‌شود و
+     * درخواست تازه‌ای به سرویس نمی‌رود. ۰ یعنی همیشه درخواست تازه.
+     */
+    val reuseMinutes: Int = 20
 ) {
     val endpointValid: Boolean
         get() = isValidEndpoint(endpoint)
@@ -70,7 +82,11 @@ data class PumpAiConfig(
         endpoint = backup.endpoint,
         model = backup.model,
         apiKey = backup.apiKey,
-        providerSearch = backup.providerSearch
+        providerSearch = backup.providerSearch,
+        // سیاست مصرف مال کل برنامه است، نه یک سرویس؛ پشتیبان هم باید کم‌مصرف بماند.
+        economyMode = economyMode,
+        dailyTokenBudget = dailyTokenBudget,
+        reuseMinutes = reuseMinutes
     )
 
     /** همه‌ی سرویس‌های تنظیم‌شده (حتی ناقص) به‌ترتیب اولویت؛ برای تست و پیام خطا. */
@@ -248,7 +264,10 @@ object PumpAiConfigStore {
                     model = obj.optString("model"),
                     apiKey = apiKey,
                     providerSearch = obj.optBoolean("providerSearch", true),
-                    backups = backups
+                    backups = backups,
+                    economyMode = obj.optBoolean("economyMode", true),
+                    dailyTokenBudget = obj.optInt("dailyTokenBudget", 0),
+                    reuseMinutes = obj.optInt("reuseMinutes", 20)
                 )
             )
             if ((needsMigration || backupPlainText) && !save(context, config)) {
@@ -333,6 +352,9 @@ object PumpAiConfigStore {
             .put("apiKeyCipher", cipher)
             .put("providerSearch", safe.providerSearch)
             .put("backups", backupsJson)
+            .put("economyMode", safe.economyMode)
+            .put("dailyTokenBudget", safe.dailyTokenBudget)
+            .put("reuseMinutes", safe.reuseMinutes)
             .toString()
         prefs.edit().putString(KEY_CONFIG, raw).apply()
         return true
@@ -342,6 +364,8 @@ object PumpAiConfigStore {
         endpoint = config.endpoint.trim().take(500),
         model = config.model.trim().take(150),
         apiKey = sanitizeKey(config.apiKey),
+        dailyTokenBudget = config.dailyTokenBudget.coerceIn(0, 5_000_000),
+        reuseMinutes = config.reuseMinutes.coerceIn(0, 24 * 60),
         backups = config.backups.take(PumpAiConfig.MAX_BACKUPS).map { backup ->
             backup.copy(
                 endpoint = backup.endpoint.trim().take(500),

@@ -98,14 +98,15 @@ object PumpAiReviewer {
      * پاسخ بی‌متن (مثل MALFORMED_FUNCTION_CALL) بدهد، همان درخواست از مسیر دوم می‌رود.
      */
     internal fun reviewRoutes(config: PumpAiConfig, coin: PumpScanner.PumpCoin): List<Route> {
-        val system = systemPrompt()
-        val user = userPrompt(coin)
+        val system = systemPrompt(config.economyMode)
+        val user = userPrompt(coin, config.economyMode)
         val noThinking = supportsThinkingBudget(config.model)
+        val nativeCap = reviewOutputTokens(config, nativeRoute = true)
         if (isAnthropicHost(config.endpoint)) {
             return listOf(
                 Route(
                     endpoint = anthropicEndpoint(config.endpoint),
-                    payload = anthropicBody(config.model, system, user, 2048, temperature = 0.2),
+                    payload = anthropicBody(config.model, system, user, nativeCap, temperature = 0.2),
                     nativeGemini = false,
                     label = "Claude بومی",
                     timeoutSeconds = REQUEST_TIMEOUT_SECONDS,
@@ -119,14 +120,14 @@ object PumpAiReviewer {
             return listOf(
                 Route(
                     native,
-                    geminiBody(system, user, 2048, jsonOutput = true, disableThinking = noThinking),
+                    geminiBody(system, user, nativeCap, jsonOutput = true, disableThinking = noThinking),
                     true,
                     "Gemini بومی",
                     REQUEST_TIMEOUT_SECONDS
                 ),
                 Route(
                     native,
-                    geminiBody(system, user, 2048, disableThinking = noThinking),
+                    geminiBody(system, user, nativeCap, disableThinking = noThinking),
                     true,
                     "Gemini بومی (متن ساده)",
                     FALLBACK_TIMEOUT_SECONDS
@@ -187,7 +188,7 @@ object PumpAiReviewer {
             val native = geminiEndpoint(GOOGLE_BASE, config.model)
             routes += Route(
                 native,
-                geminiBody(system, user, 2048, jsonOutput = true, disableThinking = noThinking),
+                geminiBody(system, user, nativeCap, jsonOutput = true, disableThinking = noThinking),
                 true,
                 "Gemini بومی",
                 FALLBACK_TIMEOUT_SECONDS
@@ -205,6 +206,7 @@ object PumpAiReviewer {
         coin: PumpScanner.PumpCoin
     ): Outcome = withContext(Dispatchers.IO) {
         if (!config.enabled) return@withContext Outcome(error = "بررسی هوش مصنوعی خاموش است")
+        budgetError(config)?.let { return@withContext Outcome(error = it) }
         val chain = config.chain
         if (chain.isEmpty()) return@withContext Outcome(error = "آدرس API و نام مدل را کامل کن")
         val errors = mutableListOf<String>()
@@ -273,6 +275,7 @@ object PumpAiReviewer {
         responseSchema: JsonObject? = null
     ): CompletionOutcome = withContext(Dispatchers.IO) {
         if (!config.enabled) return@withContext CompletionOutcome(error = "بررسی هوش مصنوعی خاموش است")
+        budgetError(config)?.let { return@withContext CompletionOutcome(error = it) }
         val chain = config.chain
         if (chain.isEmpty()) {
             return@withContext CompletionOutcome(error = "آدرس API و نام مدل را کامل کن")
@@ -299,7 +302,9 @@ object PumpAiReviewer {
     ): CompletionOutcome = withContext(Dispatchers.IO) {
         val routes = try {
             completionRoutes(
-                config, system, user, maxTokens.coerceIn(128, 4096), responseSchema
+                config, system, user,
+                completionTokens(config, maxTokens).coerceIn(128, 4096),
+                responseSchema
             )
         } catch (invalid: IllegalArgumentException) {
             return@withContext CompletionOutcome(error = invalid.message ?: "آدرس یا نام مدل نامعتبر است")
@@ -467,6 +472,74 @@ object PumpAiReviewer {
         return null
     }
 
+    /** مصرف توکن یک درخواست، همان‌طور که خود سرویس گزارش کرده است. */
+    data class Usage(val input: Int, val output: Int, val estimated: Boolean = false) {
+        val total: Int get() = input + output
+    }
+
+    /**
+     * مصرف هر درخواست به این callback داده می‌شود تا لایه‌ی بالاتر آن را ذخیره کند.
+     * اینجا عمداً به Context وصل نمی‌شویم تا این فایل قابل تست و بدون وابستگی به اندروید بماند.
+     */
+    @Volatile
+    var usageSink: ((Usage) -> Unit)? = null
+
+    /** مصرف امروز (توکن) برای احترام به سقف روزانه؛ null یعنی هنوز وصل نشده. */
+    @Volatile
+    var usedTodayProvider: (() -> Int)? = null
+
+    /** تخمین محافظه‌کارانه وقتی سرویس فیلد usage نمی‌دهد (≈۴ کاراکتر = ۱ توکن). */
+    internal fun estimateTokens(text: String): Int = (text.length + 3) / 4
+
+    /** usage استاندارد OpenAI، Anthropic و Gemini — هر سه شکل پشتیبانی می‌شود. */
+    internal fun parseUsage(raw: String): Usage? {
+        val root = runCatching { json.parseToJsonElement(raw) as? JsonObject }.getOrNull() ?: return null
+        (root["usage"] as? JsonObject)?.let { usage ->
+            val input = usage.int("prompt_tokens") ?: usage.int("input_tokens")
+            val output = usage.int("completion_tokens") ?: usage.int("output_tokens")
+            if (input != null || output != null) {
+                return Usage(input ?: 0, output ?: 0)
+            }
+            usage.int("total_tokens")?.let { return Usage(it, 0) }
+        }
+        (root["usageMetadata"] as? JsonObject)?.let { usage ->
+            val input = usage.int("promptTokenCount")
+            val output = (usage.int("candidatesTokenCount") ?: 0) + (usage.int("thoughtsTokenCount") ?: 0)
+            if (input != null || output > 0) return Usage(input ?: 0, output)
+        }
+        return null
+    }
+
+    private fun JsonObject.int(key: String): Int? = (this[key] as? JsonPrimitive)?.intOrNull
+
+    /** پیام سقف روزانه؛ null یعنی اجازه‌ی درخواست هست. */
+    internal fun budgetMessage(budget: Int, usedToday: Int): String? = if (budget > 0 && usedToday >= budget) {
+        "سقف مصرف روزانه‌ی توکن پر شده است (${usedToday} از ${budget}). " +
+                "تا فردا درخواست تازه‌ای فرستاده نمی‌شود؛ اگر لازم است، سقف را در تنظیمات بالا ببر یا صفر کن."
+    } else {
+        null
+    }
+
+    private fun budgetError(config: PumpAiConfig): String? {
+        val budget = config.dailyTokenBudget
+        if (budget <= 0) return null
+        val used = usedTodayProvider?.invoke() ?: return null
+        return budgetMessage(budget, used)
+    }
+
+    /**
+     * سقف پاسخِ تحلیل. در حالت کم‌مصرف پاسخ کوتاه‌تر خواسته می‌شود؛ خروجی گران‌ترین
+     * بخش هزینه است و تحلیل این برنامه به متن بلند نیاز ندارد.
+     */
+    internal fun reviewOutputTokens(config: PumpAiConfig, nativeRoute: Boolean): Int = when {
+        config.economyMode -> if (nativeRoute) 1100 else 800
+        else -> if (nativeRoute) 2048 else 1200
+    }
+
+    /** سقف پاسخ قابلیت‌های متنی (خبر) با همان سیاست کم‌مصرف. */
+    internal fun completionTokens(config: PumpAiConfig, requested: Int): Int =
+        if (config.economyMode) (requested * 6 / 10).coerceAtLeast(768) else requested
+
     /** نمایش امن کلید در گزارش عیب‌یابی: فقط پیشوند، دو کاراکتر آخر و طول. */
     fun keyFingerprint(apiKey: String): String = when {
         apiKey.isEmpty() -> "ذخیره نشده"
@@ -577,7 +650,10 @@ object PumpAiReviewer {
                     .coerceAtMost(timeoutSeconds.toLong()).toInt()
             }
             try {
-                return Http.execute(request, maxBytes, attemptTimeout)
+                val body = Http.execute(request, maxBytes, attemptTimeout)
+                // تنها نقطه‌ی مشترک همه‌ی مسیرها؛ شمارش مصرف اینجا هیچ درخواستی را جا نمی‌اندازد.
+                reportUsage(payload, body)
+                return body
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (http: Http.HttpException) {
@@ -609,6 +685,17 @@ object PumpAiReviewer {
                 attempt++
             }
         }
+    }
+
+    /** مصرف واقعی را ثبت می‌کند و اگر سرویس usage ندهد، تخمین محافظه‌کارانه می‌زند. */
+    private fun reportUsage(payload: JsonObject, body: String) {
+        val sink = usageSink ?: return
+        val usage = parseUsage(body) ?: Usage(
+            input = estimateTokens(payload.toString()),
+            output = estimateTokens(body),
+            estimated = true
+        )
+        runCatching { sink(usage) }
     }
 
     /** backoff نیز داخل سقف کلی همان route است؛ retry زمان پنج‌دقیقه‌ای را دوبرابر نمی‌کند. */
@@ -1275,7 +1362,32 @@ object PumpAiReviewer {
     }
 
     /** متن نقش سیستم — بین مسیر OpenAI-compatible و مسیر بومی Gemini مشترک است. */
-    internal fun systemPrompt(): String =
+    /**
+     * دستور سیستمی. در حالت کم‌مصرف نسخه‌ی فشرده فرستاده می‌شود: همان کلیدهای JSON و
+     * همان قواعد ضدکلی‌گویی، ولی بدون توضیح‌های تکراری. این متن در هر درخواست تکرار
+     * می‌شود، پس کوتاه‌کردنش مستقیم‌ترین صرفه‌جویی توکن ورودی است.
+     */
+    internal fun systemPrompt(economy: Boolean = false): String =
+        if (economy) COMPACT_SYSTEM_PROMPT else FULL_SYSTEM_PROMPT
+
+    private val COMPACT_SYSTEM_PROMPT: String by lazy {
+        """
+        نقش: تحلیل‌گر ارشد رمزارز برای یک معامله‌گر حرفه‌ای. فارسی، فشرده و عددی بنویس.
+        قواعد: کلی‌گویی ممنوع؛ عددهای ورودی را تکرار نکن بلکه تفسیر کن؛ هر ادعا یا از داده‌ی
+        ورودی باشد یا از خبر واقعی با لینک HTTPS؛ آنچه را نمی‌دانی «نامشخص» بنویس و حدس نزن؛
+        سطح‌ها را با عدد دلاری واقعی بده؛ سود تضمین نکن.
+        تکنیکال را از همین داده‌ها بساز (ساختار ۱س/۲۴س/۷ر/۳۰ر، جای قیمت در دامنه، فاصله تا ATH،
+        گردش حجم، ایچیموکو). در project پشتوانه/شبکه/کاربرد/توکنومیکس را کوتاه بگو و در
+        catalysts محرک‌های پیشِ رو را. تصمیم را صریح بگو و سناریوی باطل‌کننده را هم بنویس.
+        هر فیلد حداکثر دو جمله. فقط JSON معتبر بدون markdown با همین کلیدها:
+        {"verdict":"همسو|محتاط‌تر|نامطمئن","recommendation":"فعلاً فقط زیر نظر بگیر|صبر کن؛ ورود عجولانه نکن|فعلاً وارد نشو؛ قیمت را تعقیب نکن",
+         "action":"...","entry":"...","stopLoss":"...","targets":"...","timeframe":"...","invalidation":"...",
+         "technical":"...","project":"...","catalysts":"...","risks":"...","reason":"...","summary":"...","confidence":0,
+         "news":[{"title":"...","url":"https://...","relation":"...","source":"...","publishedAt":"..."}]}
+        """.trimIndent()
+    }
+
+    private val FULL_SYSTEM_PROMPT: String by lazy {
         """
         نقش: تحلیل‌گر ارشد بازار رمزارز با تخصص هم‌زمان در تحلیل تکنیکال، جریان نقدینگی،
         فاندامنتال پروژه و تحلیل خبری. مخاطب یک معامله‌گر است، نه تازه‌کار.
@@ -1311,11 +1423,13 @@ object PumpAiReviewer {
          "summary":"نظر کارشناسی خلاصه در ۲ تا ۳ جمله","confidence":0,
          "news":[{"title":"...","url":"https://...","relation":"ارتباط خبر با قیمت","source":"...","publishedAt":"..."}]}
         """.trimIndent()
+    }
 
     /** داده‌های همین کوین برای مدل؛ هیچ اطلاعات شخصی‌ای فرستاده نمی‌شود. */
-    internal fun userPrompt(coin: PumpScanner.PumpCoin): String {
+    internal fun userPrompt(coin: PumpScanner.PumpCoin, economy: Boolean = false): String {
         val advice = coin.advice
         val ichimoku = Ichimoku.of(coin.spark)
+        if (economy) return economyUserPrompt(coin, ichimoku)
         return buildString {
             appendLine("کوین: ${coin.displayName} (شناسه: ${coin.id})")
             appendLine("رتبه بازار: ${coin.rank}")
@@ -1358,6 +1472,36 @@ object PumpAiReviewer {
         }
     }
 
+    /**
+     * همان داده‌ها در فشرده‌ترین شکل: یک برچسب کوتاه برای هر عدد و بدون جمله‌سازی.
+     * حدود نیمی از توکن ورودی نسخه‌ی کامل را می‌گیرد و چیزی از اطلاعات کم نمی‌شود.
+     */
+    private fun economyUserPrompt(coin: PumpScanner.PumpCoin, ichimoku: Ichimoku.Series?): String {
+        val advice = coin.advice
+        return buildString {
+            appendLine("${coin.displayName} (${coin.id}) رتبه ${coin.rank}")
+            appendLine("قیمت ${number(coin.price)}$ | ۱س ${number(coin.change1h)}٪ | ۲۴س ${number(coin.change24h)}٪ | " +
+                    "۷ر ${number(coin.change7d)}٪ | ۳۰ر ${number(coin.change30d)}٪")
+            appendLine("سقف/کف ۲۴س ${number(coin.high24h)}/${number(coin.low24h)}$" +
+                    (coin.rangePosition24h?.let { " | جای قیمت در دامنه ${number(it * 100)}٪" } ?: ""))
+            appendLine("ATH ${number(coin.ath)}$ (${number(coin.athChangePct)}٪) | حجم ${number(coin.volume)}$ | " +
+                    "مارکت‌کپ ${number(coin.marketCap)}$ | گردش ${number(coin.turnover * 100)}٪")
+            appendLine("عرضه ${number(coin.circulatingSupply)}/${number(coin.totalSupply)} | مرحله ${coin.stage.label} | " +
+                    "ریسک ${coin.risk.label}${if (coin.thinMarket) " | بازار کم‌عمق" else ""}")
+            if (ichimoku != null) {
+                appendLine("ایچیموکو ت${number(ichimoku.lastTenkan)}/ک${number(ichimoku.lastKijun)} " +
+                        "ابر ${number(minOfOrNull(ichimoku.currentSpanA, ichimoku.currentSpanB))}–" +
+                        "${number(maxOfOrNull(ichimoku.currentSpanA, ichimoku.currentSpanB))} | " +
+                        Ichimoku.summary(coin.price, ichimoku))
+            }
+            if (coin.spark.size >= 6) {
+                append("روند ۷ر: ")
+                appendLine(PumpScanner.downsample(coin.spark, 6).joinToString(",") { number(it) })
+            }
+            append("پیشنهاد پایه: ${advice.recommendation.label}")
+        }
+    }
+
     private fun maxOfOrNull(a: Double?, b: Double?): Double? =
         if (a == null || b == null) (a ?: b) else maxOf(a, b)
 
@@ -1371,12 +1515,12 @@ object PumpAiReviewer {
         includeProviderSearch: Boolean = config.providerSearch,
         jsonMode: Boolean = false
     ): JsonObject {
-        val system = systemPrompt()
-        val user = userPrompt(coin)
+        val system = systemPrompt(config.economyMode)
+        val user = userPrompt(coin, config.economyMode)
         return buildJsonObject {
             put("model", config.model)
             put("temperature", 0.2)
-            put("max_tokens", tokenBudget(config.model, 1200))
+            put("max_tokens", tokenBudget(config.model, reviewOutputTokens(config, nativeRoute = false)))
             put("messages", buildJsonArray {
                 add(buildJsonObject { put("role", "system"); put("content", system) })
                 add(buildJsonObject { put("role", "user"); put("content", user) })
@@ -1393,14 +1537,17 @@ object PumpAiReviewer {
                 when {
                     host == "api.openai.com" -> put(
                         "web_search_options",
-                        buildJsonObject { put("search_context_size", "medium") }
+                        buildJsonObject {
+                            // context جست‌وجو مستقیماً توکن ورودی است؛ در حالت کم‌مصرف کوچک می‌شود.
+                            put("search_context_size", if (config.economyMode) "low" else "medium")
+                        }
                     )
                     host == "openrouter.ai" || host.endsWith(".openrouter.ai") -> put(
                         "plugins",
                         buildJsonArray {
                             add(buildJsonObject {
                                 put("id", "web")
-                                put("max_results", 5)
+                                put("max_results", if (config.economyMode) 3 else 5)
                             })
                         }
                     )

@@ -146,7 +146,10 @@ fun PortfolioCategory(persian: Boolean) {
             val outcome = withContext(Dispatchers.IO) { PumpAiReviewer.review(config, coin) }
             outcome.review?.let {
                 withContext(Dispatchers.IO) {
-                    AiReviewStore.add(context, trade.coinId, trade.symbol, trade.name, it)
+                    AiReviewStore.add(
+                        context, trade.coinId, trade.symbol, trade.name, it,
+                        price = coin.price
+                    )
                 }
                 histories = histories +
                         (trade.coinId to withContext(Dispatchers.IO) { AiReviewStore.history(context, trade.coinId) })

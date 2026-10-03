@@ -27,7 +27,9 @@ object AiReviewStore {
     @Serializable
     data class Entry(
         val at: Long,
-        val review: PumpAiReviewer.Review
+        val review: PumpAiReviewer.Review,
+        /** قیمت لحظه‌ی تحلیل؛ معیار اینکه تحلیل هنوز به‌درد می‌خورد یا کهنه شده است. */
+        val price: Double? = null
     )
 
     @Serializable
@@ -82,11 +84,12 @@ object AiReviewStore {
         symbol: String,
         name: String,
         review: PumpAiReviewer.Review,
-        at: Long = System.currentTimeMillis()
+        at: Long = System.currentTimeMillis(),
+        price: Double? = null
     ) {
         val id = coinId.trim().lowercase()
         if (id.isEmpty()) return
-        val entry = Entry(at = at, review = review)
+        val entry = Entry(at = at, review = review, price = price)
         val logs = readAll(context).toMutableList()
         val idx = logs.indexOfFirst { it.coinId == id }
         if (idx >= 0) {

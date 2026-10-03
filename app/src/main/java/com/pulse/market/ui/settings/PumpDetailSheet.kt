@@ -91,6 +91,8 @@ fun PumpDetailSheet(
     aiReviewAt: Long?,
     aiHistory: List<com.pulse.market.data.AiReviewStore.Entry> = emptyList(),
     aiError: String?,
+    /** پیام بی‌خطر مثل «از تحلیل ذخیره‌شده استفاده شد»؛ خطا نیست و قرمز نمایش داده نمی‌شود. */
+    aiNote: String? = null,
     nobitex: NobitexMarkets.Result?,
     openTrade: PaperTradeStore.Trade?,
     onBuy: (Double, Double?, Double?, Double, List<Double>?, List<Double>?) -> Unit,
@@ -332,6 +334,13 @@ fun PumpDetailSheet(
                         "خطای AI: $aiError",
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.error
+                    )
+                }
+                if (!aiNote.isNullOrBlank()) {
+                    Text(
+                        aiNote,
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 aiReview?.let { review ->

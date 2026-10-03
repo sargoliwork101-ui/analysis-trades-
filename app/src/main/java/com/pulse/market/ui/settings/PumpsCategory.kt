@@ -39,6 +39,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -62,9 +63,11 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.pulse.market.data.AiUsageStore
 import com.pulse.market.data.MAX_SYMBOLS
 import com.pulse.market.data.PumpAiConfig
 import com.pulse.market.data.PaperTradeStore
@@ -607,6 +610,66 @@ fun PumpsCategory(
                         ) { vm.saveAiConfig(aiConfig.copy(providerSearch = it)) }
 
                         RowDivider()
+                        // ───── مدیریت مصرف توکن ─────
+                        SwitchRow(
+                            "حالت کم‌مصرف (صرفه‌جویی در توکن)",
+                            if (aiConfig.economyMode)
+                                "دستور فشرده، پاسخ کوتاه‌تر و خبرهای کمتر در هر درخواست — حدود نیمی از توکن قبلی."
+                            else "خاموش؛ دستور کامل و پاسخ بلندتر فرستاده می‌شود (دقیق‌تر ولی گران‌تر).",
+                            aiConfig.economyMode
+                        ) { vm.saveAiConfig(aiConfig.copy(economyMode = it)) }
+                        RowDivider()
+                        InnerRow {
+                            OutlinedTextField(
+                                value = if (aiConfig.reuseMinutes == 0) "" else aiConfig.reuseMinutes.toString(),
+                                onValueChange = { raw ->
+                                    val minutes = raw.filter { it.isDigit() }.take(4).toIntOrNull() ?: 0
+                                    vm.saveAiConfig(aiConfig.copy(reuseMinutes = minutes.coerceIn(0, 24 * 60)))
+                                },
+                                label = { Text("استفاده از تحلیل ذخیره‌شده تا (دقیقه)") },
+                                placeholder = { Text("۰ = همیشه درخواست تازه") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Hint(
+                                "اگر همین کوین در این بازه تحلیل شده و قیمتش بیش از ۲٪ تکان نخورده باشد، " +
+                                    "همان تحلیل نشان داده می‌شود و درخواست تازه‌ای نمی‌رود. زدن دوباره‌ی دکمه، " +
+                                    "همیشه تحلیل تازه می‌گیرد."
+                            )
+                            OutlinedTextField(
+                                value = if (aiConfig.dailyTokenBudget == 0) "" else aiConfig.dailyTokenBudget.toString(),
+                                onValueChange = { raw ->
+                                    val budget = raw.filter { it.isDigit() }.take(7).toIntOrNull() ?: 0
+                                    vm.saveAiConfig(aiConfig.copy(dailyTokenBudget = budget.coerceIn(0, 5_000_000)))
+                                },
+                                label = { Text("سقف مصرف روزانه (توکن)") },
+                                placeholder = { Text("۰ = بدون سقف") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Text(
+                                AiUsageStore.summaryText(
+                                    today = vm.aiUsageToday,
+                                    weekTotal = vm.aiUsageWeek,
+                                    budget = aiConfig.dailyTokenBudget
+                                ),
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            OutlinedButton(
+                                onClick = { vm.clearAiUsage() },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("صفر کردن شمارنده‌ی مصرف", fontSize = 11.5.sp)
+                            }
+                            Hint(
+                                "عددها از خودِ پاسخ سرویس خوانده می‌شوند (و اگر سرویس گزارش ندهد، تخمین زده می‌شود) " +
+                                    "و فقط روی همین گوشی می‌مانند. با رسیدن به سقف، تا پایان شبانه‌روز درخواست تازه‌ای فرستاده نمی‌شود."
+                            )
+                        }
+                        RowDivider()
                         AiBackupProvidersSection(
                             config = aiConfig,
                             onChange = { vm.saveAiConfig(it) }
@@ -664,6 +727,7 @@ fun PumpsCategory(
             aiReviewAt = aiReviewAt[selected.id],
             aiHistory = vm.aiHistory[selected.id].orEmpty(),
             aiError = aiErrors[selected.id],
+            aiNote = vm.aiNotes[selected.id],
             nobitex = nobitex[selected.id],
             openTrade = trades.firstOrNull { it.coinId == selected.id && it.isOpen },
             onBuy = { amount, takeProfit, stopLoss, fee, buyPrices, sellPrices ->

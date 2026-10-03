@@ -1,7 +1,9 @@
 package com.pulse.market
 
 import android.app.Application
+import com.pulse.market.data.AiUsageStore
 import com.pulse.market.data.Http
+import com.pulse.market.data.PumpAiReviewer
 import com.pulse.market.widget.StockWidgetProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -22,6 +24,14 @@ class App : Application() {
         super.onCreate()
         // پیش از هر درخواست شبکه، کش دیسکِ HTTP آماده می‌شود (بدون کار سنگین/شبکه).
         Http.init(this)
+        // شمارش مصرف توکن و سقف روزانه باید برای همه‌ی بخش‌ها (پامپ، کیف، خبر) کار کند،
+        // پس یک‌جا و در سطح برنامه وصل می‌شود، نه داخل یک صفحه.
+        PumpAiReviewer.usageSink = { usage ->
+            runCatching { AiUsageStore.record(this, usage.input, usage.output) }
+        }
+        PumpAiReviewer.usedTodayProvider = {
+            runCatching { AiUsageStore.today(this).total }.getOrDefault(0)
+        }
         appScope.launch {
             try {
                 // بالا آمدن پروسه ممکن است از Worker/رسیورِ پس‌زمینه باشد؛ در آن حالت
