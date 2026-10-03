@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.NotificationsActive
@@ -57,7 +58,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -95,6 +98,7 @@ fun PumpsCategory(
     onAddSymbol: (SymbolDef) -> Unit
 ) {
     val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     val vm: PumpsViewModel = viewModel()
 
     // بارگذاری اولیه یک‌بار انجام می‌شود؛ چون state در ViewModel است، با ترک و
@@ -469,6 +473,12 @@ fun PumpsCategory(
                                     )
                                 }
                             }
+                            Hint(
+                                "⚠️ اگر در ایران و بدون فیلترشکن هستی، Gemini، OpenAI و Claude درخواست را رد " +
+                                    "می‌کنند (خطای محدودیت جغرافیایی یا «اتصال برقرار نشد»). در این حالت یکی از " +
+                                    "درگاه‌های ایرانی «آوالای» یا «گپ‌جی‌پی‌تی» را انتخاب کن — سازگار با OpenAI و " +
+                                    "بدون فیلترشکن — یا دست‌کم یکی از آن‌ها را پایین به‌عنوان سرویس پشتیبان اضافه کن."
+                            )
                             val activePreset = PumpAiConfig.PRESETS.firstOrNull { aiConfig.matches(it) }
                             Hint(
                                 activePreset?.hint
@@ -550,6 +560,31 @@ fun PumpsCategory(
                                     fontWeight = FontWeight.Bold,
                                     color = if (result.ok) Color(0xFF16A34A) else MaterialTheme.colorScheme.error
                                 )
+                                // گزارش کامل (بدون کلید) تا کاربر بتواند دقیقاً همان متن
+                                // خطا را جایی بفرستد یا نگه دارد؛ تایپ دوباره‌ی متن طولانی لازم نیست.
+                                OutlinedButton(
+                                    onClick = {
+                                        clipboard.setText(
+                                            AnnotatedString(
+                                                "گزارش عیب‌یابی هوش مصنوعی — نبض بازار\n" +
+                                                    "مدل: ${aiConfig.model}\n" +
+                                                    "مقصد: ${aiTarget?.display ?: aiConfig.endpoint}\n" +
+                                                    "کلید ذخیره‌شده: ${if (aiConfig.apiKey.isBlank()) "ندارد" else "دارد"}\n" +
+                                                    "تعداد سرویس آماده: ${aiConfig.chain.size}\n\n" +
+                                                    result.message
+                                            )
+                                        )
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(
+                                        Icons.Default.ContentCopy,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("کپی گزارش عیب‌یابی (بدون کلید)", fontSize = 11.5.sp)
+                                }
                             }
                             Hint(
                                 "تست یک پیام کوتاه و بدون داده‌ی کوین مستقیماً به مقصد بالا می‌فرستد؛ " +

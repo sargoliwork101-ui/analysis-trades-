@@ -222,4 +222,37 @@ class PumpAiFailoverTest {
         assertEquals("generativelanguage.googleapis.com", target!!.host)
     }
 
+    @Test
+    fun reasoningModelsGetAWorkableOutputBudget() {
+        // سقف ۱۶ توکنیِ تست اتصال روی مدل استدلالی، پاسخ را بی‌متن می‌کرد.
+        assertEquals(PumpAiReviewer.MIN_REASONING_TOKENS, PumpAiReviewer.tokenBudget("gpt-5-mini", 16))
+        assertEquals(PumpAiReviewer.MIN_REASONING_TOKENS, PumpAiReviewer.tokenBudget("o3-mini", 1200))
+        assertEquals(4096, PumpAiReviewer.tokenBudget("gpt-5", 4096))
+        assertEquals(16, PumpAiReviewer.tokenBudget("gpt-4o-mini", 16))
+        assertEquals(1200, PumpAiReviewer.tokenBudget("gemini-2.0-flash", 1200))
+    }
+
+    @Test
+    fun iranReachableGatewaysArePresetAndRoutable() {
+        val iranian = PumpAiConfig.PRESETS.filter {
+            it.endpoint.endsWith(".ir/v1") || it.id == "gapgpt"
+        }
+        assertTrue(iranian.isNotEmpty())
+        for (preset in iranian) {
+            val config = PumpAiConfig(
+                enabled = true,
+                endpoint = preset.endpoint,
+                model = preset.model,
+                apiKey = "test"
+            )
+            assertTrue(preset.id, config.isReady)
+            assertTrue(
+                preset.id,
+                PumpAiReviewer.chatCompletionsEndpoint(preset.endpoint).endsWith("/v1/chat/completions")
+            )
+            // درگاه ایرانی نباید به مسیر بومی Gemini/Anthropic بیفتد.
+            assertFalse(preset.id, PumpAiReviewer.isGeminiNative(preset.endpoint))
+            assertFalse(preset.id, PumpAiReviewer.isAnthropicHost(preset.endpoint))
+        }
+    }
 }

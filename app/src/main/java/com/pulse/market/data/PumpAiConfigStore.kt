@@ -117,6 +117,26 @@ data class PumpAiConfig(
         /** سرویس‌های آماده؛ Gemini و Claude از API بومی خودشان و بقیه از OpenAI-compatible. */
         val PRESETS: List<Preset> = listOf(
             Preset(
+                id = "avalai",
+                title = "آوالای (ایران، بدون فیلترشکن)",
+                endpoint = "https://api.avalai.ir/v1",
+                model = "gpt-4o-mini",
+                hint = "درگاه ایرانی و سازگار با OpenAI؛ کلید aa-… را از avalai.ir بگیر. " +
+                        "از داخل ایران بدون فیلترشکن کار می‌کند و مدل‌های GPT، Claude و Gemini " +
+                        "را با همین یک کلید می‌دهد. اگر اینترنت داخلی ناپایدار بود، آدرس " +
+                        "https://api.avalapis.ir/v1 را هم امتحان کن.",
+                providerSearch = false
+            ),
+            Preset(
+                id = "gapgpt",
+                title = "گپ‌جی‌پی‌تی (ایران)",
+                endpoint = "https://api.gapgpt.app/v1",
+                model = "gpt-4o-mini",
+                hint = "درگاه ایرانی دیگر و سازگار با OpenAI؛ کلید را از gapgpt.app بگیر. " +
+                        "بدون فیلترشکن و با پرداخت ریالی کار می‌کند؛ گزینهٔ خوبی برای سرویس پشتیبان است.",
+                providerSearch = false
+            ),
+            Preset(
                 id = "gemini",
                 title = "Gemini (گوگل)",
                 endpoint = "https://generativelanguage.googleapis.com/v1beta",

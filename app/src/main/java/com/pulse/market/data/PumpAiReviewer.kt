@@ -343,7 +343,7 @@ object PumpAiReviewer {
         fun chatPayload(jsonMode: Boolean): JsonObject = buildJsonObject {
             put("model", config.model)
             put("temperature", 0.15)
-            put("max_tokens", maxTokens)
+            put("max_tokens", tokenBudget(config.model, maxTokens))
             put("messages", buildJsonArray {
                 add(buildJsonObject { put("role", "system"); put("content", system) })
                 add(buildJsonObject { put("role", "user"); put("content", user) })
@@ -577,6 +577,18 @@ object PumpAiReviewer {
         return name.startsWith("gpt-5") || name.startsWith("gpt5") ||
                 O_SERIES.containsMatchIn(name)
     }
+
+    /**
+     * مدل‌های استدلالی پیش از نوشتن پاسخ، توکن «تفکر» مصرف می‌کنند و همان توکن‌ها هم از
+     * سقف خروجی کم می‌شوند. با سقف کوچک، پاسخ بدون هیچ متنی برمی‌گردد
+     * (`finish_reason = length`) و کاربر خطای گمراه‌کننده می‌بیند؛ پس برای این مدل‌ها
+     * کف بودجه بالا برده می‌شود.
+     */
+    internal fun tokenBudget(model: String, requested: Int): Int =
+        if (needsModernTokenParam(model)) maxOf(requested, MIN_REASONING_TOKENS) else requested
+
+    /** کف بودجه‌ی خروجی مدل‌های استدلالی. */
+    internal const val MIN_REASONING_TOKENS = 1_024
 
     /** مدل‌های استدلالی OpenAI: o1، o3-mini، o4-mini… (نه o1-preview از سرویس دیگر مهم است). */
     private val O_SERIES = Regex("^o[1-9][0-9]?(\\z|[-_.])")
@@ -1157,7 +1169,9 @@ object PumpAiReviewer {
         val user = "Reply with exactly: OK"
         fun chatPayload(): JsonObject = buildJsonObject {
             put("model", config.model)
-            put("max_tokens", 16)
+            // مدل استدلالی با سقف ۱۶ توکن، کل بودجه را صرف «تفکر» می‌کند و متن خالی
+            // برمی‌گرداند؛ تست اتصالِ کلیدِ سالم بی‌دلیل قرمز می‌شد.
+            put("max_tokens", tokenBudget(config.model, 16))
             put("temperature", 0.0)
             put("messages", buildJsonArray {
                 add(buildJsonObject { put("role", "user"); put("content", user) })
@@ -1306,7 +1320,7 @@ object PumpAiReviewer {
         return buildJsonObject {
             put("model", config.model)
             put("temperature", 0.2)
-            put("max_tokens", 1200)
+            put("max_tokens", tokenBudget(config.model, 1200))
             put("messages", buildJsonArray {
                 add(buildJsonObject { put("role", "system"); put("content", system) })
                 add(buildJsonObject { put("role", "user"); put("content", user) })

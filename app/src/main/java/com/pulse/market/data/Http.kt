@@ -127,8 +127,6 @@ object Http {
             // پاسخِ redirect فقط برای هدر Location لازم است؛ بدنه‌اش بسته می‌شود.
             response.use { r ->
                 if (redirectCount >= MAX_REDIRECTS) error("تعداد تغییر مسیر پاسخ بیش از حد مجاز است")
-                // POST هوش مصنوعی یا هر بدنه‌ی حساس نباید خودکار به مقصد دیگری فرستاده شود.
-                if (current.body != null) error("تغییر مسیر برای درخواست دارای بدنه مجاز نیست")
                 val location = r.header("Location")
                     ?: error("پاسخ تغییر مسیر، مقصد معتبر ندارد")
                 val next = current.url.resolve(location)
@@ -138,6 +136,14 @@ object Http {
                 }
                 val sameOrigin = current.url.scheme == next.scheme &&
                         current.url.host == next.host && current.url.port == next.port
+                // درخواست دارای بدنه (POST هوش مصنوعی) فقط وقتی دنبال می‌شود که سرویس
+                // صریحاً «همان متد و بدنه» را خواسته باشد (۳۰۷/۳۰۸) و مقصد هم دقیقاً
+                // همان origin باشد؛ بعضی درگاه‌ها فقط `/v1` را به `/v1/` می‌فرستند و
+                // پیش‌تر همین، اتصال هوش مصنوعی را با خطا می‌بست. بدنه هرگز به میزبان
+                // دیگری فرستاده نمی‌شود.
+                if (current.body != null && !(sameOrigin && (r.code == 307 || r.code == 308))) {
+                    error("تغییر مسیر برای درخواست دارای بدنه مجاز نیست")
+                }
                 current = current.newBuilder().url(next).apply {
                     if (!sameOrigin) {
                         for (name in current.headers.names().filter(::isSensitiveHeader)) {
