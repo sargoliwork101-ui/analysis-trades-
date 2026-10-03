@@ -2,6 +2,9 @@ package com.pulse.market.data
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -193,12 +196,31 @@ object PumpAiReviewer {
         return routes
     }
 
+    /**
+     * تحلیل با زنجیره‌ی سرویس‌ها: اول سرویس اصلی و اگر پاسخ نداد (خطای کلید، سهمیه،
+     * فیلتر جغرافیایی، قطعی شبکه…) همان درخواست از سرویس پشتیبان بعدی می‌رود.
+     */
     suspend fun review(
         config: PumpAiConfig,
         coin: PumpScanner.PumpCoin
     ): Outcome = withContext(Dispatchers.IO) {
         if (!config.enabled) return@withContext Outcome(error = "بررسی هوش مصنوعی خاموش است")
-        if (!config.isReady) return@withContext Outcome(error = "آدرس API و نام مدل را کامل کن")
+        val chain = config.chain
+        if (chain.isEmpty()) return@withContext Outcome(error = "آدرس API و نام مدل را کامل کن")
+        val errors = mutableListOf<String>()
+        for ((index, provider) in chain.withIndex()) {
+            val outcome = reviewWith(provider, coin)
+            if (outcome.review != null) return@withContext outcome
+            errors += providerErrorLine(index, provider, outcome.error)
+        }
+        Outcome(error = chainErrorText(errors))
+    }
+
+    /** یک سرویس مشخص؛ مسیرهای داخلی همان سرویس هنوز به‌ترتیب امتحان می‌شوند. */
+    private suspend fun reviewWith(
+        config: PumpAiConfig,
+        coin: PumpScanner.PumpCoin
+    ): Outcome = withContext(Dispatchers.IO) {
         val routes = try {
             reviewRoutes(config, coin)
         } catch (invalid: IllegalArgumentException) {
@@ -251,7 +273,30 @@ object PumpAiReviewer {
         responseSchema: JsonObject? = null
     ): CompletionOutcome = withContext(Dispatchers.IO) {
         if (!config.enabled) return@withContext CompletionOutcome(error = "بررسی هوش مصنوعی خاموش است")
-        if (!config.isReady) return@withContext CompletionOutcome(error = "آدرس API و نام مدل را کامل کن")
+        val chain = config.chain
+        if (chain.isEmpty()) {
+            return@withContext CompletionOutcome(error = "آدرس API و نام مدل را کامل کن")
+        }
+        val errors = mutableListOf<String>()
+        for ((index, provider) in chain.withIndex()) {
+            val outcome = completeWith(
+                provider, system, user, maxTokens, timeoutSeconds, responseSchema
+            )
+            if (!outcome.content.isNullOrBlank()) return@withContext outcome
+            errors += providerErrorLine(index, provider, outcome.error)
+        }
+        CompletionOutcome(error = chainErrorText(errors))
+    }
+
+    /** همان [complete] ولی فقط روی یک سرویس. */
+    private suspend fun completeWith(
+        config: PumpAiConfig,
+        system: String,
+        user: String,
+        maxTokens: Int,
+        timeoutSeconds: Int?,
+        responseSchema: JsonObject?
+    ): CompletionOutcome = withContext(Dispatchers.IO) {
         val routes = try {
             completionRoutes(
                 config, system, user, maxTokens.coerceIn(128, 4096), responseSchema
@@ -387,6 +432,27 @@ object PumpAiReviewer {
         return routes
     }
 
+    /** نام کوتاه و بی‌خطرِ یک سرویس برای پیام‌ها: میزبان + مدل (بدون کلید). */
+    internal fun providerLabel(config: PumpAiConfig): String {
+        val host = hostOf(config.endpoint).ifBlank { "آدرس خالی" }
+        val model = config.model.trim().ifBlank { "بدون مدل" }
+        return "$host · $model"
+    }
+
+    /** یک خط گزارش برای سرویس شکست‌خورده در زنجیره. */
+    internal fun providerErrorLine(index: Int, config: PumpAiConfig, error: String?): String {
+        val title = if (index == 0) "سرویس اصلی" else "پشتیبان $index"
+        return "$title (${providerLabel(config)}): ${error ?: "پاسخی نداد"}"
+    }
+
+    /** وقتی همه‌ی سرویس‌های زنجیره شکست خوردند، همه‌ی دلیل‌ها با هم نمایش داده می‌شوند. */
+    internal fun chainErrorText(errors: List<String>): String = when {
+        errors.isEmpty() -> "ارتباط با سرویس AI یا خواندن پاسخ ممکن نشد"
+        errors.size == 1 -> errors.first().substringAfter("): ", errors.first())
+        else -> "هیچ‌کدام از ${errors.size} سرویس هوش مصنوعی پاسخ ندادند:\n" +
+                errors.joinToString("\n") { "• $it" }
+    }
+
     /** خطایی که امتحان مسیر دیگر هم آن را حل نمی‌کند. */
     internal fun isFatalServiceError(http: Http.HttpException, message: String): Boolean =
         http.code == 401 || http.code == 403 || http.code == 429 ||
@@ -448,9 +514,11 @@ object PumpAiReviewer {
         timeoutSeconds: Int,
         maxBytes: Long
     ): String {
-        val request = buildRequest(config, route.endpoint, route.payload)
+        var payload = requestPayload(config, route.endpoint, route.payload)
+        var request = buildRequest(config, route.endpoint, payload)
         val deadlineNanos = System.nanoTime() + timeoutSeconds.toLong() * 1_000_000_000L
         var attempt = 0
+        var parameterFixTried = false
         while (true) {
             val attemptTimeout = if (attempt == 0) {
                 timeoutSeconds
@@ -463,6 +531,17 @@ object PumpAiReviewer {
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (http: Http.HttpException) {
+                // ۴۰۰ به‌خاطر نام پارامتر (max_tokens/temperature) با یک تطبیق حل می‌شود
+                // و نباید سهمیه‌ی retry واقعی را مصرف کند.
+                if (http.code == 400 && !parameterFixTried) {
+                    val fixed = payloadForParameterError(payload, http.message.orEmpty())
+                    parameterFixTried = true
+                    if (fixed != null && hasRetryWindow(deadlineNanos, 0L)) {
+                        payload = fixed
+                        request = buildRequest(config, route.endpoint, payload)
+                        continue
+                    }
+                }
                 if (attempt >= MAX_AI_RETRIES || !isRetryableHttp(http)) throw http
                 val wait = retryDelayMillis(
                     attempt, http.retryAfterMillis, Random.nextLong(0L, 251L)
@@ -488,10 +567,70 @@ object PumpAiReviewer {
         return remainingMillis >= waitMillis + MIN_RETRY_CALL_WINDOW_MS
     }
 
+    /**
+     * مدل‌های تازه‌ی OpenAI (خانواده‌ی o و GPT-5) پارامتر قدیمی `max_tokens` را رد
+     * می‌کنند و فقط `max_completion_tokens` و دمای پیش‌فرض را می‌پذیرند؛ بدون این
+     * تطبیق، اتصال با خطای ۴۰۰ شکست می‌خورد.
+     */
+    internal fun needsModernTokenParam(model: String): Boolean {
+        val name = model.trim().lowercase(Locale.ROOT).substringAfterLast('/')
+        return name.startsWith("gpt-5") || name.startsWith("gpt5") ||
+                O_SERIES.containsMatchIn(name)
+    }
+
+    /** مدل‌های استدلالی OpenAI: o1، o3-mini، o4-mini… (نه o1-preview از سرویس دیگر مهم است). */
+    private val O_SERIES = Regex("^o[1-9][0-9]?(\\z|[-_.])")
+
+    /** همان بدنه، ولی با نام پارامترهای مدل‌های تازه. */
+    internal fun modernizeChatPayload(payload: JsonObject): JsonObject = buildJsonObject {
+        for ((key, value) in payload) {
+            when (key) {
+                "max_tokens" -> put("max_completion_tokens", value)
+                // این مدل‌ها فقط temperature=1 را قبول می‌کنند؛ حذف = همان پیش‌فرض.
+                "temperature" -> Unit
+                else -> put(key, value)
+            }
+        }
+    }
+
+    /**
+     * اگر سرویس با ۴۰۰ گفت پارامتر پذیرفته نیست، همان درخواست یک‌بار با نام تازه‌ی
+     * پارامتر دوباره فرستاده می‌شود. null یعنی این خطا با تغییر بدنه حل نمی‌شود.
+     */
+    internal fun payloadForParameterError(payload: JsonObject, message: String): JsonObject? {
+        val lower = message.lowercase(Locale.ROOT)
+        val rejected = lower.contains("unsupported parameter") ||
+                lower.contains("unsupported_parameter") ||
+                lower.contains("unsupported value") ||
+                lower.contains("unsupported_value") ||
+                lower.contains("is not supported") ||
+                lower.contains("does not support") ||
+                lower.contains("unrecognized request argument")
+        if (!rejected) return null
+        val tokenIssue = lower.contains("max_tokens") || lower.contains("max_completion_tokens")
+        val temperatureIssue = lower.contains("temperature")
+        if (!tokenIssue && !temperatureIssue) return null
+        if (tokenIssue && payload["max_tokens"] == null) return null
+        if (!tokenIssue && payload["temperature"] == null) return null
+        val next = buildJsonObject {
+            for ((key, value) in payload) {
+                when {
+                    key == "max_tokens" && tokenIssue -> put("max_completion_tokens", value)
+                    key == "temperature" -> Unit
+                    else -> put(key, value)
+                }
+            }
+        }
+        return next.takeIf { it.toString() != payload.toString() }
+    }
+
     internal fun buildRequest(config: PumpAiConfig, endpoint: String, payload: JsonObject): Request =
         Request.Builder()
             .url(endpoint)
-            .post(payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
+            .post(
+                requestPayload(config, endpoint, payload).toString()
+                    .toRequestBody("application/json; charset=utf-8".toMediaType())
+            )
             .header("Accept", "application/json")
             .apply {
                 if (config.apiKey.isNotBlank()) {
@@ -517,6 +656,17 @@ object PumpAiReviewer {
                 }
             }
             .build()
+
+    /** بدنه‌ی نهایی؛ فقط مسیرهای سازگار با OpenAI به تطبیق پارامتر نیاز دارند. */
+    internal fun requestPayload(
+        config: PumpAiConfig,
+        endpoint: String,
+        payload: JsonObject
+    ): JsonObject = when {
+        isGeminiNative(endpoint) || isAnthropicHost(endpoint) -> payload
+        needsModernTokenParam(config.model) -> modernizeChatPayload(payload)
+        else -> payload
+    }
 
     /** API رسمی Anthropic از POST /v1/messages استفاده می‌کند، نه chat/completions. */
     internal fun isAnthropicHost(endpoint: String): Boolean {
@@ -885,7 +1035,9 @@ object PumpAiReviewer {
     }
 
     internal fun connectionTarget(config: PumpAiConfig): ConnectionTarget? = runCatching {
-        val route = testRoutes(config).first()
+        // مقصدِ اولین سرویسِ آماده‌ی زنجیره؛ همان جایی که درخواست واقعاً به آن می‌رود.
+        val first = config.chain.firstOrNull() ?: config.primary
+        val route = testRoutes(first).first()
         val uri = URI(route.endpoint)
         ConnectionTarget(
             route = route.label,
@@ -913,6 +1065,33 @@ object PumpAiReviewer {
      * واقعاً کار می‌کنند. هیچ داده‌ی کوینی فرستاده نمی‌شود.
      */
     suspend fun testConnection(config: PumpAiConfig): TestResult = withContext(Dispatchers.IO) {
+        val chain = config.configuredChain
+        if (chain.size <= 1) return@withContext testProvider(config.primary)
+        // هر سرویس هم‌زمان تست می‌شود تا کاربر برای چهار سرویس، چهار برابر منتظر نماند.
+        val results = coroutineScope {
+            chain.map { provider -> async { testProvider(provider) } }.awaitAll()
+        }
+        val okIndex = results.indexOfFirst { it.ok }
+        val lines = results.mapIndexed { index, result ->
+            val title = if (index == 0) "سرویس اصلی" else "پشتیبان $index"
+            "$title (${providerLabel(chain[index])}): ${result.message}"
+        }
+        val header = when {
+            okIndex == 0 -> "✅ سرویس اصلی جواب می‌دهد و ${results.size - 1} سرویس پشتیبان هم تنظیم شده است."
+            okIndex > 0 -> "⚠️ سرویس اصلی جواب نداد ولی پشتیبان $okIndex سالم است؛ " +
+                    "تحلیل‌ها خودکار از همان پشتیبان گرفته می‌شوند."
+            else -> "❌ هیچ‌کدام از ${results.size} سرویس پاسخ ندادند."
+        }
+        TestResult(
+            ok = okIndex >= 0,
+            message = (listOf(header) + lines).joinToString("\n"),
+            latencyMillis = results.getOrNull(okIndex)?.latencyMillis,
+            route = results.getOrNull(okIndex)?.route.orEmpty()
+        )
+    }
+
+    /** تست یک سرویس مشخص از زنجیره. */
+    private suspend fun testProvider(config: PumpAiConfig): TestResult = withContext(Dispatchers.IO) {
         if (config.endpoint.isBlank() || config.model.isBlank()) {
             return@withContext TestResult(false, "اول آدرس API و نام مدل را بنویس")
         }

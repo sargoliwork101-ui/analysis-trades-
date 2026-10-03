@@ -554,7 +554,9 @@ fun PumpsCategory(
                             Hint(
                                 "تست یک پیام کوتاه و بدون داده‌ی کوین مستقیماً به مقصد بالا می‌فرستد؛ " +
                                     "هر مسیر حداکثر ${PumpAiReviewer.CONNECTION_TEST_TIMEOUT_SECONDS} ثانیه فرصت دارد و " +
-                                    "نتیجه، مقصد واقعی، پروتکل، زمان پاسخ و کیفیت اتصال را نشان می‌دهد."
+                                    "نتیجه، مقصد واقعی، پروتکل، زمان پاسخ و کیفیت اتصال را نشان می‌دهد. " +
+                                    "اگر سرویس پشتیبان تعریف کرده باشی، همه‌ی سرویس‌ها هم‌زمان تست و نتیجه‌ی " +
+                                    "هرکدام جداگانه گزارش می‌شود."
                             )
                         }
                         RowDivider()
@@ -565,6 +567,12 @@ fun PumpsCategory(
                             else "خاموش؛ مدل فقط با داده‌های همین صفحه نظر می‌دهد و خبر تازه جست‌وجو نمی‌کند.",
                             aiConfig.providerSearch
                         ) { vm.saveAiConfig(aiConfig.copy(providerSearch = it)) }
+
+                        RowDivider()
+                        AiBackupProvidersSection(
+                            config = aiConfig,
+                            onChange = { vm.saveAiConfig(it) }
+                        )
                     }
                 }
 
@@ -612,7 +620,7 @@ fun PumpsCategory(
                 it.code == selected.id && it.sourceId == PumpScanner.CRYPTO_SOURCE_ID
             },
             aiEnabled = aiConfig.enabled,
-            aiReady = aiConfig.isReady,
+            aiReady = aiConfig.anyReady,
             aiBusy = selected.id in aiBusyIds,
             aiReview = aiReviews[selected.id],
             aiReviewAt = aiReviewAt[selected.id],

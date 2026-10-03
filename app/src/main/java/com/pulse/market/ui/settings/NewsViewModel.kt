@@ -122,7 +122,7 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun summarizeMissing() {
         val config = aiConfig
-        if (aiBusy || !config.enabled || !config.isReady) return
+        if (aiBusy || !config.enabled || !config.anyReady) return
         val pending = items.filterNot { it.hasCompleteAiAnalysis }
             .sortedWith(compareByDescending<MarketNewsItem> { it.importance }
                 .thenByDescending { it.publishedAt })

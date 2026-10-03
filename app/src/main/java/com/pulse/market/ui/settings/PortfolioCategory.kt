@@ -130,7 +130,7 @@ fun PortfolioCategory(persian: Boolean) {
 
     fun runWalletAi(trade: PaperTradeStore.Trade) {
         val config = aiConfig
-        if (!config.isReady || aiBusyCoinId != null) return
+        if (!config.anyReady || aiBusyCoinId != null) return
         aiBusyCoinId = trade.coinId
         aiError = null
         scope.launch {
@@ -360,7 +360,7 @@ fun PortfolioCategory(persian: Boolean) {
             priceAt = priceAt,
             persian = persian,
             aiEnabled = aiConfig.enabled,
-            aiReady = aiConfig.isReady,
+            aiReady = aiConfig.anyReady,
             aiBusy = aiBusyCoinId == coinId,
             aiError = aiError,
             history = histories[coinId].orEmpty(),

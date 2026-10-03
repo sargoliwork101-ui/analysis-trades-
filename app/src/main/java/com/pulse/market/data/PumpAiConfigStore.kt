@@ -8,19 +8,48 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URI
 
 /**
+ * یک سرویس پشتیبانِ هوش مصنوعی: آدرس، مدل و کلید کاملاً مستقل از سرویس اصلی.
+ *
+ * چرا: اگر سرویس اصلی (مثلاً به‌خاطر محدودیت جغرافیایی، اتمام سهمیه یا خطای ۴۰۱)
+ * جواب ندهد، برنامه بدون دخالت کاربر سراغ سرویس بعدی می‌رود.
+ */
+data class PumpAiBackup(
+    val endpoint: String = "",
+    val model: String = "",
+    val apiKey: String = "",
+    val providerSearch: Boolean = false,
+    /** خاموش‌کردن یک پشتیبان بدون پاک‌کردن کلیدش. */
+    val active: Boolean = true
+) {
+    /** آیا کاربر چیزی در این ردیف نوشته است؟ (برای تشخیص ردیف خالی) */
+    val configured: Boolean
+        get() = endpoint.isNotBlank() || model.isNotBlank() || apiKey.isNotBlank()
+
+    fun matches(preset: PumpAiConfig.Preset): Boolean =
+        endpoint.trim().trimEnd('/').equals(preset.endpoint, ignoreCase = true) &&
+                model.trim().equals(preset.model, ignoreCase = true)
+}
+
+/**
  * تنظیمات سراسریِ سرویس هوش مصنوعی پامپ.
  * کلید خارج از WidgetConfig/بکاپ و به‌صورت AES-GCM با Android Keystore ذخیره می‌شود.
+ *
+ * علاوه بر سرویس اصلی، تا [MAX_BACKUPS] سرویس پشتیبان هم می‌شود تعریف کرد؛
+ * [chain] ترتیب واقعی تلاش است (اصلی، بعد پشتیبان‌های فعال و کامل).
  */
 data class PumpAiConfig(
     val enabled: Boolean = false,
     val endpoint: String = "",
     val model: String = "",
     val apiKey: String = "",
-    val providerSearch: Boolean = true
+    val providerSearch: Boolean = true,
+    /** سرویس‌های جایگزین؛ فقط وقتی استفاده می‌شوند که سرویس قبلی پاسخ ندهد. */
+    val backups: List<PumpAiBackup> = emptyList()
 ) {
     val endpointValid: Boolean
         get() = isValidEndpoint(endpoint)
@@ -30,6 +59,40 @@ data class PumpAiConfig(
 
     val isReady: Boolean
         get() = endpointValid && model.isNotBlank() && !insecureKeyTransport
+
+    /** همین سرویس به‌تنهایی (بدون پشتیبان‌ها) — واحدِ کارِ لایه‌ی شبکه. */
+    val primary: PumpAiConfig
+        get() = if (backups.isEmpty()) this else copy(backups = emptyList())
+
+    /** یک پشتیبان را به یک پیکربندی مستقل تبدیل می‌کند. */
+    fun asConfig(backup: PumpAiBackup): PumpAiConfig = PumpAiConfig(
+        enabled = enabled,
+        endpoint = backup.endpoint,
+        model = backup.model,
+        apiKey = backup.apiKey,
+        providerSearch = backup.providerSearch
+    )
+
+    /** همه‌ی سرویس‌های تنظیم‌شده (حتی ناقص) به‌ترتیب اولویت؛ برای تست و پیام خطا. */
+    val configuredChain: List<PumpAiConfig>
+        get() = buildList {
+            add(primary)
+            for (backup in backups) {
+                if (backup.active && backup.configured) add(asConfig(backup))
+            }
+        }
+
+    /** ترتیب واقعی تلاش: فقط سرویس‌هایی که آدرس و مدل سالم دارند. */
+    val chain: List<PumpAiConfig>
+        get() = configuredChain.filter { it.isReady }
+
+    /** حداقل یک سرویس (اصلی یا پشتیبان) آماده‌ی استفاده است. */
+    val anyReady: Boolean
+        get() = chain.isNotEmpty()
+
+    /** شمار سرویس‌های پشتیبانِ فعال و کامل. */
+    val readyBackupCount: Int
+        get() = (chain.size - (if (primary.isReady) 1 else 0)).coerceAtLeast(0)
 
     /** آیا این پیکربندی دقیقاً روی یکی از سرویس‌های آماده تنظیم شده است؟ */
     fun matches(preset: Preset): Boolean =
@@ -48,6 +111,9 @@ data class PumpAiConfig(
     )
 
     companion object {
+        /** سقف سرویس‌های پشتیبان؛ یعنی حداکثر چهار سرویس در زنجیره. */
+        const val MAX_BACKUPS = 3
+
         /** سرویس‌های آماده؛ Gemini و Claude از API بومی خودشان و بقیه از OpenAI-compatible. */
         val PRESETS: List<Preset> = listOf(
             Preset(
@@ -134,18 +200,43 @@ object PumpAiConfigStore {
             val apiKey = decrypted ?: legacyPlainText
             // هر مقدار plaintext باقی‌مانده روی دیسک باید با نسخه‌ی رمزشده بازنویسی شود.
             val needsMigration = legacyPlainText.isNotEmpty()
+            // پشتیبان‌ها هم مثل سرویس اصلی کلیدشان رمزشده ذخیره می‌شود؛ هر مقدار
+            // plaintext قدیمی/دست‌کاری‌شده با همان مسیر مهاجرت بازنویسی می‌شود.
+            var backupPlainText = false
+            val backups = mutableListOf<PumpAiBackup>()
+            val rawBackups = obj.optJSONArray("backups")
+            if (rawBackups != null) {
+                for (index in 0 until minOf(rawBackups.length(), PumpAiConfig.MAX_BACKUPS)) {
+                    val item = rawBackups.optJSONObject(index) ?: continue
+                    val legacyBackupKey = item.optString("apiKey")
+                    if (legacyBackupKey.isNotEmpty()) backupPlainText = true
+                    val backupKey = PumpAiSecretCipher.decrypt(item.optString("apiKeyCipher"))
+                        ?.takeIf { it.isNotEmpty() } ?: legacyBackupKey
+                    backups += PumpAiBackup(
+                        endpoint = item.optString("endpoint"),
+                        model = item.optString("model"),
+                        apiKey = backupKey,
+                        providerSearch = item.optBoolean("providerSearch", false),
+                        active = item.optBoolean("active", true)
+                    )
+                }
+            }
             val config = sanitize(
                 PumpAiConfig(
                     enabled = obj.optBoolean("enabled", false),
                     endpoint = obj.optString("endpoint"),
                     model = obj.optString("model"),
                     apiKey = apiKey,
-                    providerSearch = obj.optBoolean("providerSearch", true)
+                    providerSearch = obj.optBoolean("providerSearch", true),
+                    backups = backups
                 )
             )
-            if (needsMigration && !save(context, config)) {
+            if ((needsMigration || backupPlainText) && !save(context, config)) {
                 // اگر Keystore در دسترس نبود، پیکربندی غیرحساس را نگه دار ولی plaintext را حذف کن.
-                val withoutKey = config.copy(apiKey = "")
+                val withoutKey = config.copy(
+                    apiKey = "",
+                    backups = config.backups.map { it.copy(apiKey = "") }
+                )
                 save(context, withoutKey)
                 return@runCatching withoutKey
             }
@@ -177,32 +268,66 @@ object PumpAiConfigStore {
     fun save(context: Context, config: PumpAiConfig): Boolean {
         val safe = sanitize(config)
         val prefs = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
-        val existingCipher = prefs.getString(KEY_CONFIG, null)?.let { raw ->
-            runCatching { JSONObject(raw).optString("apiKeyCipher") }.getOrNull()
-        }.orEmpty()
-        val existingPlain = PumpAiSecretCipher.decrypt(existingCipher)
-        val cipher = when {
-            safe.apiKey.isEmpty() -> ""
-            existingPlain == safe.apiKey -> existingCipher
-            else -> runCatching { PumpAiSecretCipher.encrypt(safe.apiKey) }.getOrNull().orEmpty()
+        val stored = prefs.getString(KEY_CONFIG, null)?.let { raw ->
+            runCatching { JSONObject(raw) }.getOrNull()
         }
-        val secureSave = safe.apiKey.isEmpty() || cipher.isNotEmpty()
-        // در شکست Keystore، تنظیم قبلی (و ciphertext سالم احتمالی) را پاک نکن.
-        if (!secureSave) return false
+        // رمزگذاری دوباره‌ی کلید بدون تغییر لازم نیست؛ ciphertext موجود دوباره استفاده می‌شود.
+        val knownCiphers = HashMap<String, String>()
+        fun remember(cipherText: String) {
+            if (cipherText.isEmpty()) return
+            PumpAiSecretCipher.decrypt(cipherText)?.takeIf { it.isNotEmpty() }?.let { plain ->
+                if (!knownCiphers.containsKey(plain)) knownCiphers[plain] = cipherText
+            }
+        }
+        remember(stored?.optString("apiKeyCipher").orEmpty())
+        stored?.optJSONArray("backups")?.let { array ->
+            for (index in 0 until array.length()) {
+                remember(array.optJSONObject(index)?.optString("apiKeyCipher").orEmpty())
+            }
+        }
+        /** رشته‌ی خالی یعنی «کلیدی نیست»؛ null یعنی Keystore شکست خورد. */
+        fun cipherFor(plainKey: String): String? = when {
+            plainKey.isEmpty() -> ""
+            knownCiphers.containsKey(plainKey) -> knownCiphers[plainKey]
+            else -> runCatching { PumpAiSecretCipher.encrypt(plainKey) }.getOrNull()
+                ?.takeIf { it.isNotEmpty() }
+        }
+
+        val cipher = cipherFor(safe.apiKey) ?: return false
+        val backupsJson = JSONArray()
+        for (backup in safe.backups) {
+            val backupCipher = cipherFor(backup.apiKey) ?: return false
+            backupsJson.put(
+                JSONObject()
+                    .put("endpoint", backup.endpoint)
+                    .put("model", backup.model)
+                    .put("apiKeyCipher", backupCipher)
+                    .put("providerSearch", backup.providerSearch)
+                    .put("active", backup.active)
+            )
+        }
         val raw = JSONObject()
             .put("enabled", safe.enabled)
             .put("endpoint", safe.endpoint)
             .put("model", safe.model)
             .put("apiKeyCipher", cipher)
             .put("providerSearch", safe.providerSearch)
+            .put("backups", backupsJson)
             .toString()
         prefs.edit().putString(KEY_CONFIG, raw).apply()
         return true
     }
 
-    private fun sanitize(config: PumpAiConfig): PumpAiConfig = config.copy(
+    internal fun sanitize(config: PumpAiConfig): PumpAiConfig = config.copy(
         endpoint = config.endpoint.trim().take(500),
         model = config.model.trim().take(150),
-        apiKey = config.apiKey.trim().take(1000)
+        apiKey = config.apiKey.trim().take(1000),
+        backups = config.backups.take(PumpAiConfig.MAX_BACKUPS).map { backup ->
+            backup.copy(
+                endpoint = backup.endpoint.trim().take(500),
+                model = backup.model.trim().take(150),
+                apiKey = backup.apiKey.trim().take(1000)
+            )
+        }
     )
 }

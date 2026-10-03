@@ -111,7 +111,7 @@ fun NewsCategory(
                             vm.aiBusy -> vm.aiProgress.ifBlank {
                                 "هوش مصنوعی در حال تحلیل است؛ هر دسته تا ۵ دقیقه فرصت پاسخ دارد…"
                             }
-                            vm.aiConfig.enabled && vm.aiConfig.isReady ->
+                            vm.aiConfig.enabled && vm.aiConfig.anyReady ->
                                 "ترجمه و تحلیل کامل فارسی با ${vm.aiConfig.model} فعال است"
                             else -> "برای نمایش خبرهای فارسی و تحلیل‌شده، هوش مصنوعی را تنظیم کن"
                         },
@@ -136,7 +136,7 @@ fun NewsCategory(
                     fontSize = 10.5.sp,
                     color = MaterialTheme.colorScheme.primary
                 )
-                if (!vm.aiConfig.enabled || !vm.aiConfig.isReady) {
+                if (!vm.aiConfig.enabled || !vm.aiConfig.anyReady) {
                     OutlinedButton(onClick = onConfigureAi, modifier = Modifier.fillMaxWidth()) {
                         Text("تنظیم هوش مصنوعی", fontSize = 12.sp)
                     }
@@ -236,7 +236,7 @@ fun NewsCategory(
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         when {
-            !vm.aiConfig.enabled || !vm.aiConfig.isReady -> InfoCard(
+            !vm.aiConfig.enabled || !vm.aiConfig.anyReady -> InfoCard(
                 "برای اینکه همهٔ خبرها فارسی باشند و پیش از چکیده، نظر، اثر بازار و سابقهٔ تاریخی AI داشته باشند، ابتدا هوش مصنوعی را تنظیم کن."
             )
             (vm.loading || vm.aiBusy) && analyzedItems.isEmpty() -> InfoCard(

@@ -134,7 +134,7 @@ class PumpsViewModel(app: Application) : AndroidViewModel(app) {
 
     fun runAiReview(coin: PumpScanner.PumpCoin) {
         val config = aiConfig
-        if (!config.isReady || coin.id in aiBusyIds) return
+        if (!config.anyReady || coin.id in aiBusyIds) return
         aiBusyIds = aiBusyIds + coin.id
         aiErrors = aiErrors - coin.id
         viewModelScope.launch {
