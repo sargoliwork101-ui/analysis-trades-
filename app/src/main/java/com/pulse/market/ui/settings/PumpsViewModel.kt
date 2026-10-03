@@ -99,7 +99,10 @@ class PumpsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun saveAiConfig(new: PumpAiConfig) {
+    fun saveAiConfig(raw: PumpAiConfig) {
+        // همان چیزی که ذخیره می‌شود باید همان چیزی باشد که فرستاده و نمایش داده می‌شود:
+        // کلیدِ چسبانده‌شده با فاصله/نیم‌فاصله/خط‌جدید وگرنه هدر HTTP را خراب می‌کند یا ۴۰۱ می‌گیرد.
+        val new = PumpAiConfigStore.sanitize(raw)
         if (new != aiConfig) {
             aiReviews = emptyMap()
             aiErrors = emptyMap()

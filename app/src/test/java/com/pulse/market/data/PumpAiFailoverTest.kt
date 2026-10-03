@@ -262,4 +262,50 @@ class PumpAiFailoverTest {
             assertFalse(preset.id, PumpAiReviewer.isAnthropicHost(preset.endpoint))
         }
     }
+
+    @Test
+    fun pastedKeysAreCleanedOfInvisibleAndWrappingText() {
+        // کپی از پیام‌رسان فارسی: نیم‌فاصله، فاصله‌ی سخت، خط‌جدید و پیشوند Bearer.
+        assertEquals("sk-or-v1-abc", PumpAiConfigStore.sanitizeKey("  sk-or-v1-abc \n"))
+        assertEquals("sk-or-v1-abc", PumpAiConfigStore.sanitizeKey("Bearer sk-or-v1-abc"))
+        assertEquals("sk-or-v1-abc", PumpAiConfigStore.sanitizeKey("sk-or-\u200cv1-\u00a0abc"))
+        assertEquals("sk-ant-x", PumpAiConfigStore.sanitizeKey("\u202bsk-ant-x\u202c"))
+        // کلیدی که واقعاً با همین حروف شروع می‌شود دست‌نخورده می‌ماند.
+        assertEquals("tokenabc123", PumpAiConfigStore.sanitizeKey("tokenabc123"))
+    }
+
+    @Test
+    fun keyWarningExplainsTheUsualCausesOfHttp401() {
+        assertNotNull(PumpAiReviewer.keyWarning("https://openrouter.ai/api/v1", ""))
+        assertNotNull(PumpAiReviewer.keyWarning("https://openrouter.ai/api/v1", "sk-ant-aaaaaaaaaaaaaaaaaaaa"))
+        assertNotNull(PumpAiReviewer.keyWarning("https://api.anthropic.com/v1", "sk-or-v1-aaaaaaaaaaaaaaa"))
+        assertNotNull(PumpAiReviewer.keyWarning("https://api.openai.com/v1", "sk-short"))
+        assertNotNull(PumpAiReviewer.keyWarning("https://example.com/v1", "abc def ghijklmnopqrstuv"))
+        // کلید درست و سرویس ناشناخته نباید هشدار بی‌مورد بگیرد.
+        assertNull(PumpAiReviewer.keyWarning("https://openrouter.ai/api/v1", "sk-or-v1-0123456789abcdef"))
+        assertNull(PumpAiReviewer.keyWarning("https://example.com/v1", "0123456789abcdefghijklmn"))
+    }
+
+    @Test
+    fun authErrorsCarryTheKeyHintAndNeverTheKey() {
+        val config = PumpAiConfig(
+            enabled = true,
+            endpoint = "https://openrouter.ai/api/v1",
+            model = "openai/gpt-4o-mini",
+            apiKey = "sk-ant-should-not-be-here"
+        )
+        val text = PumpAiReviewer.withKeyHint(config, 401, "کلید API پذیرفته نشد (۴۰۱)")
+        assertTrue(text.contains("sk-or-"))
+        assertFalse(text.contains("should-not-be-here"))
+        // خطاهای غیرکلیدی پیام اضافه نمی‌گیرند.
+        assertEquals("خطای ۵۰۰", PumpAiReviewer.withKeyHint(config, 500, "خطای ۵۰۰"))
+    }
+
+    @Test
+    fun keyFingerprintShowsShapeWithoutTheSecret() {
+        val print = PumpAiReviewer.keyFingerprint("sk-or-v1-0123456789abcdef")
+        assertTrue(print.contains("sk-or"))
+        assertFalse(print.contains("0123456789"))
+        assertEquals("ذخیره نشده", PumpAiReviewer.keyFingerprint(""))
+    }
 }

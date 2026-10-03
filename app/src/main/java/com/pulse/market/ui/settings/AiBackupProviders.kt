@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pulse.market.data.PumpAiBackup
 import com.pulse.market.data.PumpAiConfig
+import com.pulse.market.data.PumpAiReviewer
 
 /**
  * بخش «سرویس‌های پشتیبان هوش مصنوعی».
@@ -220,6 +221,9 @@ private fun BackupProviderCard(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
+            PumpAiReviewer.keyWarning(backup.endpoint, backup.apiKey)?.let { problem ->
+                if (backup.configured) Hint("⚠️ $problem")
+            }
             if (asConfig.insecureKeyTransport) {
                 Hint("⚠️ روی آدرس HTTP کلید ارسال نمی‌شود؛ آدرس HTTPS بگذار.")
             }

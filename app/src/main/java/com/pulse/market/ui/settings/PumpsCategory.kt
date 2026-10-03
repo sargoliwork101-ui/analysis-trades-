@@ -509,6 +509,9 @@ fun PumpsCategory(
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
+                            PumpAiReviewer.keyWarning(aiConfig.endpoint, aiConfig.apiKey)?.let { problem ->
+                                Hint("⚠️ $problem")
+                            }
                             if (aiConfig.insecureKeyTransport) {
                                 Hint("⚠️ برای امنیت، API Key روی HTTP ارسال نمی‌شود؛ آدرس HTTPS بگذار یا کلید را خالی کن.")
                             } else if (aiConfig.endpoint.startsWith("http://", ignoreCase = true)) {
@@ -569,7 +572,7 @@ fun PumpsCategory(
                                                 "گزارش عیب‌یابی هوش مصنوعی — نبض بازار\n" +
                                                     "مدل: ${aiConfig.model}\n" +
                                                     "مقصد: ${aiTarget?.display ?: aiConfig.endpoint}\n" +
-                                                    "کلید ذخیره‌شده: ${if (aiConfig.apiKey.isBlank()) "ندارد" else "دارد"}\n" +
+                                                    "کلید ذخیره‌شده: ${PumpAiReviewer.keyFingerprint(aiConfig.apiKey)}\n" +
                                                     "تعداد سرویس آماده: ${aiConfig.chain.size}\n\n" +
                                                     result.message
                                             )

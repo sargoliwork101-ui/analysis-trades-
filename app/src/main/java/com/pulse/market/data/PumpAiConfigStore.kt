@@ -341,13 +341,41 @@ object PumpAiConfigStore {
     internal fun sanitize(config: PumpAiConfig): PumpAiConfig = config.copy(
         endpoint = config.endpoint.trim().take(500),
         model = config.model.trim().take(150),
-        apiKey = config.apiKey.trim().take(1000),
+        apiKey = sanitizeKey(config.apiKey),
         backups = config.backups.take(PumpAiConfig.MAX_BACKUPS).map { backup ->
             backup.copy(
                 endpoint = backup.endpoint.trim().take(500),
                 model = backup.model.trim().take(150),
-                apiKey = backup.apiKey.trim().take(1000)
+                apiKey = sanitizeKey(backup.apiKey)
             )
         }
     )
+
+    /**
+     * کلید باید دقیقاً همان رشته‌ی ASCII سرویس باشد.
+     *
+     * چرا: کپی‌کردن کلید از پیام‌رسان/مرورگر فارسی خیلی وقت‌ها فاصله، خط‌جدید،
+     * نیم‌فاصله (U+200C) یا کاراکتر جهت‌دهی راست‌به‌چپ را هم می‌آورد. چنین کلیدی
+     * یا هدر HTTP را خراب می‌کند یا سرویس آن را با ۴۰۱ رد می‌کند، درحالی‌که کاربر
+     * مطمئن است کلیدش درست است. پیشوند «Bearer» هم اگر مانده باشد حذف می‌شود چون
+     * خودِ برنامه آن را اضافه می‌کند.
+     */
+    internal fun sanitizeKey(raw: String): String {
+        val trimmed = raw.trim()
+        // «Bearer»/«Token» فقط وقتی حذف می‌شود که واقعاً پیشوندِ جدا باشد؛ کلیدی که
+        // اتفاقاً با همین حروف شروع شود دست‌کاری نمی‌شود.
+        val withoutScheme = when {
+            trimmed.startsWith("bearer ", ignoreCase = true) -> trimmed.drop(7)
+            trimmed.startsWith("token ", ignoreCase = true) -> trimmed.drop(6)
+            else -> trimmed
+        }
+        return withoutScheme
+            .filterNot { char ->
+                char.isWhitespace() || char.code < 32 || char.code == 127 ||
+                        char == '\u00A0' || char == '\u061C' || char == '\uFEFF' ||
+                        char in '\u200B'..'\u200F' || char in '\u202A'..'\u202E' ||
+                        char in '\u2066'..'\u2069'
+            }
+            .take(1000)
+    }
 }

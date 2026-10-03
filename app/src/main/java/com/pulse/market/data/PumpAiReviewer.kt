@@ -238,7 +238,7 @@ object PumpAiReviewer {
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (http: Http.HttpException) {
-                lastError = httpErrorText(http)
+                lastError = withKeyHint(config, http.code, httpErrorText(http))
                 // خطای کلید/دسترسی/مسدودی با مسیر دیگر هم درست نمی‌شود.
                 if (isFatalServiceError(http, lastError)) return@withContext Outcome(error = lastError)
                 continue
@@ -316,7 +316,7 @@ object PumpAiReviewer {
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (http: Http.HttpException) {
-                lastError = httpErrorText(http)
+                lastError = withKeyHint(config, http.code, httpErrorText(http))
                 if (isFatalServiceError(http, lastError)) {
                     return@withContext CompletionOutcome(error = lastError)
                 }
@@ -431,6 +431,56 @@ object PumpAiReviewer {
         }
         return routes
     }
+
+    /**
+     * اشکال‌های شایعِ خودِ کلید که سرویس را به ۴۰۱/۴۰۳ می‌رساند. این‌ها را پیش از
+     * «کلید اشتباه است» باید به کاربر گفت؛ در عمل بیشتر ۴۰۱ها از کپی ناقص، کاراکتر
+     * نامرئی فارسی یا جابه‌جا شدن کلید دو سرویس می‌آید.
+     */
+    internal fun keyWarning(endpoint: String, apiKey: String): String? {
+        if (apiKey.isEmpty()) {
+            return "کلید API ذخیره نشده است — کادر کلید را دوباره پر کن و چند ثانیه صبر کن تا ذخیره شود."
+        }
+        if (apiKey.any { it.isWhitespace() }) {
+            return "کلید فاصله یا خط‌جدید دارد؛ موقع کپی کاراکتر اضافه آمده است."
+        }
+        if (apiKey.any { it.code < 32 || it.code > 126 }) {
+            return "کلید کاراکتر غیرانگلیسی یا نامرئی دارد (نیم‌فاصله/کاراکتر راست‌به‌چپ)؛ " +
+                    "آن را در یک ویرایشگر ساده بچسبان و دوباره کپی کن."
+        }
+        if (apiKey.startsWith("bearer", ignoreCase = true)) {
+            return "«Bearer» را از ابتدای کلید بردار؛ خود برنامه آن را اضافه می‌کند."
+        }
+        val host = hostOf(endpoint)
+        val expected = when {
+            host.endsWith("openrouter.ai") -> "sk-or-"
+            host.endsWith("anthropic.com") -> "sk-ant-"
+            host == "api.openai.com" -> "sk-"
+            host.endsWith("avalai.ir") || host.endsWith("avalapis.ir") -> "aa-"
+            else -> null
+        }
+        if (expected != null && !apiKey.startsWith(expected, ignoreCase = true)) {
+            return "کلید این سرویس معمولاً با «$expected» شروع می‌شود، ولی کلید واردشده این‌طور " +
+                    "نیست؛ احتمالاً کلید سرویس دیگری در این کادر مانده است."
+        }
+        if (apiKey.length < 20) return "طول کلید خیلی کوتاه است؛ احتمالاً کامل کپی نشده."
+        return null
+    }
+
+    /** نمایش امن کلید در گزارش عیب‌یابی: فقط پیشوند، دو کاراکتر آخر و طول. */
+    fun keyFingerprint(apiKey: String): String = when {
+        apiKey.isEmpty() -> "ذخیره نشده"
+        apiKey.length <= 12 -> "${apiKey.length} کاراکتر"
+        else -> "${apiKey.take(5)}…${apiKey.takeLast(2)} (${apiKey.length} کاراکتر)"
+    }
+
+    /** خطای کلید/دسترسی همیشه با محتمل‌ترین دلیلِ قابل‌اصلاح همراه می‌شود. */
+    internal fun withKeyHint(config: PumpAiConfig, code: Int, message: String): String =
+        if (code == 401 || code == 403) {
+            keyWarning(config.endpoint, config.apiKey)?.let { "$message — $it" } ?: message
+        } else {
+            message
+        }
 
     /** نام کوتاه و بی‌خطرِ یک سرویس برای پیام‌ها: میزبان + مدل (بدون کلید). */
     internal fun providerLabel(config: PumpAiConfig): String {
@@ -1144,7 +1194,7 @@ object PumpAiReviewer {
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (http: Http.HttpException) {
-                val message = httpErrorText(http)
+                val message = withKeyHint(config, http.code, httpErrorText(http))
                 lastMessage = "❌ $message — مقصد مستقیم: $destination"
                 if (isFatalServiceError(http, message)) return@withContext TestResult(false, lastMessage)
                 continue
