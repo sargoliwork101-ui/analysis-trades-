@@ -251,7 +251,7 @@ object PumpAiReviewer {
             val content = extractRouteContent(route, raw)
             if (content != null) {
                 return@withContext Outcome(
-                    review = parseReview(content, route.providerSearchRequested)
+                    review = parseReview(content, route.providerSearchRequested, wasCutByLength(raw))
                 )
             }
             lastError = emptyContentReason(raw)
@@ -443,8 +443,16 @@ object PumpAiReviewer {
      * نامرئی فارسی یا جابه‌جا شدن کلید دو سرویس می‌آید.
      */
     internal fun keyWarning(endpoint: String, apiKey: String): String? {
+        val host = hostOf(endpoint)
+        val expected = expectedKeyPrefix(host)
         if (apiKey.isEmpty()) {
-            return "کلید API ذخیره نشده است — کادر کلید را دوباره پر کن و چند ثانیه صبر کن تا ذخیره شود."
+            // سرویس محلی (Ollama/LM Studio) و آدرس خالی اصلاً کلید نمی‌خواهند؛ هشدار
+            // بی‌مورد روی نصب تازه فقط کاربر را گمراه می‌کند.
+            return if (expected != null || KEY_REQUIRED_HOSTS.any { host.endsWith(it) }) {
+                "کلید API ذخیره نشده است — کادر کلید را دوباره پر کن و چند ثانیه صبر کن تا ذخیره شود."
+            } else {
+                null
+            }
         }
         if (apiKey.any { it.isWhitespace() }) {
             return "کلید فاصله یا خط‌جدید دارد؛ موقع کپی کاراکتر اضافه آمده است."
@@ -455,14 +463,6 @@ object PumpAiReviewer {
         }
         if (apiKey.startsWith("bearer", ignoreCase = true)) {
             return "«Bearer» را از ابتدای کلید بردار؛ خود برنامه آن را اضافه می‌کند."
-        }
-        val host = hostOf(endpoint)
-        val expected = when {
-            host.endsWith("openrouter.ai") -> "sk-or-"
-            host.endsWith("anthropic.com") -> "sk-ant-"
-            host == "api.openai.com" -> "sk-"
-            host.endsWith("avalai.ir") || host.endsWith("avalapis.ir") -> "aa-"
-            else -> null
         }
         if (expected != null && !apiKey.startsWith(expected, ignoreCase = true)) {
             return "کلید این سرویس معمولاً با «$expected» شروع می‌شود، ولی کلید واردشده این‌طور " +
@@ -488,8 +488,17 @@ object PumpAiReviewer {
     @Volatile
     var usedTodayProvider: (() -> Int)? = null
 
-    /** تخمین محافظه‌کارانه وقتی سرویس فیلد usage نمی‌دهد (≈۴ کاراکتر = ۱ توکن). */
-    internal fun estimateTokens(text: String): Int = (text.length + 3) / 4
+    /**
+     * تخمین وقتی سرویس فیلد usage نمی‌دهد. متن فارسی خیلی گران‌تر از انگلیسی توکن
+     * می‌گیرد (تقریباً هر دو کاراکتر یک توکن، در برابر هر چهار کاراکتر انگلیسی)، پس
+     * تخمین ساده‌ی «طول تقسیم بر ۴» مصرف واقعی این برنامه را نصف نشان می‌داد.
+     */
+    internal fun estimateTokens(text: String): Int {
+        var ascii = 0
+        var other = 0
+        for (char in text) if (char.code < 128) ascii++ else other++
+        return (ascii + 3) / 4 + (other + 1) / 2
+    }
 
     /** usage استاندارد OpenAI، Anthropic و Gemini — هر سه شکل پشتیبانی می‌شود. */
     internal fun parseUsage(raw: String): Usage? {
@@ -532,13 +541,29 @@ object PumpAiReviewer {
      * بخش هزینه است و تحلیل این برنامه به متن بلند نیاز ندارد.
      */
     internal fun reviewOutputTokens(config: PumpAiConfig, nativeRoute: Boolean): Int = when {
-        config.economyMode -> if (nativeRoute) 1100 else 800
+        // سقف خیلی کم بدترین نوع مصرف است: پاسخ نصفه می‌آید، JSON خراب می‌شود و کل
+        // هزینه هدر می‌رود. صرفه‌جویی اصلی از ورودیِ فشرده می‌آید، نه از بریدن پاسخ.
+        config.economyMode -> if (nativeRoute) 1400 else 1000
         else -> if (nativeRoute) 2048 else 1200
     }
 
     /** سقف پاسخ قابلیت‌های متنی (خبر) با همان سیاست کم‌مصرف. */
     internal fun completionTokens(config: PumpAiConfig, requested: Int): Int =
-        if (config.economyMode) (requested * 6 / 10).coerceAtLeast(768) else requested
+        if (config.economyMode) (requested * 8 / 10).coerceAtLeast(1024) else requested
+
+    /** پیشوند شناخته‌شده‌ی کلید هر سرویس؛ null یعنی شکل کلید این میزبان را نمی‌دانیم. */
+    private fun expectedKeyPrefix(host: String): String? = when {
+        host.endsWith("openrouter.ai") -> "sk-or-"
+        host.endsWith("anthropic.com") -> "sk-ant-"
+        host == "api.openai.com" -> "sk-"
+        host.endsWith("avalai.ir") || host.endsWith("avalapis.ir") -> "aa-"
+        else -> null
+    }
+
+    /** سرویس‌های ابری‌ای که بدون کلید قطعاً ۴۰۱ می‌دهند. */
+    private val KEY_REQUIRED_HOSTS = listOf(
+        "googleapis.com", "llmsrelay.com", "gapgpt.app", "openai.azure.com", "groq.com"
+    )
 
     /** نمایش امن کلید در گزارش عیب‌یابی: فقط پیشوند، دو کاراکتر آخر و طول. */
     fun keyFingerprint(apiKey: String): String = when {
@@ -1580,7 +1605,23 @@ object PumpAiReviewer {
     }
 
     /** parser خالص و قابل تست؛ پاسخ غیر JSON هم به‌صورت محتاطانه نمایش داده می‌شود. */
-    fun parseReview(content: String, providerSearchRequested: Boolean = true): Review {
+    /** پاسخی که سرویس به‌خاطر سقف طول نیمه‌کاره رها کرده است. */
+    internal fun wasCutByLength(raw: String): Boolean {
+        val flat = raw.replace(" ", "").lowercase(Locale.ROOT)
+        return flat.contains("\"finish_reason\":\"length\"") ||
+                flat.contains("\"finishreason\":\"max_tokens\"") ||
+                flat.contains("\"stop_reason\":\"max_tokens\"")
+    }
+
+    internal const val TRUNCATED_HINT =
+        "پاسخ سرویس به سقف طول خورد و ناقص ماند؛ «حالت کم‌مصرف» را خاموش کن یا مدل کم‌حرف‌تری بگذار. "
+
+    fun parseReview(
+        content: String,
+        providerSearchRequested: Boolean = true,
+        /** پاسخ وسط کار بریده شده بود؛ در متن نتیجه به کاربر گفته می‌شود. */
+        truncated: Boolean = false
+    ): Review {
         val clean = content.trim()
             .removePrefix("```json").removePrefix("```")
             .removeSuffix("```").trim()
@@ -1592,7 +1633,8 @@ object PumpAiReviewer {
             return Review(
                 verdict = "نامطمئن",
                 recommendation = PumpScanner.Recommendation.WAIT.label,
-                reason = safeDisplayText(clean, 1200).ifBlank { "سرویس AI پاسخ قابل‌استفاده‌ای نداد." },
+                reason = (if (truncated) TRUNCATED_HINT else "") +
+                        safeDisplayText(clean, 1200).ifBlank { "سرویس AI پاسخ قابل‌استفاده‌ای نداد." },
                 confidence = null,
                 news = emptyList(),
                 providerSearchRequested = providerSearchRequested,

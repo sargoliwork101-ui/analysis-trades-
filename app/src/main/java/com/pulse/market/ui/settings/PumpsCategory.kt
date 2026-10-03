@@ -434,6 +434,8 @@ fun PumpsCategory(
 
             // ───────── تب ۳) هوش مصنوعی: نظر دوم اختیاری ─────────
             2 -> {
+                // شمارنده ممکن است از صفحه‌های دیگر (کیف، خبر) جلو رفته باشد.
+                LaunchedEffect(Unit) { vm.refreshAiUsageNow() }
                 SectionHeader(
                     "نظر دوم هوش مصنوعی",
                     "اتصال بومی Gemini/Claude یا API سازگار OpenAI — مدل و کلید دست خودت"

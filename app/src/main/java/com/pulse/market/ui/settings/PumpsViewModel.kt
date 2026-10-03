@@ -64,13 +64,15 @@ class PumpsViewModel(app: Application) : AndroidViewModel(app) {
     var tradeNotice by mutableStateOf<String?>(null); private set
     var nobitex by mutableStateOf<Map<String, NobitexMarkets.Result>>(emptyMap()); private set
 
-    /** بیش از این درصد تغییر قیمت، تحلیل ذخیره‌شده را بی‌اعتبار می‌کند. */
-    private val PRICE_DRIFT_PERCENT = 2.0
-
     private var aiEdited = false
     private var started = false
 
     private val ctx get() = getApplication<Application>().applicationContext
+
+    /** به‌روزرسانی شمارنده از بیرون (مثلاً وقتی تب هوش مصنوعی باز می‌شود). */
+    fun refreshAiUsageNow() {
+        viewModelScope.launch { refreshAiUsage() }
+    }
 
     private suspend fun refreshAiUsage() {
         val today = withContext(Dispatchers.IO) { AiUsageStore.today(ctx) }
@@ -135,9 +137,15 @@ class PumpsViewModel(app: Application) : AndroidViewModel(app) {
         // همان چیزی که ذخیره می‌شود باید همان چیزی باشد که فرستاده و نمایش داده می‌شود:
         // کلیدِ چسبانده‌شده با فاصله/نیم‌فاصله/خط‌جدید وگرنه هدر HTTP را خراب می‌کند یا ۴۰۱ می‌گیرد.
         val new = PumpAiConfigStore.sanitize(raw)
-        if (new != aiConfig) {
+        // فقط عوض‌شدن خودِ سرویس (آدرس/مدل/کلید/پشتیبان‌ها) تحلیل‌های گرفته‌شده را
+        // بی‌اعتبار می‌کند؛ دست‌زدن به تنظیم‌های مصرف نباید نتیجه‌ها را پاک کند.
+        if (!new.sameProviderAs(aiConfig)) {
             aiReviews = emptyMap()
             aiErrors = emptyMap()
+            aiReviewAt = emptyMap()
+            aiReviewPrice = emptyMap()
+            aiNotes = emptyMap()
+            aiForceIds = emptySet()
             aiTestResult = null
         }
         aiEdited = true
@@ -163,6 +171,8 @@ class PumpsViewModel(app: Application) : AndroidViewModel(app) {
                 )
             } finally {
                 aiTestBusy = false
+                // تست اتصال هم توکن مصرف می‌کند (هرچند کم)؛ شمارنده باید همان لحظه درست باشد.
+                runCatching { refreshAiUsage() }
             }
         }
     }
@@ -200,7 +210,8 @@ class PumpsViewModel(app: Application) : AndroidViewModel(app) {
                 outcome.error?.let { aiErrors = aiErrors + (coin.id to it) }
             } finally {
                 aiBusyIds = aiBusyIds - coin.id
-                refreshAiUsage()
+                // در لغو شدن صفحه، به‌روزرسانی شمارنده نباید خطا بسازد.
+                runCatching { refreshAiUsage() }
             }
         }
     }
@@ -229,6 +240,11 @@ class PumpsViewModel(app: Application) : AndroidViewModel(app) {
         val age = if (ageMinutes <= 0L) "کمتر از یک دقیقه" else "$ageMinutes دقیقه"
         return "برای صرفه‌جویی در توکن، تحلیل $age پیشِ همین کوین نشان داده شد " +
                 "(قیمت از آن زمان تغییر مهمی نکرده). برای تحلیل کاملاً تازه، دکمه را دوباره بزن."
+    }
+
+    private companion object {
+        /** بیش از این درصد تغییر قیمت، تحلیل ذخیره‌شده را بی‌اعتبار می‌کند. */
+        const val PRICE_DRIFT_PERCENT = 2.0
     }
 
     /** تاریخچه‌ی تحلیل‌های یک کوین را برای صفحه‌ی جزئیات بارگذاری می‌کند. */

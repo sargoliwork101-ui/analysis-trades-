@@ -110,6 +110,16 @@ data class PumpAiConfig(
     val readyBackupCount: Int
         get() = (chain.size - (if (primary.isReady) 1 else 0)).coerceAtLeast(0)
 
+    /**
+     * آیا سرویس‌دهنده‌ها همان‌هایند؟ تنظیم‌های مصرف (حالت کم‌مصرف، سقف روزانه، بازه‌ی
+     * استفاده‌ی دوباره) هیچ ربطی به اینکه تحلیل قبلی معتبر است یا نه ندارند، پس
+     * تغییر آن‌ها نباید تحلیل‌های گرفته‌شده را دور بریزد.
+     */
+    fun sameProviderAs(other: PumpAiConfig): Boolean =
+        enabled == other.enabled && endpoint == other.endpoint && model == other.model &&
+                apiKey == other.apiKey && providerSearch == other.providerSearch &&
+                backups == other.backups
+
     /** آیا این پیکربندی دقیقاً روی یکی از سرویس‌های آماده تنظیم شده است؟ */
     fun matches(preset: Preset): Boolean =
         endpoint.trim().trimEnd('/').equals(preset.endpoint, ignoreCase = true) &&

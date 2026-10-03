@@ -277,6 +277,10 @@ class PumpAiFailoverTest {
     @Test
     fun keyWarningExplainsTheUsualCausesOfHttp401() {
         assertNotNull(PumpAiReviewer.keyWarning("https://openrouter.ai/api/v1", ""))
+        assertNotNull(PumpAiReviewer.keyWarning("https://generativelanguage.googleapis.com/v1beta", ""))
+        // سرویس محلی یا کادر خالیِ نصب تازه نباید هشدار بی‌مورد بگیرد.
+        assertNull(PumpAiReviewer.keyWarning("http://192.168.1.10:11434/v1", ""))
+        assertNull(PumpAiReviewer.keyWarning("", ""))
         assertNotNull(PumpAiReviewer.keyWarning("https://openrouter.ai/api/v1", "sk-ant-aaaaaaaaaaaaaaaaaaaa"))
         assertNotNull(PumpAiReviewer.keyWarning("https://api.anthropic.com/v1", "sk-or-v1-aaaaaaaaaaaaaaa"))
         assertNotNull(PumpAiReviewer.keyWarning("https://api.openai.com/v1", "sk-short"))
@@ -337,17 +341,17 @@ class PumpAiFailoverTest {
             economyMode = true
         )
         val rich = economy.copy(economyMode = false)
-        assertEquals(800, PumpAiReviewer.reviewOutputTokens(economy, nativeRoute = false))
+        assertEquals(1000, PumpAiReviewer.reviewOutputTokens(economy, nativeRoute = false))
         assertEquals(1200, PumpAiReviewer.reviewOutputTokens(rich, nativeRoute = false))
-        assertEquals(1100, PumpAiReviewer.reviewOutputTokens(economy, nativeRoute = true))
+        assertEquals(1400, PumpAiReviewer.reviewOutputTokens(economy, nativeRoute = true))
         assertEquals(2048, PumpAiReviewer.reviewOutputTokens(rich, nativeRoute = true))
-        assertEquals(2457, PumpAiReviewer.completionTokens(economy, 4096))
+        assertEquals(3276, PumpAiReviewer.completionTokens(economy, 4096))
         assertEquals(4096, PumpAiReviewer.completionTokens(rich, 4096))
         // سقف خیلی کوچک نباید پاسخ را ناقص کند.
-        assertEquals(768, PumpAiReviewer.completionTokens(economy, 900))
+        assertEquals(1024, PumpAiReviewer.completionTokens(economy, 900))
 
         val body = PumpAiReviewer.reviewRoutes(economy, coin).first().payload.toString()
-        assertTrue(body.contains("\"max_tokens\":800"))
+        assertTrue(body.contains("\"max_tokens\":1000"))
         assertTrue(body.contains("\"max_results\":3"))
     }
 
@@ -368,6 +372,8 @@ class PumpAiFailoverTest {
         assertNull(PumpAiReviewer.parseUsage("""{"choices":[]}"""))
         // تخمین جایگزین وقتی سرویس چیزی گزارش نمی‌کند.
         assertEquals(3, PumpAiReviewer.estimateTokens("abcdefghijk"))
+        // متن فارسی تقریباً دو برابرِ انگلیسی توکن می‌گیرد و تخمین باید همین را بگوید.
+        assertTrue(PumpAiReviewer.estimateTokens("تحلیل بازار") > PumpAiReviewer.estimateTokens("market view"))
     }
 
     @Test
@@ -401,5 +407,44 @@ class PumpAiFailoverTest {
         assertTrue(backup.economyMode)
         assertEquals(50_000, backup.dailyTokenBudget)
         assertEquals(30, backup.reuseMinutes)
+    }
+
+    @Test
+    fun consumptionSettingsDoNotInvalidateStoredAnalyses() {
+        val base = PumpAiConfig(
+            enabled = true,
+            endpoint = "https://openrouter.ai/api/v1",
+            model = "openai/gpt-4o-mini",
+            apiKey = "sk-or-v1-0123456789abcdef"
+        )
+        // تغییر سیاست مصرف = همان سرویس.
+        assertTrue(base.sameProviderAs(base.copy(economyMode = false)))
+        assertTrue(base.sameProviderAs(base.copy(dailyTokenBudget = 50_000)))
+        assertTrue(base.sameProviderAs(base.copy(reuseMinutes = 0)))
+        // تغییر خودِ سرویس = تحلیل‌های قبلی دیگر معتبر نیستند.
+        assertFalse(base.sameProviderAs(base.copy(model = "anthropic/claude-sonnet-4.5")))
+        assertFalse(base.sameProviderAs(base.copy(apiKey = "sk-or-v1-other")))
+        assertFalse(base.sameProviderAs(base.copy(enabled = false)))
+        assertFalse(
+            base.sameProviderAs(
+                base.copy(backups = listOf(PumpAiBackup(endpoint = "https://api.avalai.ir/v1", model = "gpt-4o-mini")))
+            )
+        )
+    }
+
+    @Test
+    fun answersCutByTheTokenCapAreReportedInsteadOfShownAsGibberish() {
+        assertTrue(PumpAiReviewer.wasCutByLength("""{"choices":[{"finish_reason":"length"}]}"""))
+        assertTrue(PumpAiReviewer.wasCutByLength("""{"stop_reason": "max_tokens"}"""))
+        assertTrue(PumpAiReviewer.wasCutByLength("""{"candidates":[{"finishReason":"MAX_TOKENS"}]}"""))
+        assertFalse(PumpAiReviewer.wasCutByLength("""{"choices":[{"finish_reason":"stop"}]}"""))
+
+        val cut = PumpAiReviewer.parseReview("""{"verdict":"همسو","technical":"قیمت بالای ک""", truncated = true)
+        assertTrue(cut.reason.startsWith(PumpAiReviewer.TRUNCATED_HINT))
+        // پاسخ سالم هیچ پیام اضافه‌ای نمی‌گیرد.
+        val healthy = PumpAiReviewer.parseReview(
+            """{"verdict":"همسو","recommendation":"فعلاً فقط زیر نظر بگیر","reason":"حجم تأیید می‌کند","news":[]}"""
+        )
+        assertFalse(healthy.reason.contains("سقف طول"))
     }
 }

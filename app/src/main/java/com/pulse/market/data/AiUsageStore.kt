@@ -108,8 +108,14 @@ object AiUsageStore {
     /** روزهای اخیر، تازه‌ترین اول. */
     fun recent(context: Context): List<Day> = read(context).sortedByDescending { it.day }
 
-    /** مجموع توکن هفت روز گذشته. */
-    fun weekTotal(context: Context): Int = recent(context).take(7).sumOf { it.total }
+    /**
+     * مجموع توکن هفت روز گذشته. عمداً «هفت رکورد آخر» نیست: اگر چند روز هیچ درخواستی
+     * نرفته باشد، رکوردهای قدیمی‌تر نباید در آمار «هفت روز اخیر» شمرده شوند.
+     */
+    fun weekTotal(context: Context, now: Long = System.currentTimeMillis()): Int {
+        val cutoff = dayKey(now - 6L * 24 * 60 * 60 * 1000)
+        return recent(context).filter { it.day >= cutoff }.sumOf { it.total }
+    }
 
     @Synchronized
     fun clear(context: Context) {
