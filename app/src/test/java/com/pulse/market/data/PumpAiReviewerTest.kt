@@ -280,7 +280,7 @@ class PumpAiReviewerTest {
         assertEquals(750L, PumpAiReviewer.retryDelayMillis(0, null, 0L))
         assertEquals("عالی", PumpAiReviewer.connectionQuality(1_000L))
         assertEquals("کند", PumpAiReviewer.connectionQuality(30_000L))
-        assertEquals(20, PumpAiReviewer.CONNECTION_TEST_TIMEOUT_SECONDS)
+        assertEquals(45, PumpAiReviewer.CONNECTION_TEST_TIMEOUT_SECONDS)
     }
 
     @Test

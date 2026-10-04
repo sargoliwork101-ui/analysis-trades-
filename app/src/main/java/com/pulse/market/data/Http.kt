@@ -81,7 +81,9 @@ object Http {
 
     private val client: OkHttpClient by lazy {
         OkHttpClient.Builder()
-            .connectTimeout(12, TimeUnit.SECONDS)
+            // اتصال اول روی موبایل ایران یا پشت فیلترشکن کند است؛ ۱۲ ثانیه بی‌دلیل
+            // درخواست‌های سالم را می‌کُشت.
+            .connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
             .callTimeout(25, TimeUnit.SECONDS)
             .retryOnConnectionFailure(true)

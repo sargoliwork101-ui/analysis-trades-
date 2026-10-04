@@ -596,10 +596,15 @@ object PumpAiReviewer {
     /** وقتی همه‌ی سرویس‌های زنجیره شکست خوردند، همه‌ی دلیل‌ها با هم نمایش داده می‌شوند. */
     internal fun chainErrorText(errors: List<String>): String = when {
         errors.isEmpty() -> "ارتباط با سرویس AI یا خواندن پاسخ ممکن نشد"
-        errors.size == 1 -> errors.first().substringAfter("): ", errors.first())
+        errors.size == 1 -> errors.first().substringAfter("): ", errors.first()) + "\n" + TEST_HINT
         else -> "هیچ‌کدام از ${errors.size} سرویس هوش مصنوعی پاسخ ندادند:\n" +
-                errors.joinToString("\n") { "• $it" }
+                errors.joinToString("\n") { "• $it" } + "\n" + TEST_HINT
     }
+
+    /** راهنمای ثابتِ بعد از شکست کامل زنجیره؛ عیب‌یابی واقعی در «تست اتصال» انجام می‌شود. */
+    internal const val TEST_HINT =
+        "برای فهمیدن علت دقیق، در تنظیمات › هوش مصنوعی دکمهٔ «تست اتصال» را بزن؛ " +
+            "آنجا جدا جدا معلوم می‌شود مشکل از اینترنت، فیلترینگ، کلید یا کندی مدل است."
 
     /** خطایی که امتحان مسیر دیگر هم آن را حل نمی‌کند. */
     internal fun isFatalServiceError(http: Http.HttpException, message: String): Boolean =
@@ -632,7 +637,8 @@ object PumpAiReviewer {
     private const val MAX_AI_RETRIES = 1
     private const val MAX_RETRY_AFTER_MS = 60_000L
     private const val MIN_RETRY_CALL_WINDOW_MS = 3_000L
-    internal const val CONNECTION_TEST_TIMEOUT_SECONDS = 20
+    /** تست اتصال باید روی خط کند هم فرصت داشته باشد؛ ۲۰ ثانیه سرویس‌های سالم را رد می‌کرد. */
+    internal const val CONNECTION_TEST_TIMEOUT_SECONDS = 45
 
     /** فقط خطاهای گذرا retry می‌شوند؛ خطای اعتبار/مدل/صورتحساب دوباره‌کاری نمی‌شود. */
     internal fun isRetryableHttp(http: Http.HttpException): Boolean {
@@ -1293,6 +1299,9 @@ object PumpAiReviewer {
             return@withContext TestResult(false, "❌ " + (invalid.message ?: "آدرس یا نام مدل نامعتبر است"))
         }
         var lastMessage = "❌ ارتباط با سرویس AI ممکن نشد"
+        // فقط وقتی عیب‌یابی شبکه اجرا می‌شود که خطا واقعاً شبکه‌ای باشد؛ خطای کلید یا
+        // مدل با آزمودن پورت حل نمی‌شود و نباید کاربر را شش ثانیه بیشتر منتظر بگذارد.
+        var networkFailure = false
         for (route in routes) {
             val destination = routeDestination(route)
             val startedAt = System.nanoTime()
@@ -1311,6 +1320,7 @@ object PumpAiReviewer {
                 if (isFatalServiceError(http, message)) return@withContext TestResult(false, lastMessage)
                 continue
             } catch (failure: Exception) {
+                networkFailure = true
                 lastMessage = "❌ ${networkErrorText(failure)} — مقصد مستقیم: $destination"
                 continue
             }
@@ -1327,6 +1337,9 @@ object PumpAiReviewer {
                 )
             }
             lastMessage = "⚠️ ${emptyContentReason(raw)} — مقصد مستقیم: $destination"
+        }
+        if (networkFailure) {
+            NetworkProbe.adviceFor(config.endpoint)?.let { lastMessage += "\n" + it }
         }
         TestResult(false, lastMessage)
     }

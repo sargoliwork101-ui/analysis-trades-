@@ -111,7 +111,28 @@ class PumpAiFailoverTest {
     @Test
     fun singleProviderErrorStaysShort() {
         val line = PumpAiReviewer.providerErrorLine(0, openAiPrimary, "کلید API پذیرفته نشد")
-        assertEquals("کلید API پذیرفته نشد", PumpAiReviewer.chainErrorText(listOf(line)))
+        val text = PumpAiReviewer.chainErrorText(listOf(line))
+
+        assertEquals("کلید API پذیرفته نشد", text.substringBefore("\n"))
+        // بعد از شکست، کاربر باید بداند عیب‌یابی دقیق کجاست.
+        assertTrue(text.contains("تست اتصال"))
+    }
+
+    @Test
+    fun networkProbeAdviceNamesTheBrokenStage() {
+        val host = "api.openai.com"
+        val dns = NetworkProbe.advice(host, NetworkProbe.Result(NetworkProbe.Stage.DNS, 12L))
+        val tcp = NetworkProbe.advice(host, NetworkProbe.Result(NetworkProbe.Stage.TCP, 30L))
+        val tls = NetworkProbe.advice(host, NetworkProbe.Result(NetworkProbe.Stage.TLS, 40L))
+        val ok = NetworkProbe.advice(host, NetworkProbe.Result(NetworkProbe.Stage.OK, 140L))
+
+        assertTrue(dns.contains(host) && dns.contains("DNS"))
+        // مسیر بسته = پیشنهاد فیلترشکن یا سرویس داخلی، نه «مدل را عوض کن».
+        assertTrue(tcp.contains("فیلترشکن") && tcp.contains("api.avalai.ir"))
+        assertTrue(tls.contains("TLS") && tls.contains("api.gapgpt.app"))
+        // شبکه سالم = راهنمایی درست سمت مدل، بدون حرف فیلترشکن.
+        assertTrue(ok.contains("140") && ok.contains("gemini-2.0-flash"))
+        assertFalse(ok.contains("فیلترشکن"))
     }
 
     @Test
