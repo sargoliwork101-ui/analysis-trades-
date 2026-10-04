@@ -242,8 +242,11 @@ object NewsAiSummarizer {
     internal const val BRIEFING_ITEMS = 18
 
     /** شناسه‌ی سبکِ فهرست خبر؛ تا وقتی عوض نشده، جمع‌بندی دوباره خریداری نمی‌شود. */
-    internal fun signature(items: List<MarketNewsItem>): String =
-        items.take(BRIEFING_ITEMS).joinToString("|") { it.id }.hashCode().toString()
+    internal fun signature(items: List<MarketNewsItem>): String {
+        val source = items.take(BRIEFING_ITEMS)
+        // تعداد هم در امضا می‌آید تا برخوردِ اتفاقیِ hash، یک فهرست عوض‌شده را «بدون تغییر» نشان ندهد.
+        return "${source.size}:${source.joinToString("|") { it.id }.hashCode()}"
+    }
 
     internal fun briefingSchema(): JsonObject = buildJsonObject {
         put("type", "OBJECT")

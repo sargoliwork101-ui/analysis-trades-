@@ -49,6 +49,9 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
             // فقط عوض‌شدن خودِ سرویس دلیل تحلیل دوباره است؛ تغییر تنظیم‌های مصرف
             // (حالت کم‌مصرف/سقف روزانه) نباید یک تحلیل تازه و پولی راه بیندازد.
             val configChanged = !loadedConfig.sameProviderAs(aiConfig)
+            // روشن‌شدنِ خودِ کلید «ترجمهٔ تک‌تک خبرها» هم باید کار را شروع کند؛ این کلید
+            // عمداً جزو هویت سرویس نیست تا خاموش/روشن‌کردنش تحلیل دوباره راه نیندازد.
+            val perItemTurnedOn = loadedConfig.newsPerItemAi && !aiConfig.newsPerItemAi
             aiConfig = loadedConfig
 
             if (!started) {
@@ -67,8 +70,9 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
                     summarizeMissing()
                     ensureBriefing(force = false)
                 }
-            } else if (configChanged) {
-                summarizeMissing()
+            } else {
+                if (configChanged || perItemTurnedOn) summarizeMissing()
+                // بی‌هزینه است: اگر فهرست خبرها عوض نشده باشد، خودش برمی‌گردد.
                 ensureBriefing(force = false)
             }
         }
@@ -142,8 +146,35 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
 
     /** گرفتن نظر تازه با دکمهٔ کاربر؛ کش را دور می‌زند. */
     fun refreshBriefing() {
-        viewModelScope.launch { ensureBriefing(force = true) }
+        viewModelScope.launch {
+            // دکمه نباید بی‌صدا بی‌اثر بماند؛ اگر شرایط فراهم نیست، دلیلش گفته می‌شود.
+            val config = aiConfig
+            val blocked = when {
+                !config.enabled -> "بررسی هوش مصنوعی خاموش است؛ از تنظیمات روشنش کن"
+                !config.anyReady -> "اول آدرس API، نام مدل و کلید را در تنظیمات کامل کن"
+                !config.newsBriefing -> "کلید «نظر کلی هوش مصنوعی در تب خبر» در تنظیمات خاموش است"
+                items.isEmpty() -> "هنوز خبری برای جمع‌بندی دریافت نشده؛ اول تازه‌سازی کن"
+                else -> null
+            }
+            if (blocked != null) {
+                briefingError = blocked
+                return@launch
+            }
+            ensureBriefing(force = true)
+        }
     }
+
+    /**
+     * جمع‌بندیِ ذخیره‌شده برای فهرست قبلیِ خبرهاست؟ کاربر باید بداند نظری که می‌بیند
+     * مربوط به خبرهای تازه‌ی روی صفحه نیست.
+     */
+    val briefingStale: Boolean
+        get() {
+            val current = briefing ?: return false
+            if (items.isEmpty() || current.signature.isBlank()) return false
+            val source = items.sortedFor(NewsSortOrder.NEWEST).take(NewsAiSummarizer.BRIEFING_ITEMS)
+            return NewsAiSummarizer.signature(source) != current.signature
+        }
 
     /**
      * فقط وقتی هزینه می‌کند که واقعاً لازم باشد: جمع‌بندیِ ذخیره‌شده تا وقتی فهرست

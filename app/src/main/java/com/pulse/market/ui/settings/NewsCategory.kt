@@ -120,7 +120,7 @@ fun NewsCategory(
                                 "جمع‌بندی + ترجمه و تحلیل تک‌تک خبرها با ${vm.aiConfig.model} فعال است"
                             vm.aiConfig.enabled && vm.aiConfig.anyReady ->
                                 "نظر کلی هوش مصنوعی با ${vm.aiConfig.model} فعال است (کم‌مصرف)"
-                            else -> "برای نمایش خبرهای فارسی و تحلیل‌شده، هوش مصنوعی را تنظیم کن"
+                            else -> "خبرها با تیتر و منبع اصلی نمایش داده می‌شوند؛ برای «نظر کلی» فارسی، هوش مصنوعی را تنظیم کن"
                         },
                         fontSize = 12.5.sp,
                         fontWeight = FontWeight.Bold,
@@ -162,6 +162,7 @@ fun NewsCategory(
                 briefing = vm.briefing,
                 busy = vm.briefingBusy,
                 error = vm.briefingError,
+                stale = vm.briefingStale,
                 items = vm.items,
                 onRefresh = vm::refreshBriefing,
                 onOpen = { url ->
@@ -318,6 +319,7 @@ private fun AiBriefingCard(
     briefing: NewsAiSummarizer.Briefing?,
     busy: Boolean,
     error: String?,
+    stale: Boolean,
     items: List<MarketNewsItem>,
     onRefresh: () -> Unit,
     onOpen: (String) -> Unit
@@ -364,6 +366,14 @@ private fun AiBriefingCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 return@Column
+            }
+            if (stale && !busy) {
+                Text(
+                    "⏳ این جمع‌بندی برای فهرست قبلی خبرهاست؛ برای نظر تازه روی «نظر تازه» بزن.",
+                    fontSize = 10.8.sp,
+                    lineHeight = 17.sp,
+                    color = MaterialTheme.colorScheme.tertiary
+                )
             }
             Text(
                 briefing.headline,
@@ -455,9 +465,11 @@ private fun AiBriefingCard(
                 }
             }
             Text(
-                (if (briefing.at > 0L) "ساخته‌شده ${Format.relativeTime(briefing.at)}" else "") +
-                    (if (briefing.model.isNotBlank()) " • مدل ${briefing.model}" else "") +
-                    " • یک درخواست کوتاه برای کل این بخش",
+                listOf(
+                    if (briefing.at > 0L) "ساخته‌شده ${Format.relativeTime(briefing.at)}" else "",
+                    if (briefing.model.isNotBlank()) "مدل ${briefing.model}" else "",
+                    "یک درخواست کوتاه برای کل این بخش"
+                ).filter { it.isNotBlank() }.joinToString(" • "),
                 fontSize = 10.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

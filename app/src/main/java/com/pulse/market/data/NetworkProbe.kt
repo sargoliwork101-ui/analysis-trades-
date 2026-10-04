@@ -66,7 +66,7 @@ object NetworkProbe {
             Stage.DNS -> "🔍 عیب‌یابی: نام «$name» اصلاً به IP تبدیل نشد. یعنی یا اینترنت دستگاه " +
                 "قطع است، یا آدرس API غلط تایپ شده، یا DNS/فیلترینگ جلوی آن را گرفته. " +
                 "آدرس را دوباره نگاه کن و اینترنت را امتحان کن."
-            Stage.TCP -> "🔍 عیب‌یابی: «$name» پیدا شد ولی درِ ارتباط (پورت ۴۴۳) باز نشد. " +
+            Stage.TCP -> "🔍 عیب‌یابی: «$name» پیدا شد ولی درِ ارتباط (پورت امن) باز نشد. " +
                 "این نشانه‌ی روشنِ مسدودبودن مسیر است؛ با فیلترشکن امتحان کن. " + IRAN_FRIENDLY_HINT
             Stage.TLS -> "🔍 عیب‌یابی: اتصال به «$name» برقرار شد ولی ارتباط امن (TLS) وسط کار " +
                 "بسته شد — معمولاً یعنی مسیر فیلتر می‌شود یا ساعت/تاریخ دستگاه اشتباه است. " +
@@ -78,12 +78,18 @@ object NetworkProbe {
         }
     }
 
+    /** پورت واقعیِ همان آدرس؛ سرویس‌های خودمیزبان گاهی روی پورت غیر ۴۴۳ هستند. */
+    internal fun portOf(uri: java.net.URI): Int = when {
+        uri.port > 0 -> uri.port
+        uri.scheme.orEmpty().equals("http", ignoreCase = true) -> 80
+        else -> 443
+    }
+
     /** عیب‌یابی کاملِ یک آدرس API؛ اگر میزبان خوانده نشود، چیزی اضافه نمی‌کند. */
     fun adviceFor(endpoint: String): String? {
-        val host = runCatching {
-            java.net.URI(endpoint.trim()).host.orEmpty().lowercase(Locale.ROOT)
-        }.getOrDefault("")
+        val uri = runCatching { java.net.URI(endpoint.trim()) }.getOrNull() ?: return null
+        val host = uri.host.orEmpty().lowercase(Locale.ROOT)
         if (host.isBlank()) return null
-        return advice(host, probe(host))
+        return advice(host, probe(host, portOf(uri)))
     }
 }

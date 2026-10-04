@@ -138,4 +138,22 @@ class NewsAiSummarizerTest {
         assertTrue(system.contains("لینک تازه نساز"))
         assertTrue(system.contains("توصیهٔ خرید یا فروش نده"))
     }
+
+    @Test
+    fun signatureCountsItemsSoAShorterListIsNeverSeenAsUnchanged() {
+        val items = (1..5).map { newsItem("n$it", "Headline $it") }
+
+        assertEquals("5:" + items.joinToString("|") { it.id }.hashCode(), NewsAiSummarizer.signature(items))
+        // فهرست کوتاه‌تر هرگز نباید با فهرست کامل یکی شمرده شود.
+        assertTrue(NewsAiSummarizer.signature(items.take(4)).startsWith("4:"))
+        assertTrue(NewsAiSummarizer.signature(items) != NewsAiSummarizer.signature(items.take(4)))
+        assertEquals(NewsAiSummarizer.signature(emptyList()), "0:" + "".hashCode())
+    }
+
+    @Test
+    fun networkProbeUsesTheRealPortOfTheEndpoint() {
+        assertEquals(443, NetworkProbe.portOf(java.net.URI("https://api.avalai.ir/v1")))
+        assertEquals(80, NetworkProbe.portOf(java.net.URI("http://127.0.0.1/v1")))
+        assertEquals(8080, NetworkProbe.portOf(java.net.URI("https://my-server.local:8080/v1")))
+    }
 }
