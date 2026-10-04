@@ -140,6 +140,12 @@ fun NewsCategory(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
+                    "خبرهای قبلی با تازه‌سازی پاک نمی‌شوند: فهرست تا ۷ روز یا ۸۰ خبر نگه داشته می‌شود " +
+                        "و خبر تازه به همان فهرست اضافه می‌شود.",
+                    fontSize = 10.5.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
                     "تیترها مستقیماً از RSS گوگل‌نیوز، نبض بورس، اقتصاد۲۴، اقتصاد آنلاین، CoinDesk و CNBC خوانده می‌شوند. " +
                         if (aiTarget != null) {
                             "ترجمه/تحلیل با همان API تنظیم‌شده و مستقیم روی ${aiTarget.display} (${aiTarget.route}) انجام می‌شود."
@@ -199,6 +205,14 @@ fun NewsCategory(
                         },
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                if (vm.keptFromHistory > 0) {
+                    Text(
+                        "${Format.toPersianDigits(vm.keptFromHistory.toString())} خبر از تازه‌سازی‌های قبلی " +
+                            "نگه داشته شده‌اند (تاریخچهٔ ۷ روز)",
+                        fontSize = 10.5.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }

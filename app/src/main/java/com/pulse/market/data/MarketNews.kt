@@ -241,6 +241,55 @@ object MarketNews {
         MarketNewsFeed(merged, System.currentTimeMillis(), failed)
     }
 
+    /** خبرهای قدیمی‌تر تا این مدت نگه داشته می‌شوند، حتی وقتی از فید منبع بیرون رفته‌اند. */
+    const val HISTORY_KEEP_MS = 7L * 24L * 60L * 60L * 1000L
+
+    /** سقف کل فهرست (تازه + نگه‌داشته‌شده) تا حافظه و کش از کنترل خارج نشود. */
+    const val HISTORY_MAX_ITEMS = 80
+
+    /**
+     * فید RSS فقط یک پنجره‌ی کوچک از آخرین خبرهاست؛ با هر تازه‌سازی، خبرهای دیروز از
+     * آن بیرون می‌افتند. قبلاً همان‌ها از برنامه هم پاک می‌شدند و کاربر خبری را که
+     * خوانده بود دیگر پیدا نمی‌کرد. اینجا خبرهای تازه با خبرهای قبلی ادغام می‌شوند:
+     * تحلیل AI و امتیاز قبلی حفظ می‌شود، تکراری‌ها یکی می‌شوند و فقط خبرهای کهنه‌تر
+     * از یک هفته (یا بیرون از سقف فهرست) کنار گذاشته می‌شوند.
+     */
+    fun mergeWithHistory(
+        existing: List<MarketNewsItem>,
+        fresh: List<MarketNewsItem>,
+        now: Long = System.currentTimeMillis(),
+        keepMillis: Long = HISTORY_KEEP_MS,
+        maxItems: Int = HISTORY_MAX_ITEMS
+    ): List<MarketNewsItem> {
+        if (fresh.isEmpty()) return existing
+        val previous = existing.associateBy { it.id }
+        val refreshed = fresh.map { item ->
+            val old = previous[item.id] ?: return@map item
+            if (!old.hasCompleteAiAnalysis) item else item.copy(
+                aiTitle = old.aiTitle,
+                aiOutlook = old.aiOutlook,
+                marketImpact = old.marketImpact,
+                historicalContext = old.historicalContext,
+                aiSummary = old.aiSummary,
+                importance = maxOf(item.importance, old.importance)
+            )
+        }
+        val freshIds = refreshed.mapTo(hashSetOf()) { it.id }
+        // خبرِ بدون تاریخ معتبر هم نگه داشته می‌شود؛ نبودن تاریخ دلیل حذف نیست.
+        val kept = existing.filter { old ->
+            old.id !in freshIds &&
+                (old.publishedAt <= 0L || now - old.publishedAt <= keepMillis)
+        }
+        return (refreshed + kept)
+            .distinctBy { it.id }
+            .sortedWith(
+                compareByDescending<MarketNewsItem> { it.publishedAt > 0L }
+                    .thenByDescending { it.publishedAt }
+                    .thenByDescending { it.importance }
+            )
+            .take(maxItems.coerceAtLeast(fresh.size))
+    }
+
     /** parser خالص RSS/Atom برای تست؛ فقط URL امن HTTPS وارد مدل می‌شود. */
     internal fun parseFeed(
         xml: String,

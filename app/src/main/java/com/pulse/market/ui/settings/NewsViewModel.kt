@@ -17,6 +17,7 @@ import com.pulse.market.data.NewsNotifier
 import com.pulse.market.data.PumpAiConfig
 import com.pulse.market.data.PumpAiConfigStore
 import com.pulse.market.data.PumpAiReviewer
+import com.pulse.market.ui.Format
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -33,6 +34,10 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
     var failedSources by mutableStateOf<List<String>>(emptyList()); private set
     var fetchedAt by mutableStateOf(0L); private set
     var aiConfig by mutableStateOf(PumpAiConfig()); private set
+
+    /** چند خبر از تازه‌سازی‌های قبلی نگه داشته شده‌اند (برای شفافیت در رابط کاربری). */
+    var keptFromHistory by mutableStateOf(0); private set
+    var newSinceLastFetch by mutableStateOf(0); private set
 
     /** نظر کلی هوش مصنوعی از مجموع تیترها (ارزان‌ترین مسیر استفاده از AI در تب خبر). */
     var briefing by mutableStateOf<NewsAiSummarizer.Briefing?>(null); private set
@@ -106,25 +111,23 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
                     "تازه‌سازی کامل نشد؛ خبرهای ذخیره‌شده نمایش داده می‌شوند"
                 }
             } else {
-                // تحلیل کامل AI خبرهای بدون تغییر را نگه دار تا هر refresh هزینه و زمان دوباره نداشته باشد.
-                val previous = items.associateBy { it.id }
-                items = feed.items.map { item ->
-                    val old = previous[item.id]
-                    if (old?.hasCompleteAiAnalysis == true) {
-                        item.copy(
-                            aiTitle = old.aiTitle,
-                            aiOutlook = old.aiOutlook,
-                            marketImpact = old.marketImpact,
-                            historicalContext = old.historicalContext,
-                            aiSummary = old.aiSummary,
-                            importance = maxOf(item.importance, old.importance)
-                        )
-                    } else item
-                }
+                // خبرهای قبلی پاک نمی‌شوند: فید تازه با فهرست موجود ادغام می‌شود تا خبری
+                // که از پنجره‌ی RSS بیرون رفته از برنامه حذف نشود. تحلیل کامل AI هم
+                // همراه خبر می‌ماند تا هیچ refreshی هزینه و زمان دوباره نسازد.
+                val before = items.size
+                items = MarketNews.mergeWithHistory(items, feed.items, feed.fetchedAt)
+                keptFromHistory = (items.size - feed.items.size).coerceAtLeast(0)
+                newSinceLastFetch = (items.size - before).coerceAtLeast(0)
                 fetchedAt = feed.fetchedAt
                 withContext(Dispatchers.IO) { NewsCacheStore.save(ctx, fetchedAt, items) }
-                if (failedSources.isNotEmpty()) {
-                    message = "بعضی منابع پاسخ ندادند؛ نتیجه از منابع سالم تکمیل شد"
+                message = when {
+                    failedSources.isNotEmpty() ->
+                        "بعضی منابع پاسخ ندادند؛ نتیجه از منابع سالم تکمیل شد"
+                    newSinceLastFetch > 0 && keptFromHistory > 0 ->
+                        "${Format.toPersianDigits(newSinceLastFetch.toString())} خبر تازه اضافه شد؛ خبرهای قبلی هم پاک نشدند"
+                    newSinceLastFetch > 0 ->
+                        "${Format.toPersianDigits(newSinceLastFetch.toString())} خبر تازه اضافه شد"
+                    else -> ""
                 }
             }
         } catch (cancelled: CancellationException) {

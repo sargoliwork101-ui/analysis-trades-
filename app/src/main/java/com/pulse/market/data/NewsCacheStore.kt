@@ -8,7 +8,8 @@ import kotlinx.serialization.json.Json
 object NewsCacheStore {
     private const val PREF = "pulse_market_news"
     private const val KEY = "latest"
-    private const val MAX_ITEMS = 40
+    /** باید دست‌کم به‌اندازه‌ی تاریخچه‌ی نگه‌داشته‌شده جا داشته باشد وگرنه کش همان خبرها را می‌بُرد. */
+    private const val MAX_ITEMS = MarketNews.HISTORY_MAX_ITEMS
     const val FRESH_MS = 10 * 60_000L
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }

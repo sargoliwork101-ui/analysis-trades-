@@ -163,4 +163,71 @@ class MarketNewsTest {
         assertEquals("b", result.single().id)
         assertFalse(result.single().sourceSummary.isBlank())
     }
+
+    private fun historyItem(
+        id: String,
+        publishedAt: Long,
+        importance: Int = 50,
+        analyzed: Boolean = false
+    ) = MarketNewsItem(
+        id = id,
+        title = "Title $id",
+        sourceSummary = "summary $id",
+        url = "https://example.com/$id",
+        source = "Source",
+        publishedAt = publishedAt,
+        category = NewsCategory.CRYPTO,
+        region = NewsRegion.WORLD,
+        importance = importance,
+        aiTitle = if (analyzed) "عنوان فارسی" else "",
+        aiOutlook = if (analyzed) "نظر" else "",
+        marketImpact = if (analyzed) "اثر" else "",
+        historicalContext = if (analyzed) "سابقه" else "",
+        aiSummary = if (analyzed) "خلاصه" else ""
+    )
+
+    @Test
+    fun refreshKeepsOlderStoriesInsteadOfWipingTheList() {
+        val now = 10L * 24L * 60L * 60L * 1000L
+        val hour = 60L * 60L * 1000L
+        val existing = listOf(
+            historyItem("old1", now - 2 * hour, analyzed = true),
+            historyItem("old2", now - 30 * hour),
+            // کهنه‌تر از یک هفته: تنها موردی که باید کنار برود.
+            historyItem("ancient", now - 9L * 24L * hour / 1L)
+        )
+        val fresh = listOf(historyItem("new1", now - hour), historyItem("old1", now - 2 * hour, importance = 80))
+
+        val merged = MarketNews.mergeWithHistory(existing, fresh, now)
+
+        assertEquals(listOf("new1", "old1", "old2"), merged.map { it.id })
+        // تحلیل فارسیِ خبر قدیمی نباید با تازه‌سازی از بین برود.
+        assertTrue(merged.first { it.id == "old1" }.hasCompleteAiAnalysis)
+        assertEquals(80, merged.first { it.id == "old1" }.importance)
+    }
+
+    @Test
+    fun mergeNeverDropsEverythingOnAnEmptyOrFailedRefresh() {
+        val now = 1_000_000_000L
+        val existing = listOf(historyItem("a", now - 1000L), historyItem("b", 0L))
+
+        // فید خالی (منبع پاسخ نداد) هیچ خبری را پاک نمی‌کند.
+        assertEquals(existing, MarketNews.mergeWithHistory(existing, emptyList(), now))
+        // خبرِ بدون تاریخ معتبر هم حذف نمی‌شود.
+        val merged = MarketNews.mergeWithHistory(existing, listOf(historyItem("c", now)), now)
+        assertEquals(setOf("a", "b", "c"), merged.map { it.id }.toSet())
+    }
+
+    @Test
+    fun mergeRespectsTheListCap() {
+        val now = 1_000_000_000L
+        val existing = (1..90).map { historyItem("old$it", now - it * 1000L) }
+        val fresh = (1..5).map { historyItem("new$it", now - it) }
+
+        val merged = MarketNews.mergeWithHistory(existing, fresh, now)
+
+        assertEquals(MarketNews.HISTORY_MAX_ITEMS, merged.size)
+        // خبرهای تازه هرگز قربانی سقف نمی‌شوند.
+        assertTrue(merged.map { it.id }.containsAll(fresh.map { it.id }))
+    }
 }
