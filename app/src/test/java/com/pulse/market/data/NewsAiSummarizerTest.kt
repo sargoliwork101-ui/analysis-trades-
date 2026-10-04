@@ -63,4 +63,79 @@ class NewsAiSummarizerTest {
     fun malformedAnswerIsSafeEmptyResult() {
         assertTrue(NewsAiSummarizer.parse("not json").isEmpty())
     }
+
+    private fun newsItem(id: String, title: String, published: Long = 1_700_000_000_000L) = MarketNewsItem(
+        id = id,
+        title = title,
+        sourceSummary = "متن کامل خبر که در مسیر جمع‌بندی اصلاً فرستاده نمی‌شود و فقط تیتر می‌رود.",
+        url = "https://example.com/$id",
+        source = "CoinDesk",
+        publishedAt = published,
+        category = NewsCategory.CRYPTO,
+        region = NewsRegion.WORLD,
+        importance = 70
+    )
+
+    @Test
+    fun briefingKeepsOnlyRealNewsIdsAndPersianText() {
+        val raw = """
+            ```json
+            {"headline":"ریسک‌پذیری بازار کم شده است",
+             "summary":"چند خبر هم‌زمان از سخت‌گیری پولی و خروج نقدینگی خبر می‌دهند و فشار روی دارایی‌های پرریسک را بیشتر کرده‌اند.",
+             "outlook":"اگر داده‌های تورمی هفتهٔ بعد بالا بماند، فشار ادامه می‌یابد؛ در غیر این صورت اصلاح کوتاه‌مدت محتمل است.",
+             "marketImpact":"کریپتو و سهام محتمل‌ترین بازارهای اثرپذیرند و دلار می‌تواند تقویت شود.",
+             "watch":"نشست بانک مرکزی و داده‌های تورم را دنبال کن.",
+             "basedOn":[{"id":"n1","why":"مستقیم‌ترین خبر دربارهٔ سیاست پولی است."},
+                        {"id":"ghost","why":"خبری که در فهرست نبود"},
+                        {"id":"n2","why":"خروج نقدینگی از صندوق‌ها را نشان می‌دهد."},
+                        {"id":"n1","why":"تکراری"}]}
+            ```
+        """.trimIndent()
+
+        val parsed = NewsAiSummarizer.parseBriefing(raw, setOf("n1", "n2"))
+
+        assertTrue(parsed != null && parsed.usable)
+        assertEquals(listOf("n1", "n2"), parsed!!.sources.map { it.id })
+        assertTrue(parsed.headline.contains("ریسک‌پذیری"))
+        assertTrue(parsed.watch.isNotBlank())
+    }
+
+    @Test
+    fun briefingRejectsEnglishOrEmptyAnswers() {
+        assertNull(
+            NewsAiSummarizer.parseBriefing(
+                """{"headline":"Market risk is down","summary":"Several stories point to tighter policy.","basedOn":[]}""",
+                setOf("n1")
+            )
+        )
+        assertNull(NewsAiSummarizer.parseBriefing("پاسخ آزاد بدون ساختار", setOf("n1")))
+    }
+
+    @Test
+    fun briefingPromptSendsOnlyHeadlinesAndStaysSmall() {
+        val items = (1..25).map { newsItem("n$it", "Headline number $it about the market") }
+        val now = 1_700_003_600_000L
+        val prompt = NewsAiSummarizer.briefingUserPrompt(items, now)
+
+        // فقط تیتر می‌رود، نه متن خبر و نه لینک.
+        assertTrue(!prompt.contains("متن کامل خبر"))
+        assertTrue(!prompt.contains("https://example.com"))
+        assertTrue(prompt.contains("Headline number 1"))
+        // سقف تعداد رعایت می‌شود تا هزینه ثابت بماند.
+        assertTrue(!prompt.contains("Headline number 19"))
+        assertTrue(prompt.contains("\"ageHours\":1"))
+        assertTrue(prompt.length < 3_000)
+
+        // امضا با تغییر فهرست عوض می‌شود و با همان فهرست ثابت می‌ماند.
+        assertEquals(NewsAiSummarizer.signature(items), NewsAiSummarizer.signature(items))
+        assertTrue(NewsAiSummarizer.signature(items) != NewsAiSummarizer.signature(items.drop(1)))
+    }
+
+    @Test
+    fun briefingInstructionsForbidInventedSourcesAndAdvice() {
+        val system = NewsAiSummarizer.briefingSystemPrompt()
+        assertTrue(system.contains("basedOn"))
+        assertTrue(system.contains("لینک تازه نساز"))
+        assertTrue(system.contains("توصیهٔ خرید یا فروش نده"))
+    }
 }

@@ -61,7 +61,14 @@ data class PumpAiConfig(
      * تا این چند دقیقه، تحلیل ذخیره‌شده‌ی همان کوین دوباره نمایش داده می‌شود و
      * درخواست تازه‌ای به سرویس نمی‌رود. ۰ یعنی همیشه درخواست تازه.
      */
-    val reuseMinutes: Int = 20
+    val reuseMinutes: Int = 20,
+    /** جمع‌بندی هوش مصنوعی از مجموع تیترهای خبری (یک درخواست کوتاه برای کل تب خبر). */
+    val newsBriefing: Boolean = true,
+    /**
+     * ترجمه و تحلیل تک‌تک خبرها. پیش‌فرض خاموش است چون برای هر چند خبر یک درخواست
+     * جداگانه با خروجی بلند فارسی لازم دارد و گران‌ترین مصرف توکن برنامه است.
+     */
+    val newsPerItemAi: Boolean = false
 ) {
     val endpointValid: Boolean
         get() = isValidEndpoint(endpoint)
@@ -86,7 +93,9 @@ data class PumpAiConfig(
         // سیاست مصرف مال کل برنامه است، نه یک سرویس؛ پشتیبان هم باید کم‌مصرف بماند.
         economyMode = economyMode,
         dailyTokenBudget = dailyTokenBudget,
-        reuseMinutes = reuseMinutes
+        reuseMinutes = reuseMinutes,
+        newsBriefing = newsBriefing,
+        newsPerItemAi = newsPerItemAi
     )
 
     /** همه‌ی سرویس‌های تنظیم‌شده (حتی ناقص) به‌ترتیب اولویت؛ برای تست و پیام خطا. */
@@ -277,7 +286,9 @@ object PumpAiConfigStore {
                     backups = backups,
                     economyMode = obj.optBoolean("economyMode", true),
                     dailyTokenBudget = obj.optInt("dailyTokenBudget", 0),
-                    reuseMinutes = obj.optInt("reuseMinutes", 20)
+                    reuseMinutes = obj.optInt("reuseMinutes", 20),
+                    newsBriefing = obj.optBoolean("newsBriefing", true),
+                    newsPerItemAi = obj.optBoolean("newsPerItemAi", false)
                 )
             )
             if ((needsMigration || backupPlainText) && !save(context, config)) {
@@ -365,6 +376,8 @@ object PumpAiConfigStore {
             .put("economyMode", safe.economyMode)
             .put("dailyTokenBudget", safe.dailyTokenBudget)
             .put("reuseMinutes", safe.reuseMinutes)
+            .put("newsBriefing", safe.newsBriefing)
+            .put("newsPerItemAi", safe.newsPerItemAi)
             .toString()
         prefs.edit().putString(KEY_CONFIG, raw).apply()
         return true

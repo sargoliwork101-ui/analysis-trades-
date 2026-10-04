@@ -621,6 +621,22 @@ fun PumpsCategory(
                             aiConfig.economyMode
                         ) { vm.saveAiConfig(aiConfig.copy(economyMode = it)) }
                         RowDivider()
+                        SwitchRow(
+                            "نظر کلی هوش مصنوعی در تب خبر",
+                            if (aiConfig.newsBriefing)
+                                "با یک درخواست کوتاه، از مجموع تیترها یک جمع‌بندی گرفته می‌شود و همان‌جا می‌بینی این نظر بر پایهٔ کدام خبرهاست (با لینک)."
+                            else "خاموش؛ در تب خبر هیچ جمع‌بندی‌ای از هوش مصنوعی گرفته نمی‌شود.",
+                            aiConfig.newsBriefing
+                        ) { vm.saveAiConfig(aiConfig.copy(newsBriefing = it)) }
+                        RowDivider()
+                        SwitchRow(
+                            "ترجمه و تحلیل تک‌تک خبرها",
+                            if (aiConfig.newsPerItemAi)
+                                "⚠️ گران‌ترین حالت: برای هر چند خبر یک درخواست جدا با خروجی بلند فارسی فرستاده می‌شود."
+                            else "خاموش (پیشنهادشده)؛ خبرها با تیتر و منبع اصلی نمایش داده می‌شوند و فقط همان جمع‌بندی کلی از AI گرفته می‌شود.",
+                            aiConfig.newsPerItemAi
+                        ) { vm.saveAiConfig(aiConfig.copy(newsPerItemAi = it)) }
+                        RowDivider()
                         InnerRow {
                             OutlinedTextField(
                                 value = if (aiConfig.reuseMinutes == 0) "" else aiConfig.reuseMinutes.toString(),

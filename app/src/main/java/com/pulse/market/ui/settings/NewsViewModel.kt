@@ -9,7 +9,10 @@ import androidx.lifecycle.viewModelScope
 import com.pulse.market.data.MarketNews
 import com.pulse.market.data.MarketNewsItem
 import com.pulse.market.data.NewsAiSummarizer
+import com.pulse.market.data.NewsBriefingStore
 import com.pulse.market.data.NewsCacheStore
+import com.pulse.market.data.NewsSortOrder
+import com.pulse.market.data.sortedFor
 import com.pulse.market.data.NewsNotifier
 import com.pulse.market.data.PumpAiConfig
 import com.pulse.market.data.PumpAiConfigStore
@@ -31,6 +34,11 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
     var fetchedAt by mutableStateOf(0L); private set
     var aiConfig by mutableStateOf(PumpAiConfig()); private set
 
+    /** نظر کلی هوش مصنوعی از مجموع تیترها (ارزان‌ترین مسیر استفاده از AI در تب خبر). */
+    var briefing by mutableStateOf<NewsAiSummarizer.Briefing?>(null); private set
+    var briefingBusy by mutableStateOf(false); private set
+    var briefingError by mutableStateOf<String?>(null); private set
+
     private var started = false
     private val ctx get() = getApplication<Application>().applicationContext
 
@@ -45,6 +53,7 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
 
             if (!started) {
                 started = true
+                briefing = withContext(Dispatchers.IO) { NewsBriefingStore.load(ctx) }
                 val cached = withContext(Dispatchers.IO) { NewsCacheStore.load(ctx) }
                 if (cached != null) {
                     items = cached.items
@@ -52,9 +61,15 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 val fresh = cached != null &&
                     System.currentTimeMillis() - cached.fetchedAt in 0L..NewsCacheStore.FRESH_MS
-                if (!fresh) refreshInternal(force = false) else summarizeMissing()
+                if (!fresh) {
+                    refreshInternal(force = false)
+                } else {
+                    summarizeMissing()
+                    ensureBriefing(force = false)
+                }
             } else if (configChanged) {
                 summarizeMissing()
+                ensureBriefing(force = false)
             }
         }
     }
@@ -119,12 +134,52 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
         } finally {
             loading = false
         }
+        // جمع‌بندی کوتاه همیشه اول می‌آید: ارزان است و حتی وقتی ترجمهٔ تک‌تک خبرها
+        // خاموش باشد، کاربر نظر هوش مصنوعی را دارد.
+        ensureBriefing(force = false)
         summarizeMissing()
+    }
+
+    /** گرفتن نظر تازه با دکمهٔ کاربر؛ کش را دور می‌زند. */
+    fun refreshBriefing() {
+        viewModelScope.launch { ensureBriefing(force = true) }
+    }
+
+    /**
+     * فقط وقتی هزینه می‌کند که واقعاً لازم باشد: جمع‌بندیِ ذخیره‌شده تا وقتی فهرست
+     * خبرها عوض نشده دوباره خریداری نمی‌شود.
+     */
+    private suspend fun ensureBriefing(force: Boolean) {
+        val config = aiConfig
+        if (briefingBusy || !config.enabled || !config.anyReady || !config.newsBriefing) return
+        // تازه‌ترین خبرها مبنای جمع‌بندی‌اند تا نتیجه با چیزی که کاربر می‌بیند بخواند.
+        val source = items.sortedFor(NewsSortOrder.NEWEST).take(NewsAiSummarizer.BRIEFING_ITEMS)
+        if (source.isEmpty()) return
+        val signature = NewsAiSummarizer.signature(source)
+        val current = briefing
+        if (!force && current != null && current.signature == signature) return
+        briefingBusy = true
+        briefingError = null
+        try {
+            val outcome = NewsAiSummarizer.briefing(config, source)
+            outcome.briefing?.let { fresh ->
+                briefing = fresh
+                withContext(Dispatchers.IO) { NewsBriefingStore.save(ctx, fresh) }
+            }
+            outcome.error?.let { briefingError = it }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            briefingError = "گرفتن نظر کلی هوش مصنوعی کامل نشد"
+        } finally {
+            briefingBusy = false
+        }
     }
 
     private suspend fun summarizeMissing() {
         val config = aiConfig
-        if (aiBusy || !config.enabled || !config.anyReady) return
+        // ترجمه و تحلیل تک‌تک خبرها گران‌ترین مسیر است و فقط با انتخاب خود کاربر اجرا می‌شود.
+        if (aiBusy || !config.enabled || !config.anyReady || !config.newsPerItemAi) return
         val pending = items.filterNot { it.hasCompleteAiAnalysis }
             .sortedWith(compareByDescending<MarketNewsItem> { it.importance }
                 .thenByDescending { it.publishedAt })
